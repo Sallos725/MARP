@@ -345,7 +345,7 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
       <label for="agent_base_url">Endpoint Base URL</label>
       <input id="agent_base_url" type="text" value="${escHtml(conf.baseUrl)}" placeholder="https://api.openai.com/v1">
     </div>
-    <div class="example-url">예시 URL: ${escHtml(exampleChatUrl(conf.baseUrl))}</div>
+    <div class="example-url" data-example-for="agent_base_url">예시 URL: ${escHtml(exampleChatUrl(conf.baseUrl))}</div>
     ${credentialField('agent_api_key', conf.apiKey)}
     <div class="field">
       <label for="agent_model">Model</label>
@@ -391,6 +391,7 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
     function setupLiteHandlers(initialConf) {
       setupProviderControls();
       setupCredentialFiles();
+      setupEndpointExamples();
       document.getElementById('llm-test-btn')?.addEventListener('click', testLiteLlm);
       document.getElementById('all-test-btn')?.addEventListener('click', testLiteLlm);
       document.getElementById('save-btn')?.addEventListener('click', async () => {
@@ -560,6 +561,38 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
       ];
     }
 
+    function providerDefaults(provider) {
+      const normalized = normalizeProviderValue(provider);
+      const defaults = {
+        openai: {
+          baseUrl: 'https://api.openai.com/v1',
+          model: 'gpt-4o-mini',
+        },
+        claude: {
+          baseUrl: 'https://api.anthropic.com/v1',
+          model: 'claude-3-5-sonnet-latest',
+        },
+        'vertex-ai': {
+          baseUrl: 'https://LOCATION-aiplatform.googleapis.com/v1/projects/PROJECT_ID/locations/LOCATION/endpoints/openapi',
+          model: 'google/gemini-1.5-pro',
+        },
+        google: {
+          baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
+          model: 'gemini-1.5-pro',
+        },
+      };
+      return defaults[normalized] || null;
+    }
+
+    function knownProviderBaseUrls() {
+      return Object.values({
+        openai: providerDefaults('openai'),
+        claude: providerDefaults('claude'),
+        vertex: providerDefaults('vertex-ai'),
+        google: providerDefaults('google'),
+      }).map(item => item.baseUrl);
+    }
+
     function setupProviderControls() {
       document.querySelectorAll('[data-provider-select]').forEach(select => {
         const update = () => {
@@ -568,10 +601,55 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
           wrapper?.classList.toggle('provider-custom-active', select.value === 'custom');
           const credential = document.querySelector('[data-credential="agent_api_key"]');
           credential?.classList.toggle('credential-vertex-active', select.value === 'vertex-ai');
+          applyProviderDefaults(select.value);
         };
         select.addEventListener('change', update);
         update();
       });
+    }
+
+    function applyProviderDefaults(provider) {
+      if (!provider || provider === 'custom') return;
+      const defaults = providerDefaults(provider);
+      if (!defaults) return;
+
+      const baseInput = document.getElementById('agent_base_url');
+      const modelInput = document.getElementById('agent_model');
+      if (baseInput && shouldReplaceEndpoint(baseInput.value)) {
+        baseInput.value = defaults.baseUrl;
+        updateEndpointExample('agent_base_url');
+      }
+      if (modelInput && shouldReplaceModel(modelInput.value)) {
+        modelInput.value = defaults.model;
+      }
+    }
+
+    function shouldReplaceEndpoint(value) {
+      if (!String(value || '').trim()) return true;
+      const normalized = normalizeUrl(value || '');
+      return knownProviderBaseUrls().map(normalizeUrl).includes(normalized);
+    }
+
+    function shouldReplaceModel(value) {
+      const normalized = String(value || '').trim();
+      if (!normalized) return true;
+      return ['gpt-4o-mini', 'claude-3-5-sonnet-latest', 'google/gemini-1.5-pro', 'gemini-1.5-pro'].includes(normalized);
+    }
+
+    function setupEndpointExamples() {
+      document.querySelectorAll('[data-example-for]').forEach(example => {
+        const baseId = example.dataset.exampleFor;
+        const input = document.getElementById(baseId);
+        input?.addEventListener('input', () => updateEndpointExample(baseId));
+        updateEndpointExample(baseId);
+      });
+    }
+
+    function updateEndpointExample(baseId) {
+      const example = document.querySelector(`[data-example-for="${baseId}"]`);
+      const input = document.getElementById(baseId);
+      if (!example || !input) return;
+      example.textContent = `예시 URL: ${exampleChatUrl(input.value || 'https://api.openai.com/v1')}`;
     }
 
     function setupCredentialFiles() {

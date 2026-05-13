@@ -248,6 +248,15 @@ Provider 드롭다운 기본 항목:
 - Google
 - Custom
 
+Provider를 변경하면 endpoint base URL과 model이 함께 갱신된다.
+단, 사용자가 이미 커스텀 endpoint/model을 입력한 경우에는 값을 덮어쓰지 않는다.
+
+기본 endpoint:
+- OpenAI: `https://api.openai.com/v1`
+- Claude: `https://api.anthropic.com/v1`
+- Vertex AI: `https://LOCATION-aiplatform.googleapis.com/v1/projects/PROJECT_ID/locations/LOCATION/endpoints/openapi`
+- Google: `https://generativelanguage.googleapis.com/v1beta/openai`
+
 5. **도움말**
    - Full 서버와 Custom AI Provider 호출 구조
    - API Key 표시 정책
@@ -363,6 +372,9 @@ GUI에서 확인/수정하는 항목:
 - Max Tokens
 - Context Window
 - Lite판 동작 구조: 세계관/플롯/등장인물은 보조 LLM, 검수는 RisuAI 메인 모델
+
+Provider를 변경하면 endpoint base URL과 model이 함께 갱신된다.
+단, 사용자가 이미 커스텀 endpoint/model을 입력한 경우에는 값을 덮어쓰지 않는다.
 
 연결 테스트:
 - **LLM 테스트**: `{base_url}/models`를 호출해 API Key와 endpoint 연결 상태를 확인한다.

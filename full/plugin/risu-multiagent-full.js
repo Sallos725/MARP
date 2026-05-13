@@ -194,7 +194,7 @@
           <div class="details-body">
             ${providerSelect(`${name}_provider`, 'Provider', v(`${name}_provider`), true)}
             ${field(`${name}_base_url`, 'Endpoint Base URL', 'text', '기본값 사용')}
-            <div class="example-url">예시 URL: ${escHtml(exampleChatUrl(v(`${name}_base_url`) || v('default_base_url', 'https://api.openai.com/v1')))}</div>
+            <div class="example-url" data-example-for="${name}_base_url">예시 URL: ${escHtml(exampleChatUrl(v(`${name}_base_url`) || v('default_base_url', 'https://api.openai.com/v1')))}</div>
             ${credentialField(`${name}_api_key`, apiKeySet)}
             ${field(`${name}_model`, 'Model', 'text', '기본값 사용')}
             <div class="row2">
@@ -390,7 +390,7 @@ button.ghost{background:#15171b;color:#a8b0bd}
       <div style="height:10px"></div>
       ${providerSelect('default_provider', 'Provider', publicCfg.default_provider || v('default_provider', 'openai'), false)}
       ${field('default_base_url', 'Endpoint Base URL', 'text', 'https://api.openai.com/v1')}
-      <div class="example-url">예시 URL: ${escHtml(exampleChatUrl(v('default_base_url', 'https://api.openai.com/v1')))}</div>
+      <div class="example-url" data-example-for="default_base_url">예시 URL: ${escHtml(exampleChatUrl(v('default_base_url', 'https://api.openai.com/v1')))}</div>
       ${credentialField('default_api_key', Boolean(publicCfg.default_api_key_set || cfg.default_api_key))}
       ${field('default_model', 'Model', 'text', 'gpt-4o-mini')}
       <div class="row2">
@@ -486,6 +486,38 @@ button.ghost{background:#15171b;color:#a8b0bd}
         { value: 'google', label: 'Google' },
         { value: 'custom', label: 'Custom' },
       ];
+    }
+
+    function providerDefaults(provider) {
+      const normalized = normalizeProviderValue(provider);
+      const defaults = {
+        openai: {
+          baseUrl: 'https://api.openai.com/v1',
+          model: 'gpt-4o-mini',
+        },
+        claude: {
+          baseUrl: 'https://api.anthropic.com/v1',
+          model: 'claude-3-5-sonnet-latest',
+        },
+        'vertex-ai': {
+          baseUrl: 'https://LOCATION-aiplatform.googleapis.com/v1/projects/PROJECT_ID/locations/LOCATION/endpoints/openapi',
+          model: 'google/gemini-1.5-pro',
+        },
+        google: {
+          baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
+          model: 'gemini-1.5-pro',
+        },
+      };
+      return defaults[normalized] || null;
+    }
+
+    function knownProviderBaseUrls() {
+      return Object.values({
+        openai: providerDefaults('openai'),
+        claude: providerDefaults('claude'),
+        vertex: providerDefaults('vertex-ai'),
+        google: providerDefaults('google'),
+      }).map(item => item.baseUrl);
     }
 
     function normalizeProviderValue(value) {
@@ -640,6 +672,7 @@ button.ghost{background:#15171b;color:#a8b0bd}
 
       setupProviderControls();
       setupCredentialFiles();
+      setupEndpointExamples();
 
       document.querySelectorAll('.tab-btn').forEach(btn => {
         btn.addEventListener('click', () => {
@@ -743,10 +776,59 @@ button.ghost{background:#15171b;color:#a8b0bd}
           const credentialId = id.replace(/_provider$/, '_api_key');
           const credential = document.querySelector(`[data-credential="${credentialId}"]`);
           credential?.classList.toggle('credential-vertex-active', select.value === 'vertex-ai');
+          applyProviderDefaults(id, select.value);
         };
         select.addEventListener('change', update);
         update();
       });
+    }
+
+    function applyProviderDefaults(providerId, provider) {
+      if (!provider || provider === 'custom') return;
+      const defaults = providerDefaults(provider);
+      if (!defaults) return;
+
+      const prefix = providerId.replace(/_provider$/, '');
+      const baseId = prefix === 'default' ? 'default_base_url' : `${prefix}_base_url`;
+      const modelId = prefix === 'default' ? 'default_model' : `${prefix}_model`;
+      const baseInput = document.getElementById(baseId);
+      const modelInput = document.getElementById(modelId);
+
+      if (baseInput && shouldReplaceEndpoint(baseInput.value)) {
+        baseInput.value = defaults.baseUrl;
+        updateEndpointExample(baseId);
+      }
+      if (modelInput && shouldReplaceModel(modelInput.value)) {
+        modelInput.value = defaults.model;
+      }
+    }
+
+    function shouldReplaceEndpoint(value) {
+      if (!String(value || '').trim()) return true;
+      const normalized = normalizeUrl(value || '');
+      return knownProviderBaseUrls().map(normalizeUrl).includes(normalized);
+    }
+
+    function shouldReplaceModel(value) {
+      const normalized = String(value || '').trim();
+      if (!normalized) return true;
+      return ['gpt-4o-mini', 'claude-3-5-sonnet-latest', 'google/gemini-1.5-pro', 'gemini-1.5-pro'].includes(normalized);
+    }
+
+    function setupEndpointExamples() {
+      document.querySelectorAll('[data-example-for]').forEach(example => {
+        const baseId = example.dataset.exampleFor;
+        const input = document.getElementById(baseId);
+        input?.addEventListener('input', () => updateEndpointExample(baseId));
+        updateEndpointExample(baseId);
+      });
+    }
+
+    function updateEndpointExample(baseId) {
+      const example = document.querySelector(`[data-example-for="${baseId}"]`);
+      const input = document.getElementById(baseId);
+      if (!example || !input) return;
+      example.textContent = `예시 URL: ${exampleChatUrl(input.value || 'https://api.openai.com/v1')}`;
     }
 
     function setupCredentialFiles() {
