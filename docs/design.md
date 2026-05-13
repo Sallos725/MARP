@@ -8,9 +8,11 @@ RisuAI의 단일 LLM 응답은 다음 문제를 가집니다:
 - 세계관 설정과 모순된 응답 생성
 - 서사 흐름 무시 (플롯 점프, 복선 누락)
 - 캐릭터 성격/말투 불일치
-- 위 오류를 사전에 잡는 검수 레이어 없음
+- 위 오류를 사전에 잡는 보강 레이어 없음
 
-**해결:** 4개의 전문 에이전트가 순차적으로 응답을 보강/검수.
+**해결:** 3개의 분석 에이전트(세계관/플롯/등장인물)가 RisuAI 메인 모델 요청 직전에
+`beforeRequest` 훅으로 끼어들어 system 프롬프트에 분석 컨텍스트를 주입한다.
+최종 RP 응답은 RisuAI가 현재 선택한 메인 모델이 그대로 생성한다.
 
 ---
 
@@ -53,16 +55,12 @@ RisuAI의 단일 LLM 응답은 다음 문제를 가집니다:
 - 등장 예정: 경비대장 마르코 (권위적, 짧은 문장)
 ```
 
-### 2-4. 검수 에이전트 (Reviewer Agent)
+### 2-4. 최종 응답 — RisuAI 메인 모델
 
-**역할:** 설정 오류 감지 (메인), 최종 응답 생성
-**입력:** 유저 입력 + context_world + context_plot + context_char + 최근 N개 메시지
-**출력:** 최종 RP 응답 텍스트
-**검수 항목:**
-- 세계관 설정 위반 여부
-- 플롯 흐름 역행 여부
-- 캐릭터 OOC(Out of Character) 여부
-- 위반 발견 시: 수정하여 응답 생성
+별도의 검수 에이전트는 두지 않는다. 분석 3개의 출력은 `beforeRequest` 훅을
+거쳐 RisuAI 메인 모델 요청의 system 프롬프트 끝에 주입되고, 메인 모델이
+검수 + RP 생성 역할을 함께 수행한다. 분석 모델과 응답 모델을 분리해
+저렴한 모델 3개로 분석을 분산하고 응답 품질은 메인 모델에 맡기는 구조다.
 
 ---
 
@@ -95,7 +93,10 @@ pipeline_context = {
 
 ## 4. API 설계 (Full판)
 
-### POST /generate
+### POST /analyze
+
+분석 3개를 순차 실행하고 컨텍스트만 반환한다. 최종 응답 생성은 호출자(플러그인 `beforeRequest` 훅)가
+RisuAI 메인 모델에 위임하므로 서버는 응답 텍스트를 만들지 않는다.
 
 **요청:**
 ```json
@@ -114,13 +115,9 @@ pipeline_context = {
 **응답:**
 ```json
 {
-  "response": "최종 RP 응답 텍스트",
-  "debug": {
-    "context_world": "...",
-    "context_plot": "...",
-    "context_char": "...",
-    "reviewer_notes": "..."
-  }
+  "context_world": "...",
+  "context_plot": "...",
+  "context_char": "..."
 }
 ```
 
@@ -181,7 +178,7 @@ API Key 원문은 반환하지 않는다.
 필수 필드 유효성을 확인한다.
 
 쿼리 파라미터:
-- `agent`: 선택. `worldbuilding`, `plot`, `character`, `reviewer` 중 하나.
+- `agent`: 선택. `worldbuilding`, `plot`, `character` 중 하나.
   생략 시 전체 에이전트를 테스트한다.
 
 **응답 예시:**
@@ -223,8 +220,8 @@ Full판 운영 대시보드를 표시한다.
    - LLM endpoint base URL 및 예시 URL
    - 기본 API Key 설정 여부
 
-2. **파이프라인**
-   - 세계관 → 플롯 → 등장인물 → 검수 에이전트 카드
+2. **분석 에이전트**
+   - 세계관 → 플롯 → 등장인물 에이전트 카드 (검수 에이전트 없음)
    - 에이전트별 provider, endpoint, 예시 URL, API Key 설정 여부
    - 에이전트별 모델, temperature, max tokens
    - 기본값 상속/개별 설정 여부
@@ -258,7 +255,7 @@ Provider를 변경하면 endpoint base URL과 model이 함께 갱신된다.
 - Google: `https://generativelanguage.googleapis.com/v1beta/openai`
 
 5. **도움말**
-   - Full 서버와 Custom AI Provider 호출 구조
+   - Full 서버와 beforeRequest 훅 호출 구조 (분석은 사이드카, 최종 응답은 RisuAI 메인 모델)
    - API Key 표시 정책
    - Docker 서버 점검 안내
 
@@ -312,13 +309,6 @@ CHARACTER_MODEL=
 CHARACTER_TEMPERATURE=
 CHARACTER_MAX_TOKENS=
 
-REVIEWER_PROVIDER=
-REVIEWER_BASE_URL=
-REVIEWER_API_KEY=
-REVIEWER_MODEL=gpt-4o
-REVIEWER_TEMPERATURE=
-REVIEWER_MAX_TOKENS=
-
 CONTEXT_WINDOW=10
 DEBUG_MODE=false
 REQUEST_TIMEOUT=60.0
@@ -330,27 +320,9 @@ REQUEST_TIMEOUT=60.0
 
 ### Lua 파이프라인
 
-```lua
--- 02_pipeline.lua 핵심 흐름
-function onStart(triggerId)
-    local userInput = getUserLastMessage(triggerId)
-    local history = buildHistory(triggerId)
-
-    -- 순차 실행
-    local ctxWorld = runWorldAgent(triggerId, userInput, history)
-    local ctxPlot  = runPlotAgent(triggerId, userInput, history, ctxWorld)
-    local ctxChar  = runCharAgent(triggerId, userInput, history, ctxWorld, ctxPlot)
-    local final    = runReviewer(triggerId, userInput, history, ctxWorld, ctxPlot, ctxChar)
-
-    -- 프롬프트 주입
-    injectFinalPrompt(triggerId, final)
-end
-```
-
-### Lua LLM 호출 전략
-
-- **세계관/플롯/등장인물:** `simpleLLM():await()` — 경량, 빠름
-- **검수 에이전트:** `LLM()` 또는 `axLLM()` — 메인/대체 모델
+Lite판은 Lua 대신 Plugin API v3 자체에서 `addRisuReplacer('beforeRequest')`
+훅으로 분석 3개를 직접 호출하고 system 프롬프트에 컨텍스트를 주입한다.
+최종 응답은 RisuAI 메인 모델이 그대로 생성한다 (Full판과 동일한 패턴).
 
 ### Lite판 플러그인 GUI
 
@@ -371,7 +343,7 @@ GUI에서 확인/수정하는 항목:
 - Temperature
 - Max Tokens
 - Context Window
-- Lite판 동작 구조: 세계관/플롯/등장인물은 보조 LLM, 검수는 RisuAI 메인 모델
+- Lite판 동작 구조: 분석 3개는 보조 LLM, 최종 응답은 RisuAI 메인 모델
 
 Provider를 변경하면 endpoint base URL과 model이 함께 갱신된다.
 단, 사용자가 이미 커스텀 endpoint/model을 입력한 경우에는 값을 덮어쓰지 않는다.
@@ -395,11 +367,11 @@ Lite판은 RisuAI의 `beforeRequest` 훅에서 보조 에이전트 3개를 순�
 1. 세계관 에이전트: `nativeFetch`로 보조 LLM 호출
 2. 플롯 에이전트: `nativeFetch`로 보조 LLM 호출
 3. 등장인물 에이전트: `nativeFetch`로 보조 LLM 호출
-4. 검수 에이전트: 별도 `nativeFetch`가 아니라 RisuAI의 현재 메인 LLM 호출이 담당
+4. 최종 응답: 별도 `nativeFetch`가 아니라 RisuAI의 현재 메인 LLM 호출이 담당
 
-따라서 실제 RP 생성 흐름은 4단계지만, Lite 플러그인 코드 안에서 직접 호출하는
-보조 LLM은 3번이다. GUI의 LLM 테스트는 공통 endpoint/credential 설정 검증용이므로
-에이전트별 호출을 반복하지 않고 1회만 수행한다.
+분석 3개의 결과는 system 프롬프트에 주입돼 메인 모델 호출에 함께 전달된다.
+GUI의 LLM 테스트는 공통 endpoint/credential 설정 검증용이므로 에이전트별 호출을
+반복하지 않고 1회만 수행한다.
 
 ---
 
@@ -408,4 +380,5 @@ Lite판은 RisuAI의 `beforeRequest` 훅에서 보조 에이전트 3개를 순�
 - [ ] 에이전트 시스템 프롬프트 최종 확정 (`docs/agent-prompts.md` 작성)
 - [ ] 슬라이딩 윈도우 기본값 튜닝 (10개 → 조정 필요할 수 있음)
 - [ ] Lite판에서 커스텀 엔드포인트 지원 방식 결정
-- [ ] 검수 에이전트 오류 감지 후 재시도 로직 필요 여부
+- [ ] 분석 컨텍스트 주입 위치/포맷 튜닝 (system 끝 vs 별도 메시지 등)
+- [ ] 분석 실패 시 단순 통과 외에 재시도 정책 도입 여부

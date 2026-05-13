@@ -6,7 +6,7 @@ class ChatMessage(BaseModel):
     content: str
 
 
-class GenerateRequest(BaseModel):
+class AnalyzeRequest(BaseModel):
     user_input: str
     chat_history: list[ChatMessage] = Field(default_factory=list)
     world_summary: str = ""
@@ -14,16 +14,10 @@ class GenerateRequest(BaseModel):
     context_window: int | None = None
 
 
-class DebugInfo(BaseModel):
+class AnalyzeResponse(BaseModel):
     context_world: str
     context_plot: str
     context_char: str
-    reviewer_notes: str
-
-
-class GenerateResponse(BaseModel):
-    response: str
-    debug: DebugInfo | None = None
 
 
 class PublicConfigStatus(BaseModel):
@@ -110,13 +104,6 @@ class ConfigModel(BaseModel):
     character_model: str = ""
     character_temperature: float | None = None
     character_max_tokens: int | None = None
-
-    reviewer_provider: str = ""
-    reviewer_base_url: str = ""
-    reviewer_api_key: str = ""
-    reviewer_model: str = ""
-    reviewer_temperature: float | None = None
-    reviewer_max_tokens: int | None = None
 
     context_window: int = 10
     debug_mode: bool = False

@@ -38,14 +38,6 @@ class Settings(BaseSettings):
     character_temperature: float | None = None
     character_max_tokens: int | None = None
 
-    # 검수 에이전트
-    reviewer_provider: str = ""
-    reviewer_base_url: str = ""
-    reviewer_api_key: str = ""
-    reviewer_model: str = ""
-    reviewer_temperature: float | None = None
-    reviewer_max_tokens: int | None = None
-
     # 파이프라인 설정
     context_window: int = 10
     debug_mode: bool = False
@@ -59,8 +51,6 @@ class Settings(BaseSettings):
         "plot_max_tokens",
         "character_temperature",
         "character_max_tokens",
-        "reviewer_temperature",
-        "reviewer_max_tokens",
         mode="before",
     )
     @classmethod

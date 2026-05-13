@@ -7,13 +7,13 @@ import httpx
 
 from app import config_store
 from app.models import (
-    GenerateRequest,
-    GenerateResponse,
+    AnalyzeRequest,
+    AnalyzeResponse,
     ConfigModel,
     StatusResponse,
     LlmTestResponse,
 )
-from app.pipeline import run_pipeline
+from app.pipeline import run_analysis
 
 
 @asynccontextmanager
@@ -24,8 +24,8 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="risu-multiagent",
-    description="RisuAI용 멀티 에이전트 RP 파이프라인",
-    version="0.1.0",
+    description="RisuAI용 멀티 에이전트 RP 분석 파이프라인 (beforeRequest 훅 기반)",
+    version="0.2.0",
     lifespan=lifespan,
 )
 
@@ -99,10 +99,10 @@ async def put_config(body: ConfigModel):
     return body
 
 
-@app.post("/generate", response_model=GenerateResponse)
-async def generate(request: GenerateRequest):
+@app.post("/analyze", response_model=AnalyzeResponse)
+async def analyze(request: AnalyzeRequest):
     try:
-        return await run_pipeline(request)
+        return await run_analysis(request)
     except httpx.HTTPStatusError as e:
         raise HTTPException(
             status_code=502,

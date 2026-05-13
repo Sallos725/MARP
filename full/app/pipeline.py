@@ -1,18 +1,17 @@
-from app.agents import WorldbuildingAgent, PlotAgent, CharacterAgent, ReviewerAgent
-from app.models import GenerateRequest, GenerateResponse, DebugInfo
+from app.agents import WorldbuildingAgent, PlotAgent, CharacterAgent
+from app.models import AnalyzeRequest, AnalyzeResponse
 from app import config_store
 
 
-async def run_pipeline(request: GenerateRequest) -> GenerateResponse:
+async def run_analysis(request: AnalyzeRequest) -> AnalyzeResponse:
     """
-    4단계 에이전트 파이프라인 순차 실행.
+    분석 에이전트 3개 순차 실행. 최종 응답은 RisuAI 메인 모델이 담당하므로 여기서 생성하지 않는다.
 
     흐름:
     유저 입력
       → 세계관 에이전트  (context_world)
       → 플롯 에이전트    (context_plot)
       → 등장인물 에이전트 (context_char)
-      → 검수 에이전트    (최종 응답)
     """
     cfg = config_store.load()
     context_window = request.context_window or cfg.get("context_window", 10)
@@ -31,15 +30,9 @@ async def run_pipeline(request: GenerateRequest) -> GenerateResponse:
     pipeline_context["context_world"] = await WorldbuildingAgent().run(pipeline_context)
     pipeline_context["context_plot"]  = await PlotAgent().run(pipeline_context)
     pipeline_context["context_char"]  = await CharacterAgent().run(pipeline_context)
-    final_response                     = await ReviewerAgent().run(pipeline_context)
 
-    debug = None
-    if cfg.get("debug_mode"):
-        debug = DebugInfo(
-            context_world=pipeline_context["context_world"],
-            context_plot=pipeline_context["context_plot"],
-            context_char=pipeline_context["context_char"],
-            reviewer_notes="(검수 에이전트 내부 처리)",
-        )
-
-    return GenerateResponse(response=final_response, debug=debug)
+    return AnalyzeResponse(
+        context_world=pipeline_context["context_world"],
+        context_plot=pipeline_context["context_plot"],
+        context_char=pipeline_context["context_char"],
+    )

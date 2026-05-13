@@ -36,12 +36,6 @@ DEFAULTS: dict = {
     "character_model":        "",
     "character_temperature":  None,
     "character_max_tokens":   None,
-    "reviewer_provider":      "",
-    "reviewer_base_url":      "",
-    "reviewer_api_key":       "",
-    "reviewer_model":         "",
-    "reviewer_temperature":   None,
-    "reviewer_max_tokens":    None,
     "context_window":         10,
     "debug_mode":             False,
     "request_timeout":        60.0,
@@ -51,7 +45,6 @@ AGENTS: tuple[tuple[str, str], ...] = (
     ("worldbuilding", "세계관 에이전트"),
     ("plot", "플롯 에이전트"),
     ("character", "등장인물 에이전트"),
-    ("reviewer", "검수 에이전트"),
 )
 
 
@@ -59,12 +52,15 @@ def load() -> dict:
     if CONFIG_PATH.exists():
         with _lock:
             text = CONFIG_PATH.read_text(encoding="utf-8")
-        return {**DEFAULTS, **json.loads(text)}
+        raw = json.loads(text)
+        # Drop legacy keys (e.g. reviewer_*) that are no longer in DEFAULTS.
+        filtered = {key: value for key, value in raw.items() if key in DEFAULTS}
+        return {**DEFAULTS, **filtered}
     return dict(DEFAULTS)
 
 
 def save(data: dict) -> None:
-    merged = {**DEFAULTS, **data}
+    merged = {**DEFAULTS, **{key: value for key, value in data.items() if key in DEFAULTS}}
     CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
     with _lock:
         CONFIG_PATH.write_text(
@@ -105,12 +101,6 @@ def initialize_from_env() -> None:
             "character_model":        s.character_model,
             "character_temperature":  s.character_temperature,
             "character_max_tokens":   s.character_max_tokens,
-            "reviewer_provider":      s.reviewer_provider,
-            "reviewer_base_url":      s.reviewer_base_url,
-            "reviewer_api_key":       s.reviewer_api_key,
-            "reviewer_model":         s.reviewer_model,
-            "reviewer_temperature":   s.reviewer_temperature,
-            "reviewer_max_tokens":    s.reviewer_max_tokens,
             "context_window":         s.context_window,
             "debug_mode":             s.debug_mode,
             "request_timeout":        s.request_timeout,

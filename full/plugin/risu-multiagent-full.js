@@ -1,19 +1,21 @@
 //@name risu_multiagent_full
 //@display-name MultiAgent RP — Full판
 //@api 3.0
-//@version 1.0.0
+//@version 2.0.0
 //@arg server_url string Full판 서버 URL (e.g. http://localhost:6009 or https://example.com/multi-agent)
 //@link https://github.com/your-repo/risu-multiagent Documentation
 
 /**
  * MultiAgent RP Pipeline — Full판 플러그인 (RisuAI Plugin API v3.0)
  *
- * 역할 1: Custom AI Provider
- *   → RisuAI 모델 목록에 "MultiAgent-Full" 등록
- *   → 선택 시 Full판 서버(/generate)를 통해 4에이전트 파이프라인 실행
+ * 역할 1: beforeRequest 훅
+ *   → RisuAI가 메인 모델로 요청 보내기 직전에 끼어들어
+ *   → Full판 서버(/analyze)로 분석 3개(세계관/플롯/캐릭터) 호출
+ *   → system 프롬프트에 분석 컨텍스트 주입
+ *   → RisuAI 메인 모델이 그대로 최종 응답 생성 (검수 역할 겸함)
  *
  * 역할 2: 설정 GUI
- *   → 플러그인 설정 메뉴에서 서버 설정값 조회/수정
+ *   → 플러그인 설정 메뉴에서 서버/에이전트 설정값 조회/수정
  */
 
 (async () => {
@@ -27,31 +29,31 @@
 
     let lastRunState = null;
 
-    // ── Custom AI Provider 등록 ───────────────────────────────────────────────
+    // ── beforeRequest 훅 등록 ─────────────────────────────────────────────────
 
-    await Risuai.addProvider('MultiAgent-Full', async (args, abortSignal) => {
-      const serverUrl = await getServerUrl();
-      const messages  = args.prompt_chat || [];
+    Risuai.addRisuReplacer('beforeRequest', async (messages, type) => {
       const startedAt = Date.now();
+      const serverUrl = await getServerUrl();
 
-      // OpenAI messages → /generate 요청 형식 변환
-      const systemMsg    = messages.find(m => m.role === 'system');
-      const nonSystem    = messages.filter(m => m.role !== 'system');
-      const userMsgs     = nonSystem.filter(m => m.role === 'user');
-      const userInput    = userMsgs.length ? userMsgs[userMsgs.length - 1].content : '';
-      // 마지막 유저 메시지를 제외한 나머지를 히스토리로
-      const chatHistory  = nonSystem.slice(0, -1).map(m => ({ role: m.role, content: m.content }));
+      // OpenAI messages → /analyze 요청 형식 변환
+      const systemMsg   = messages.find(m => m.role === 'system');
+      const nonSystem   = messages.filter(m => m.role !== 'system');
+      const lastUserIdx = findLastIndex(nonSystem, m => m.role === 'user');
+      const userInput   = lastUserIdx >= 0 ? nonSystem[lastUserIdx].content : '';
+      const chatHistory = (lastUserIdx >= 0 ? nonSystem.slice(0, lastUserIdx) : nonSystem)
+        .map(m => ({ role: m.role, content: m.content }));
+
       const runBase = {
-        provider: 'MultiAgent-Full',
         server_url: serverUrl,
         started_at: new Date(startedAt).toISOString(),
         input_chars: stringLength(userInput),
         system_chars: stringLength(systemMsg ? systemMsg.content : ''),
         history_messages: chatHistory.length,
+        mode: type || '',
       };
 
       try {
-        const res = await Risuai.nativeFetch(`${serverUrl}/generate`, {
+        const res = await Risuai.nativeFetch(`${serverUrl}/analyze`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -60,20 +62,19 @@
             world_summary: systemMsg ? systemMsg.content : '',
             char_summary:  '',
           }),
-          signal: abortSignal,
         });
 
         if (!res.ok) {
           const errText = await res.text().catch(() => '');
-          const content = `서버 오류 ${res.status}: ${errText.slice(0, 200)}`;
           await recordLastRun({
             ...runBase,
             success: false,
             status_code: res.status,
             duration_ms: Date.now() - startedAt,
-            error: content,
+            error: `서버 오류 ${res.status}: ${errText.slice(0, 200)}`,
           });
-          return { success: false, content };
+          // 분석 실패해도 채팅은 막지 않도록 원본 메시지 그대로 통과
+          return messages;
         }
 
         const data = await res.json();
@@ -82,24 +83,70 @@
           success: true,
           status_code: res.status,
           duration_ms: Date.now() - startedAt,
-          response_chars: stringLength(data.response),
-          debug_available: Boolean(data.debug),
-          debug: data.debug || null,
+          world_chars: stringLength(data.context_world),
+          plot_chars: stringLength(data.context_plot),
+          char_chars: stringLength(data.context_char),
+          debug: {
+            context_world: data.context_world,
+            context_plot: data.context_plot,
+            context_char: data.context_char,
+          },
         });
-        return { success: true, content: data.response };
+
+        return injectContext(messages, data.context_world, data.context_plot, data.context_char);
 
       } catch (err) {
-        const content = err.name === 'AbortError' ? '요청이 취소되었습니다.' : `연결 실패: ${err.message}`;
         await recordLastRun({
           ...runBase,
           success: false,
-          aborted: err.name === 'AbortError',
           duration_ms: Date.now() - startedAt,
-          error: content,
+          error: `연결 실패: ${err.message}`,
         });
-        return { success: false, content };
+        console.log(`MultiAgent pipeline error: ${err.message}`);
+        return messages;
       }
     });
+
+    function findLastIndex(arr, predicate) {
+      for (let i = arr.length - 1; i >= 0; i -= 1) {
+        if (predicate(arr[i])) return i;
+      }
+      return -1;
+    }
+
+    function injectContext(messages, contextWorld, contextPlot, contextChar) {
+      const injection = [
+        '',
+        '---',
+        '[MultiAgent RP 분석 컨텍스트]',
+        '',
+        '[세계관 에이전트]',
+        contextWorld || '(없음)',
+        '',
+        '[플롯 에이전트]',
+        contextPlot || '(없음)',
+        '',
+        '[캐릭터 에이전트]',
+        contextChar || '(없음)',
+        '',
+        '[검수 지침]',
+        '위 분석을 참고하여 세계관 위반·플롯 역행·OOC 오류를 감지하고 수정한 뒤 최종 RP 응답을 작성하세요.',
+        '---',
+      ].join('\n');
+
+      const hasSystem = messages.some(m => m.role === 'system');
+      if (hasSystem) {
+        let injected = false;
+        return messages.map(m => {
+          if (!injected && m.role === 'system') {
+            injected = true;
+            return { ...m, content: m.content + injection };
+          }
+          return m;
+        });
+      }
+      return [{ role: 'system', content: injection.replace(/^\n/, '') }, ...messages];
+    }
 
     // ── 설정 GUI ──────────────────────────────────────────────────────────────
 
@@ -220,7 +267,7 @@ h1{font-size:1.34rem;font-weight:720;letter-spacing:0;margin-bottom:4px}
 .metric-sub{font-size:.74rem;color:#a8b0bd;margin-top:2px;overflow-wrap:anywhere}
 .test-results{display:none;margin-bottom:12px}
 .test-results.active{display:block}
-.test-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+.test-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
 .test-card{background:#15171b;border:1px solid #262a31;border-radius:8px;padding:10px}
 .test-card-title{font-size:.8rem;font-weight:700;margin-bottom:6px}
 .test-card-line{font-size:.73rem;color:#a8b0bd;overflow-wrap:anywhere}
@@ -231,7 +278,7 @@ h1{font-size:1.34rem;font-weight:720;letter-spacing:0;margin-bottom:4px}
 .panel{display:none}
 .panel.active{display:block}
 .grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
-.agent-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.agent-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
 .card{background:#191b20;border:1px solid #292d35;border-radius:8px;padding:14px;margin-bottom:12px}
 .card h2{font-size:.91rem;margin-bottom:10px;color:#f2f4f7}
 .card p{font-size:.82rem;color:#a8b0bd}
@@ -292,7 +339,7 @@ button.ghost{background:#15171b;color:#a8b0bd}
   <div class="top">
     <div>
       <h1>MultiAgent RP Full판</h1>
-      <p class="subtitle">서버 연결, 에이전트 준비 상태, 파이프라인 설정을 확인합니다.</p>
+      <p class="subtitle">RisuAI 메인 모델 호출 직전에 분석 3개(세계관/플롯/캐릭터)를 끼워 넣어 system 프롬프트에 주입합니다.</p>
     </div>
     <div class="header-actions">
       <button id="refresh-btn" class="ghost">새로고침</button>
@@ -309,19 +356,19 @@ button.ghost{background:#15171b;color:#a8b0bd}
       <div class="metric-sub">${escHtml(serverUrl)}</div>
     </div>
     <div class="metric">
-      <div class="metric-label">준비 상태</div>
+      <div class="metric-label">분석 준비</div>
       <div class="metric-value">${ready ? '실행 가능' : '설정 필요'}</div>
-      <div class="metric-sub">${ready ? '4개 에이전트 준비 완료' : 'API Key 또는 모델 설정 확인 필요'}</div>
+      <div class="metric-sub">${ready ? '3개 분석 에이전트 준비 완료' : 'API Key 또는 모델 설정 확인 필요'}</div>
     </div>
     <div class="metric">
-      <div class="metric-label">Provider</div>
+      <div class="metric-label">분석 모델</div>
       <div class="metric-value">${escHtml(publicCfg.default_provider || v('default_provider', 'openai'))}</div>
       <div class="metric-sub">${escHtml(publicCfg.default_model || v('default_model', 'gpt-4o-mini'))}</div>
     </div>
     <div class="metric">
-      <div class="metric-label">LLM Endpoint</div>
-      <div class="metric-value">${escHtml(formatEndpoint(publicCfg.default_base_url || v('default_base_url', 'https://api.openai.com/v1')))}</div>
-      <div class="metric-sub">${escHtml(exampleChatUrl(publicCfg.default_base_url || v('default_base_url', 'https://api.openai.com/v1')))}</div>
+      <div class="metric-label">최종 응답</div>
+      <div class="metric-value">RisuAI 메인 모델</div>
+      <div class="metric-sub">현재 선택된 채팅 모델이 그대로 사용됩니다</div>
     </div>
   </div>
 
@@ -330,8 +377,8 @@ button.ghost{background:#15171b;color:#a8b0bd}
 
   <div class="tabs" role="tablist">
     <button class="tab-btn active" data-tab="overview">개요</button>
-    <button class="tab-btn" data-tab="pipeline">파이프라인</button>
-    <button class="tab-btn" data-tab="recent">최근 실행</button>
+    <button class="tab-btn" data-tab="pipeline">분석 에이전트</button>
+    <button class="tab-btn" data-tab="recent">최근 분석</button>
     <button class="tab-btn" data-tab="settings">설정</button>
     <button class="tab-btn" data-tab="help">도움말</button>
   </div>
@@ -343,7 +390,7 @@ button.ghost{background:#15171b;color:#a8b0bd}
         <div class="check-list">
           ${checkItem('Full 서버 연결', connected, data.statusError || '서버 상태 API 응답 확인')}
           ${checkItem('기본 API Key', Boolean(publicCfg.default_api_key_set || cfg.default_api_key), '기본값 또는 에이전트별 키 사용')}
-          ${checkItem('에이전트 준비', ready, ready ? '전체 에이전트 실행 가능' : '파이프라인 탭에서 누락 항목 확인')}
+          ${checkItem('분석 에이전트 준비', ready, ready ? '3개 분석 에이전트 실행 가능' : '분석 에이전트 탭에서 누락 항목 확인')}
           ${checkItem('LLM Endpoint 예시', Boolean(publicCfg.default_base_url || cfg.default_base_url), exampleChatUrl(publicCfg.default_base_url || cfg.default_base_url || 'https://api.openai.com/v1'))}
         </div>
       </div>
@@ -379,9 +426,9 @@ button.ghost{background:#15171b;color:#a8b0bd}
       <h2>Full 사이드카</h2>
       <div class="field">
         <label for="server_url">Sidecar URL</label>
-        <input id="server_url" type="text" value="${escHtml(serverUrl)}" placeholder="http://localhost:8000">
+        <input id="server_url" type="text" value="${escHtml(serverUrl)}" placeholder="http://localhost:6009">
       </div>
-      <div class="example-url">예시 URL: ${escHtml(normalizeUrl(serverUrl) + '/generate')}</div>
+      <div class="example-url">예시 URL: ${escHtml(normalizeUrl(serverUrl) + '/analyze')}</div>
     </div>
 
     <div class="card">
@@ -395,14 +442,13 @@ button.ghost{background:#15171b;color:#a8b0bd}
       ${field('default_model', 'Model', 'text', 'gpt-4o-mini')}
       <div class="row2">
         ${field('default_temperature', 'Temperature', 'number', '0.7')}
-        ${field('default_max_tokens', 'Max Tokens', '비우면 제한 없음')}
+        ${field('default_max_tokens', 'Max Tokens', 'number', '비우면 제한 없음')}
       </div>
     </div>
 
     ${agentSettings('worldbuilding', '세계관 에이전트', Boolean(findAgent(agents, 'worldbuilding')?.api_key_set || cfg.worldbuilding_api_key))}
     ${agentSettings('plot', '플롯 에이전트', Boolean(findAgent(agents, 'plot')?.api_key_set || cfg.plot_api_key))}
     ${agentSettings('character', '등장인물 에이전트', Boolean(findAgent(agents, 'character')?.api_key_set || cfg.character_api_key))}
-    ${agentSettings('reviewer', '검수 에이전트', Boolean(findAgent(agents, 'reviewer')?.api_key_set || cfg.reviewer_api_key))}
 
     <div class="card">
       <h2>파이프라인 설정</h2>
@@ -427,12 +473,13 @@ button.ghost{background:#15171b;color:#a8b0bd}
     <div class="card">
       <h2>운영 메모</h2>
       <ul class="help-list">
-        <li>RisuAI는 이 플러그인을 Custom AI Provider로 호출하고, Full 서버가 4단계 에이전트 파이프라인을 실행합니다.</li>
-        <li>Full판의 Sidecar URL은 RisuAI 플러그인이 호출하는 FastAPI 서버 주소입니다. 예시는 http://localhost:8000 입니다.</li>
-        <li>LLM Endpoint Base URL은 OpenAI-compatible API의 /v1 주소입니다. 예시는 https://api.openai.com/v1 입니다.</li>
+        <li>이 플러그인은 RisuAI 메인 모델 호출 직전에 beforeRequest 훅으로 끼어들어, Full 서버에 분석 3개를 요청한 뒤 결과를 system 프롬프트에 주입합니다.</li>
+        <li>최종 RP 응답은 RisuAI가 현재 선택한 메인 모델이 그대로 생성합니다. 별도의 검수 에이전트는 없습니다.</li>
+        <li>Full판의 Sidecar URL은 분석 파이프라인을 호스팅하는 FastAPI 서버 주소입니다. 예시는 http://localhost:6009 입니다.</li>
+        <li>LLM Endpoint Base URL은 분석 에이전트가 호출할 OpenAI-compatible API의 /v1 주소입니다.</li>
         <li>API Key 입력칸은 저장된 값을 다시 표시하지 않습니다. 빈칸으로 두면 기존 값이 유지됩니다.</li>
-        <li>디버그 모드는 서버 응답에 에이전트 분석 컨텍스트를 포함합니다. RP 몰입이 필요할 때는 꺼두는 편이 좋습니다.</li>
-        <li>서버가 연결되지 않으면 Docker 컨테이너 실행 상태와 서버 URL을 먼저 확인하세요.</li>
+        <li>분석 실패 시에도 채팅은 막히지 않습니다. 원본 프롬프트가 그대로 메인 모델에 전달됩니다.</li>
+        <li>디버그 모드를 켜면 최근 분석 탭에서 각 에이전트 출력을 펼쳐 볼 수 있습니다.</li>
       </ul>
     </div>
   </section>
@@ -561,7 +608,6 @@ button.ghost{background:#15171b;color:#a8b0bd}
         worldbuilding: '세계관 에이전트',
         plot: '플롯 에이전트',
         character: '등장인물 에이전트',
-        reviewer: '검수 에이전트',
       };
       return Object.entries(labels).map(([name, label]) => {
         const baseUrl = cfg[`${name}_base_url`] || cfg.default_base_url || '';
@@ -617,8 +663,8 @@ button.ghost{background:#15171b;color:#a8b0bd}
       if (!lastRun) {
         return `
           <div class="card">
-            <h2>최근 실행 기록 없음</h2>
-            <p>MultiAgent-Full Provider로 응답을 생성하면 이곳에 실행 결과가 표시됩니다.</p>
+            <h2>최근 분석 기록 없음</h2>
+            <p>RisuAI에서 채팅을 보내면 beforeRequest 훅이 자동으로 호출되며 결과가 이곳에 표시됩니다.</p>
           </div>`;
       }
 
@@ -626,13 +672,14 @@ button.ghost{background:#15171b;color:#a8b0bd}
       return `
         <div class="grid">
           <div class="card">
-            <h2>마지막 요청</h2>
+            <h2>마지막 분석</h2>
             <div class="kv">
               <div class="k">결과</div><div class="v"><span class="badge ${lastRun.success ? 'ok' : 'err'}">${lastRun.success ? '성공' : '실패'}</span></div>
               <div class="k">완료 시각</div><div class="v">${escHtml(formatDateTime(lastRun.completed_at))}</div>
               <div class="k">소요 시간</div><div class="v">${escHtml(formatDuration(lastRun.duration_ms))}</div>
               <div class="k">서버</div><div class="v">${escHtml(lastRun.server_url || '-')}</div>
               <div class="k">HTTP</div><div class="v">${escHtml(lastRun.status_code || '-')}</div>
+              <div class="k">모드</div><div class="v">${escHtml(lastRun.mode || '-')}</div>
             </div>
             ${lastRun.error ? `<div class="error-text" style="margin-top:10px">${escHtml(lastRun.error)}</div>` : ''}
           </div>
@@ -642,8 +689,9 @@ button.ghost{background:#15171b;color:#a8b0bd}
               <div class="k">현재 입력</div><div class="v">${escHtml(lastRun.input_chars ?? '-')}자</div>
               <div class="k">시스템</div><div class="v">${escHtml(lastRun.system_chars ?? '-')}자</div>
               <div class="k">히스토리</div><div class="v">${escHtml(lastRun.history_messages ?? '-')}개 메시지</div>
-              <div class="k">응답</div><div class="v">${escHtml(lastRun.response_chars ?? '-')}자</div>
-              <div class="k">디버그</div><div class="v">${lastRun.debug_available ? '반환됨' : '없음'}</div>
+              <div class="k">세계관</div><div class="v">${escHtml(lastRun.world_chars ?? '-')}자</div>
+              <div class="k">플롯</div><div class="v">${escHtml(lastRun.plot_chars ?? '-')}자</div>
+              <div class="k">캐릭터</div><div class="v">${escHtml(lastRun.char_chars ?? '-')}자</div>
             </div>
           </div>
         </div>
@@ -653,7 +701,6 @@ button.ghost{background:#15171b;color:#a8b0bd}
             ${debugBlock('세계관', debug.context_world)}
             ${debugBlock('플롯', debug.context_plot)}
             ${debugBlock('등장인물', debug.context_char)}
-            ${debugBlock('검수', debug.reviewer_notes)}
           </div>` : ''}
       `;
     }
@@ -737,12 +784,6 @@ button.ghost{background:#15171b;color:#a8b0bd}
         character_model:        getInputValue('character_model'),
         character_temperature:  optionalFloat('character_temperature'),
         character_max_tokens:   optionalInt('character_max_tokens'),
-        reviewer_provider:      getProviderValue('reviewer_provider', ''),
-        reviewer_base_url:      getInputValue('reviewer_base_url'),
-        reviewer_api_key:       secret('reviewer_api_key'),
-        reviewer_model:         getInputValue('reviewer_model'),
-        reviewer_temperature:   optionalFloat('reviewer_temperature'),
-        reviewer_max_tokens:    optionalInt('reviewer_max_tokens'),
         context_window:         parseInt(getInputValue('context_window')) || 10,
         request_timeout:        parseFloat(getInputValue('request_timeout')) || 60,
         debug_mode:             document.getElementById('debug_mode')?.checked || false,
@@ -1022,7 +1063,7 @@ button.ghost{background:#15171b;color:#a8b0bd}
       return `${(ms / 1000).toFixed(1)}초`;
     }
 
-    console.log('MultiAgent RP Full판 플러그인 v1.0.0 로드됨');
+    console.log('MultiAgent RP Full판 플러그인 v2.0.0 (beforeRequest 훅) 로드됨');
 
   } catch (err) {
     console.log(`MultiAgent Full판 init error: ${err.message}`);
