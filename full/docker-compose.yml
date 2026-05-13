@@ -2,7 +2,7 @@ services:
   risu-multiagent:
     build: .
     ports:
-      - "8000:8000"
+      - "6009:6009"
     env_file:
       - .env
     volumes:

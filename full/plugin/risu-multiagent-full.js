@@ -2,7 +2,7 @@
 //@display-name MultiAgent RP — Full판
 //@api 3.0
 //@version 1.0.0
-//@arg server_url string Full판 서버 URL (e.g. http://localhost:8000)
+//@arg server_url string Full판 서버 URL (e.g. http://localhost:6009 or https://example.com/multi-agent)
 //@link https://github.com/your-repo/risu-multiagent Documentation
 
 /**
@@ -22,7 +22,7 @@
     // ── 서버 URL 헬퍼 ─────────────────────────────────────────────────────────
 
     async function getServerUrl() {
-      return ((await Risuai.getArgument('server_url')) || 'http://localhost:8000').replace(/\/$/, '');
+      return ((await Risuai.getArgument('server_url')) || 'http://localhost:6009').replace(/\/$/, '');
     }
 
     let lastRunState = null;
@@ -130,7 +130,7 @@
       };
 
       try {
-        const statusRes = await Risuai.nativeFetch(`${serverUrl}/status`);
+        const statusRes = await Risuai.nativeFetch(`${serverUrl}/status`, { method: 'GET' });
         if (statusRes.ok) {
           data.status = await statusRes.json();
           data.connected = true;
@@ -142,7 +142,7 @@
       }
 
       try {
-        const configRes = await Risuai.nativeFetch(`${serverUrl}/config`);
+        const configRes = await Risuai.nativeFetch(`${serverUrl}/config`, { method: 'GET' });
         if (configRes.ok) data.config = await configRes.json();
       } catch (_) {}
 
@@ -865,7 +865,7 @@ button.ghost{background:#15171b;color:#a8b0bd}
     }
 
     function normalizeUrl(url) {
-      return String(url || 'http://localhost:8000').replace(/\/$/, '');
+      return String(url || 'http://localhost:6009').replace(/\/$/, '');
     }
 
     function exampleChatUrl(baseUrl) {
@@ -887,7 +887,7 @@ button.ghost{background:#15171b;color:#a8b0bd}
       const currentServerUrl = normalizeUrl(getInputValue('server_url') || serverUrl);
       setTestResults('');
       try {
-        const res = await Risuai.nativeFetch(`${currentServerUrl}/health`);
+        const res = await Risuai.nativeFetch(`${currentServerUrl}/health`, { method: 'GET' });
         if (res.ok) {
           showMsg('사이드카 연결 성공', true);
           setTestResults(`
@@ -920,7 +920,7 @@ button.ghost{background:#15171b;color:#a8b0bd}
     async function testLlm(serverUrl) {
       const currentServerUrl = normalizeUrl(getInputValue('server_url') || serverUrl);
       try {
-        const res = await Risuai.nativeFetch(`${currentServerUrl}/test/llm`);
+        const res = await Risuai.nativeFetch(`${currentServerUrl}/test/llm`, { method: 'GET' });
         if (!res.ok) {
           showMsg(`LLM 테스트 호출 실패: HTTP ${res.status}`, false);
           setTestResults(`
