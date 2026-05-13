@@ -162,7 +162,7 @@
       const field = (id, label, type = 'text', placeholder = '') => `
         <div class="field">
           <label for="${id}">${label}</label>
-          <input id="${id}" type="${type}" value="${escHtml(v(id))}" placeholder="${escHtml(placeholder)}">
+          <input id="${id}" type="${type}" value="${escHtml(fieldValue(cfg, id))}" placeholder="${escHtml(placeholder)}">
         </div>`;
 
       const apiKeyField = (id, label, isSet) => `
@@ -178,9 +178,15 @@
             <span class="summary-note">비워두면 기본값 사용</span>
           </summary>
           <div class="details-body">
-            ${field(`${name}_base_url`, 'Base URL', 'text', '기본값 사용')}
+            ${field(`${name}_provider`, 'Provider', 'text', '기본값 사용')}
+            ${field(`${name}_base_url`, 'Endpoint Base URL', 'text', '기본값 사용')}
+            <div class="example-url">예시 URL: ${escHtml(exampleChatUrl(v(`${name}_base_url`) || v('default_base_url', 'https://api.openai.com/v1')))}</div>
             ${apiKeyField(`${name}_api_key`, 'API Key', apiKeySet)}
             ${field(`${name}_model`, 'Model', 'text', '기본값 사용')}
+            <div class="row2">
+              ${field(`${name}_temperature`, 'Temperature', 'number', '기본값 사용')}
+              ${field(`${name}_max_tokens`, 'Max Tokens', 'number', '기본값 사용')}
+            </div>
           </div>
         </details>`;
 
@@ -198,6 +204,13 @@ h1{font-size:1.34rem;font-weight:720;letter-spacing:0;margin-bottom:4px}
 .metric-label{font-size:.72rem;color:#8d96a5;margin-bottom:5px}
 .metric-value{font-size:.92rem;font-weight:680;overflow-wrap:anywhere}
 .metric-sub{font-size:.74rem;color:#a8b0bd;margin-top:2px;overflow-wrap:anywhere}
+.test-results{display:none;margin-bottom:12px}
+.test-results.active{display:block}
+.test-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+.test-card{background:#15171b;border:1px solid #262a31;border-radius:8px;padding:10px}
+.test-card-title{font-size:.8rem;font-weight:700;margin-bottom:6px}
+.test-card-line{font-size:.73rem;color:#a8b0bd;overflow-wrap:anywhere}
+.example-url{font-size:.73rem;color:#8d96a5;background:#111318;border:1px solid #272c34;border-radius:6px;padding:7px 9px;margin:-3px 0 10px;overflow-wrap:anywhere}
 .tabs{display:flex;gap:6px;align-items:center;border-bottom:1px solid #2a2e36;margin-bottom:14px;overflow-x:auto}
 .tab-btn{appearance:none;background:transparent;border:0;color:#a8b0bd;border-radius:6px 6px 0 0;padding:10px 12px;white-space:nowrap}
 .tab-btn.active{background:#20242b;color:#fff}
@@ -251,7 +264,7 @@ button.ghost{background:#15171b;color:#a8b0bd}
 @media (max-width: 860px){
   .top{display:block}
   .header-actions{justify-content:flex-start;margin-top:12px}
-  .status-strip,.grid,.agent-grid{grid-template-columns:1fr}
+  .status-strip,.grid,.agent-grid,.test-grid{grid-template-columns:1fr}
   .row2{grid-template-columns:1fr}
 }
 </style></head><body>
@@ -263,13 +276,15 @@ button.ghost{background:#15171b;color:#a8b0bd}
     </div>
     <div class="header-actions">
       <button id="refresh-btn" class="ghost">새로고침</button>
-      <button id="test-btn">연결 테스트</button>
+      <button id="sidecar-test-btn">사이드카 테스트</button>
+      <button id="llm-test-btn">LLM 테스트</button>
+      <button id="all-test-btn" class="primary">전체 테스트</button>
     </div>
   </div>
 
   <div class="status-strip">
     <div class="metric">
-      <div class="metric-label">서버</div>
+      <div class="metric-label">Full 사이드카</div>
       <div class="metric-value">${connected ? '연결됨' : '연결 실패'}</div>
       <div class="metric-sub">${escHtml(serverUrl)}</div>
     </div>
@@ -279,18 +294,19 @@ button.ghost{background:#15171b;color:#a8b0bd}
       <div class="metric-sub">${ready ? '4개 에이전트 준비 완료' : 'API Key 또는 모델 설정 확인 필요'}</div>
     </div>
     <div class="metric">
-      <div class="metric-label">컨텍스트 윈도우</div>
-      <div class="metric-value">${escHtml(publicCfg.context_window ?? v('context_window', '10'))}개</div>
-      <div class="metric-sub">최근 메시지 기준</div>
+      <div class="metric-label">Provider</div>
+      <div class="metric-value">${escHtml(publicCfg.default_provider || v('default_provider', 'openai-compatible'))}</div>
+      <div class="metric-sub">${escHtml(publicCfg.default_model || v('default_model', 'gpt-4o-mini'))}</div>
     </div>
     <div class="metric">
-      <div class="metric-label">디버그 모드</div>
-      <div class="metric-value">${publicCfg.debug_mode ? '켜짐' : '꺼짐'}</div>
-      <div class="metric-sub">${publicCfg.debug_mode ? '분석 컨텍스트 반환' : '최종 응답만 반환'}</div>
+      <div class="metric-label">LLM Endpoint</div>
+      <div class="metric-value">${escHtml(formatEndpoint(publicCfg.default_base_url || v('default_base_url', 'https://api.openai.com/v1')))}</div>
+      <div class="metric-sub">${escHtml(exampleChatUrl(publicCfg.default_base_url || v('default_base_url', 'https://api.openai.com/v1')))}</div>
     </div>
   </div>
 
   <div id="msg" class="msg"></div>
+  <div id="test-results" class="test-results"></div>
 
   <div class="tabs" role="tablist">
     <button class="tab-btn active" data-tab="overview">개요</button>
@@ -308,15 +324,20 @@ button.ghost{background:#15171b;color:#a8b0bd}
           ${checkItem('Full 서버 연결', connected, data.statusError || '서버 상태 API 응답 확인')}
           ${checkItem('기본 API Key', Boolean(publicCfg.default_api_key_set || cfg.default_api_key), '기본값 또는 에이전트별 키 사용')}
           ${checkItem('에이전트 준비', ready, ready ? '전체 에이전트 실행 가능' : '파이프라인 탭에서 누락 항목 확인')}
-          ${checkItem('Reviewer 모델', Boolean(findAgent(agents, 'reviewer')?.model), '최종 응답 품질에 가장 큰 영향')}
+          ${checkItem('LLM Endpoint 예시', Boolean(publicCfg.default_base_url || cfg.default_base_url), exampleChatUrl(publicCfg.default_base_url || cfg.default_base_url || 'https://api.openai.com/v1'))}
         </div>
       </div>
       <div class="card">
         <h2>현재 구성</h2>
         <div class="kv">
           <div class="k">서버 버전</div><div class="v">${escHtml(status?.version || '-')}</div>
+          <div class="k">사이드카</div><div class="v">${escHtml(serverUrl)}</div>
+          <div class="k">Provider</div><div class="v">${escHtml(publicCfg.default_provider || v('default_provider', 'openai-compatible'))}</div>
           <div class="k">기본 모델</div><div class="v">${escHtml(publicCfg.default_model || v('default_model', 'gpt-4o-mini'))}</div>
           <div class="k">기본 URL</div><div class="v">${escHtml(publicCfg.default_base_url || v('default_base_url', 'https://api.openai.com/v1'))}</div>
+          <div class="k">예시 URL</div><div class="v">${escHtml(exampleChatUrl(publicCfg.default_base_url || v('default_base_url', 'https://api.openai.com/v1')))}</div>
+          <div class="k">Temperature</div><div class="v">${escHtml(publicCfg.default_temperature ?? v('default_temperature', '0.7'))}</div>
+          <div class="k">Max Tokens</div><div class="v">${escHtml(publicCfg.default_max_tokens ?? v('default_max_tokens', '제한 없음'))}</div>
           <div class="k">타임아웃</div><div class="v">${escHtml(publicCfg.request_timeout ?? v('request_timeout', '60'))}초</div>
         </div>
       </div>
@@ -335,20 +356,27 @@ button.ghost{background:#15171b;color:#a8b0bd}
 
   <section id="tab-settings" class="panel">
     <div class="card">
-      <h2>서버</h2>
+      <h2>Full 사이드카</h2>
       <div class="field">
-        <label for="server_url">Full판 서버 URL</label>
+        <label for="server_url">Sidecar URL</label>
         <input id="server_url" type="text" value="${escHtml(serverUrl)}" placeholder="http://localhost:8000">
       </div>
+      <div class="example-url">예시 URL: ${escHtml(normalizeUrl(serverUrl) + '/generate')}</div>
     </div>
 
     <div class="card">
-      <h2>기본 설정</h2>
+      <h2>기본 LLM 설정</h2>
       <p>에이전트별 설정이 비어 있을 때 사용됩니다.</p>
       <div style="height:10px"></div>
-      ${field('default_base_url', 'Base URL', 'text', 'https://api.openai.com/v1')}
+      ${field('default_provider', 'Provider', 'text', 'openai-compatible')}
+      ${field('default_base_url', 'Endpoint Base URL', 'text', 'https://api.openai.com/v1')}
+      <div class="example-url">예시 URL: ${escHtml(exampleChatUrl(v('default_base_url', 'https://api.openai.com/v1')))}</div>
       ${apiKeyField('default_api_key', 'API Key', Boolean(publicCfg.default_api_key_set || cfg.default_api_key))}
       ${field('default_model', 'Model', 'text', 'gpt-4o-mini')}
+      <div class="row2">
+        ${field('default_temperature', 'Temperature', 'number', '0.7')}
+        ${field('default_max_tokens', 'Max Tokens', '비우면 제한 없음')}
+      </div>
     </div>
 
     ${agentSettings('worldbuilding', '세계관 에이전트', Boolean(findAgent(agents, 'worldbuilding')?.api_key_set || cfg.worldbuilding_api_key))}
@@ -380,6 +408,8 @@ button.ghost{background:#15171b;color:#a8b0bd}
       <h2>운영 메모</h2>
       <ul class="help-list">
         <li>RisuAI는 이 플러그인을 Custom AI Provider로 호출하고, Full 서버가 4단계 에이전트 파이프라인을 실행합니다.</li>
+        <li>Full판의 Sidecar URL은 RisuAI 플러그인이 호출하는 FastAPI 서버 주소입니다. 예시는 http://localhost:8000 입니다.</li>
+        <li>LLM Endpoint Base URL은 OpenAI-compatible API의 /v1 주소입니다. 예시는 https://api.openai.com/v1 입니다.</li>
         <li>API Key 입력칸은 저장된 값을 다시 표시하지 않습니다. 빈칸으로 두면 기존 값이 유지됩니다.</li>
         <li>디버그 모드는 서버 응답에 에이전트 분석 컨텍스트를 포함합니다. RP 몰입이 필요할 때는 꺼두는 편이 좋습니다.</li>
         <li>서버가 연결되지 않으면 Docker 컨테이너 실행 상태와 서버 URL을 먼저 확인하세요.</li>
@@ -405,6 +435,11 @@ button.ghost{background:#15171b;color:#a8b0bd}
         .replace(/>/g, '&gt;');
     }
 
+    function fieldValue(cfg, key) {
+      const value = cfg[key];
+      return value !== undefined && value !== null ? String(value) : '';
+    }
+
     function checkItem(title, ok, desc) {
       return `
         <div class="check-item">
@@ -425,9 +460,13 @@ button.ghost{background:#15171b;color:#a8b0bd}
             <span class="badge ${readyClass}">${agent.ready ? '준비됨' : '미완료'}</span>
           </div>
           <div class="kv">
-            <div class="k">모델</div><div class="v">${escHtml(agent.model || '-')}</div>
-            <div class="k">Endpoint</div><div class="v">${escHtml(formatEndpoint(agent.base_url))}</div>
+            <div class="k">Provider</div><div class="v">${escHtml(agent.provider || '-')}</div>
+            <div class="k">Endpoint</div><div class="v">${escHtml(agent.base_url || '-')}</div>
+            <div class="k">예시 URL</div><div class="v">${escHtml(exampleChatUrl(agent.base_url))}</div>
             <div class="k">API Key</div><div class="v">${agent.api_key_set ? '설정됨' : '없음'}</div>
+            <div class="k">모델</div><div class="v">${escHtml(agent.model || '-')}</div>
+            <div class="k">Temp</div><div class="v">${escHtml(agent.temperature ?? '-')}</div>
+            <div class="k">Max</div><div class="v">${escHtml(agent.max_tokens ?? '제한 없음')}</div>
             <div class="k">상속</div><div class="v">${sourceText(agent)}</div>
           </div>
         </div>`;
@@ -444,14 +483,22 @@ button.ghost{background:#15171b;color:#a8b0bd}
         const baseUrl = cfg[`${name}_base_url`] || cfg.default_base_url || '';
         const apiKey = cfg[`${name}_api_key`] || cfg.default_api_key || '';
         const model = cfg[`${name}_model`] || cfg.default_model || '';
+        const temperature = cfg[`${name}_temperature`] ?? cfg.default_temperature ?? 0.7;
+        const maxTokens = cfg[`${name}_max_tokens`] ?? cfg.default_max_tokens ?? null;
         return {
           name,
           label,
+          provider: cfg[`${name}_provider`] || cfg.default_provider || 'openai-compatible',
           base_url: baseUrl,
           model,
+          temperature,
+          max_tokens: maxTokens,
+          provider_source: cfg[`${name}_provider`] ? 'override' : 'default',
           base_url_source: cfg[`${name}_base_url`] ? 'override' : 'default',
           api_key_source: cfg[`${name}_api_key`] ? 'override' : 'default',
           model_source: cfg[`${name}_model`] ? 'override' : 'default',
+          temperature_source: cfg[`${name}_temperature`] !== undefined && cfg[`${name}_temperature`] !== null ? 'override' : 'default',
+          max_tokens_source: cfg[`${name}_max_tokens`] !== undefined && cfg[`${name}_max_tokens`] !== null ? 'override' : 'default',
           api_key_set: Boolean(apiKey),
           ready: Boolean(baseUrl && apiKey && model),
         };
@@ -473,9 +520,12 @@ button.ghost{background:#15171b;color:#a8b0bd}
 
     function sourceText(agent) {
       const parts = [];
+      if (agent.provider_source === 'override') parts.push('Provider 개별');
       if (agent.base_url_source === 'override') parts.push('URL 개별');
       if (agent.api_key_source === 'override') parts.push('키 개별');
       if (agent.model_source === 'override') parts.push('모델 개별');
+      if (agent.temperature_source === 'override') parts.push('온도 개별');
+      if (agent.max_tokens_source === 'override') parts.push('토큰 개별');
       return parts.length ? parts.join(', ') : '전체 기본값';
     }
 
@@ -547,16 +597,9 @@ button.ghost{background:#15171b;color:#a8b0bd}
 
       document.getElementById('refresh-btn')?.addEventListener('click', openDashboard);
 
-      document.getElementById('test-btn')?.addEventListener('click', async () => {
-        const currentServerUrl = normalizeUrl(getInputValue('server_url') || serverUrl);
-        try {
-          const res = await Risuai.nativeFetch(`${currentServerUrl}/health`);
-          if (res.ok) showMsg('서버 연결 성공', true);
-          else showMsg(`서버 응답 오류: HTTP ${res.status}`, false);
-        } catch (err) {
-          showMsg(`연결 실패: ${err.message}`, false);
-        }
-      });
+      document.getElementById('sidecar-test-btn')?.addEventListener('click', () => testSidecar(serverUrl));
+      document.getElementById('llm-test-btn')?.addEventListener('click', () => testLlm(serverUrl));
+      document.getElementById('all-test-btn')?.addEventListener('click', () => testAll(serverUrl));
 
       document.getElementById('save-btn')?.addEventListener('click', async () => {
         const currentServerUrl = normalizeUrl(getInputValue('server_url') || serverUrl);
@@ -582,21 +625,36 @@ button.ghost{background:#15171b;color:#a8b0bd}
     function collectConfig(initialConfig) {
       const secret = key => getInputValue(key) || initialConfig[key] || '';
       return {
+        default_provider:       getInputValue('default_provider') || 'openai-compatible',
         default_base_url:       getInputValue('default_base_url'),
         default_api_key:        secret('default_api_key'),
         default_model:          getInputValue('default_model'),
+        default_temperature:    requiredFloat('default_temperature', 0.7),
+        default_max_tokens:     optionalInt('default_max_tokens'),
+        worldbuilding_provider: getInputValue('worldbuilding_provider'),
         worldbuilding_base_url: getInputValue('worldbuilding_base_url'),
         worldbuilding_api_key:  secret('worldbuilding_api_key'),
         worldbuilding_model:    getInputValue('worldbuilding_model'),
+        worldbuilding_temperature: optionalFloat('worldbuilding_temperature'),
+        worldbuilding_max_tokens:  optionalInt('worldbuilding_max_tokens'),
+        plot_provider:          getInputValue('plot_provider'),
         plot_base_url:          getInputValue('plot_base_url'),
         plot_api_key:           secret('plot_api_key'),
         plot_model:             getInputValue('plot_model'),
+        plot_temperature:       optionalFloat('plot_temperature'),
+        plot_max_tokens:        optionalInt('plot_max_tokens'),
+        character_provider:     getInputValue('character_provider'),
         character_base_url:     getInputValue('character_base_url'),
         character_api_key:      secret('character_api_key'),
         character_model:        getInputValue('character_model'),
+        character_temperature:  optionalFloat('character_temperature'),
+        character_max_tokens:   optionalInt('character_max_tokens'),
+        reviewer_provider:      getInputValue('reviewer_provider'),
         reviewer_base_url:      getInputValue('reviewer_base_url'),
         reviewer_api_key:       secret('reviewer_api_key'),
         reviewer_model:         getInputValue('reviewer_model'),
+        reviewer_temperature:   optionalFloat('reviewer_temperature'),
+        reviewer_max_tokens:    optionalInt('reviewer_max_tokens'),
         context_window:         parseInt(getInputValue('context_window')) || 10,
         request_timeout:        parseFloat(getInputValue('request_timeout')) || 60,
         debug_mode:             document.getElementById('debug_mode')?.checked || false,
@@ -607,8 +665,32 @@ button.ghost{background:#15171b;color:#a8b0bd}
       return document.getElementById(id)?.value?.trim() || '';
     }
 
+    function optionalFloat(id) {
+      const value = getInputValue(id);
+      if (!value) return null;
+      const parsed = parseFloat(value);
+      return Number.isFinite(parsed) ? parsed : null;
+    }
+
+    function optionalInt(id) {
+      const value = getInputValue(id);
+      if (!value) return null;
+      const parsed = parseInt(value);
+      return Number.isFinite(parsed) ? parsed : null;
+    }
+
+    function requiredFloat(id, fallback) {
+      const parsed = parseFloat(getInputValue(id));
+      return Number.isFinite(parsed) ? parsed : fallback;
+    }
+
     function normalizeUrl(url) {
       return String(url || 'http://localhost:8000').replace(/\/$/, '');
+    }
+
+    function exampleChatUrl(baseUrl) {
+      const normalized = String(baseUrl || 'https://api.openai.com/v1').replace(/\/$/, '');
+      return `${normalized}/chat/completions`;
     }
 
     function showMsg(text, isOk) {
@@ -619,6 +701,103 @@ button.ghost{background:#15171b;color:#a8b0bd}
       setTimeout(() => {
         if (el.textContent === text) el.className = 'msg';
       }, 4000);
+    }
+
+    async function testSidecar(serverUrl) {
+      const currentServerUrl = normalizeUrl(getInputValue('server_url') || serverUrl);
+      setTestResults('');
+      try {
+        const res = await Risuai.nativeFetch(`${currentServerUrl}/health`);
+        if (res.ok) {
+          showMsg('사이드카 연결 성공', true);
+          setTestResults(`
+            <div class="card">
+              <h2>사이드카 테스트</h2>
+              <div class="kv">
+                <div class="k">URL</div><div class="v">${escHtml(currentServerUrl + '/health')}</div>
+                <div class="k">결과</div><div class="v"><span class="badge ok">성공</span></div>
+              </div>
+            </div>`);
+          return true;
+        }
+        showMsg(`사이드카 응답 오류: HTTP ${res.status}`, false);
+        setTestResults(`
+          <div class="card">
+            <h2>사이드카 테스트</h2>
+            <div class="error-text">HTTP ${escHtml(res.status)}</div>
+          </div>`);
+      } catch (err) {
+        showMsg(`사이드카 연결 실패: ${err.message}`, false);
+        setTestResults(`
+          <div class="card">
+            <h2>사이드카 테스트</h2>
+            <div class="error-text">${escHtml(err.message)}</div>
+          </div>`);
+      }
+      return false;
+    }
+
+    async function testLlm(serverUrl) {
+      const currentServerUrl = normalizeUrl(getInputValue('server_url') || serverUrl);
+      try {
+        const res = await Risuai.nativeFetch(`${currentServerUrl}/test/llm`);
+        if (!res.ok) {
+          showMsg(`LLM 테스트 호출 실패: HTTP ${res.status}`, false);
+          setTestResults(`
+            <div class="card">
+              <h2>LLM 테스트</h2>
+              <div class="error-text">HTTP ${escHtml(res.status)}</div>
+            </div>`);
+          return false;
+        }
+
+        const data = await res.json();
+        showMsg(data.success ? 'LLM 연결 테스트 성공' : 'LLM 연결 테스트 실패', data.success);
+        setTestResults(renderLlmTestResults(data));
+        return data.success;
+      } catch (err) {
+        showMsg(`LLM 테스트 실패: ${err.message}`, false);
+        setTestResults(`
+          <div class="card">
+            <h2>LLM 테스트</h2>
+            <div class="error-text">${escHtml(err.message)}</div>
+          </div>`);
+        return false;
+      }
+    }
+
+    async function testAll(serverUrl) {
+      const sidecarOk = await testSidecar(serverUrl);
+      if (!sidecarOk) return;
+      await testLlm(serverUrl);
+    }
+
+    function renderLlmTestResults(data) {
+      const results = data.results || [];
+      return `
+        <div class="card">
+          <h2>LLM 연결 테스트</h2>
+          <div class="test-grid">
+            ${results.map(result => `
+              <div class="test-card">
+                <div class="test-card-title">${escHtml(result.label)}</div>
+                <div><span class="badge ${result.success ? 'ok' : 'err'}">${result.success ? '성공' : '실패'}</span></div>
+                <div class="test-card-line">Provider: ${escHtml(result.provider || '-')}</div>
+                <div class="test-card-line">Model: ${escHtml(result.model || '-')}</div>
+                <div class="test-card-line">URL: ${escHtml(result.example_url || '-')}</div>
+                <div class="test-card-line">HTTP: ${escHtml(result.status_code ?? '-')}</div>
+                <div class="test-card-line">Latency: ${escHtml(result.latency_ms ?? '-')}ms</div>
+                ${result.error ? `<div class="error-text" style="font-size:.73rem;margin-top:6px">${escHtml(result.error)}</div>` : ''}
+              </div>`).join('')}
+          </div>
+        </div>`;
+    }
+
+    function setTestResults(html) {
+      const el = document.getElementById('test-results');
+      if (!el) return;
+      el.innerHTML = html;
+      el.className = html ? 'test-results active' : 'test-results';
     }
 
     async function recordLastRun(run) {
