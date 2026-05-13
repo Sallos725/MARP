@@ -68,25 +68,55 @@
 
     // ── 설정 GUI ──────────────────────────────────────────────────────────────
 
-    Risuai.registerSetting('MultiAgent Full판 설정', async () => {
+    async function openDashboard() {
       const serverUrl = await getServerUrl();
+      const data = await loadDashboardData(serverUrl);
 
-      // 현재 설정 로드
-      let config = {};
-      let connected = false;
+      document.body.innerHTML = buildUI(data, serverUrl);
+      setupHandlers(data, serverUrl);
+      await Risuai.showContainer('fullscreen');
+    }
+
+    Risuai.registerSetting('MultiAgent Full판 상태', openDashboard, 'MA', 'html');
+
+    async function loadDashboardData(serverUrl) {
+      const data = {
+        status: null,
+        config: {},
+        connected: false,
+        statusError: '',
+      };
+
       try {
-        const res = await Risuai.nativeFetch(`${serverUrl}/config`);
-        if (res.ok) { config = await res.json(); connected = true; }
+        const statusRes = await Risuai.nativeFetch(`${serverUrl}/status`);
+        if (statusRes.ok) {
+          data.status = await statusRes.json();
+          data.connected = true;
+        } else {
+          data.statusError = `상태 조회 실패: HTTP ${statusRes.status}`;
+        }
+      } catch (err) {
+        data.statusError = `연결 실패: ${err.message}`;
+      }
+
+      try {
+        const configRes = await Risuai.nativeFetch(`${serverUrl}/config`);
+        if (configRes.ok) data.config = await configRes.json();
       } catch (_) {}
 
-      document.body.innerHTML = buildUI(config, serverUrl, connected);
-      setupHandlers(serverUrl);
-      await Risuai.showContainer('fullscreen');
-    }, '⚙', 'html');
+      return data;
+    }
 
     // ── UI 빌더 ───────────────────────────────────────────────────────────────
 
-    function buildUI(cfg, serverUrl, connected) {
+    function buildUI(data, serverUrl) {
+      const cfg = data.config || {};
+      const status = data.status || null;
+      const publicCfg = status?.config || {};
+      const connected = data.connected;
+      const ready = Boolean(status?.ready);
+      const agents = status?.agents || fallbackAgents(cfg);
+
       const v = (key, fallback = '') => {
         const val = cfg[key];
         return (val !== undefined && val !== null) ? String(val) : fallback;
@@ -98,165 +128,228 @@
           <input id="${id}" type="${type}" value="${escHtml(v(id))}" placeholder="${escHtml(placeholder)}">
         </div>`;
 
-      const agentSection = (name, label) => `
+      const apiKeyField = (id, label, isSet) => `
+        <div class="field">
+          <label for="${id}">${label}</label>
+          <input id="${id}" type="password" value="" placeholder="${isSet ? '설정됨 - 비워두면 유지' : '입력 필요'}" autocomplete="off">
+        </div>`;
+
+      const agentSettings = (name, label, apiKeySet) => `
         <details>
-          <summary>${label} <span class="hint">(비워두면 기본값 사용)</span></summary>
+          <summary>
+            <span>${label}</span>
+            <span class="summary-note">비워두면 기본값 사용</span>
+          </summary>
           <div class="details-body">
             ${field(`${name}_base_url`, 'Base URL', 'text', '기본값 사용')}
-            ${field(`${name}_api_key`,  'API Key',  'password', '기본값 사용')}
-            ${field(`${name}_model`,    'Model',    'text',     '기본값 사용')}
+            ${apiKeyField(`${name}_api_key`, 'API Key', apiKeySet)}
+            ${field(`${name}_model`, 'Model', 'text', '기본값 사용')}
           </div>
         </details>`;
 
       return `<!DOCTYPE html><html><head><meta charset="utf-8">
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
-body{font-family:system-ui,sans-serif;background:#12121e;color:#dde;min-height:100vh}
-.wrap{max-width:680px;margin:0 auto;padding:24px 16px 48px}
-h1{font-size:1.3rem;margin-bottom:2px}
-.subtitle{color:#667;font-size:.8rem;margin-bottom:18px}
-.status{display:flex;align-items:center;gap:8px;padding:9px 14px;border-radius:8px;background:#1c1c30;margin-bottom:18px;font-size:.82rem}
-.dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
-.dot.ok{background:#4ade80}.dot.err{background:#f87171}
-.card{background:#1a1a2e;border-radius:10px;padding:16px;margin-bottom:12px}
-.card h2{font-size:.88rem;font-weight:700;color:#8899bb;margin-bottom:12px;text-transform:uppercase;letter-spacing:.04em}
-details{background:#1a1a2e;border-radius:10px;margin-bottom:8px}
-summary{cursor:pointer;padding:14px 16px;font-size:.88rem;font-weight:600;color:#8899bb;list-style:none;display:flex;align-items:center;gap:6px}
-summary::before{content:'▶';font-size:.65rem;transition:transform .15s}
-details[open]>summary::before{transform:rotate(90deg)}
-.details-body{padding:0 16px 14px}
+body{font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#101114;color:#eceff4;min-height:100vh;line-height:1.45}
+.wrap{max-width:1040px;margin:0 auto;padding:22px 16px 84px}
+.top{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:16px}
+h1{font-size:1.34rem;font-weight:720;letter-spacing:0;margin-bottom:4px}
+.subtitle{color:#98a2b3;font-size:.84rem}
+.header-actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+.status-strip{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:16px}
+.metric{background:#191b20;border:1px solid #292d35;border-radius:8px;padding:12px;min-height:72px}
+.metric-label{font-size:.72rem;color:#8d96a5;margin-bottom:5px}
+.metric-value{font-size:.92rem;font-weight:680;overflow-wrap:anywhere}
+.metric-sub{font-size:.74rem;color:#a8b0bd;margin-top:2px;overflow-wrap:anywhere}
+.tabs{display:flex;gap:6px;align-items:center;border-bottom:1px solid #2a2e36;margin-bottom:14px;overflow-x:auto}
+.tab-btn{appearance:none;background:transparent;border:0;color:#a8b0bd;border-radius:6px 6px 0 0;padding:10px 12px;white-space:nowrap}
+.tab-btn.active{background:#20242b;color:#fff}
+.panel{display:none}
+.panel.active{display:block}
+.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.agent-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.card{background:#191b20;border:1px solid #292d35;border-radius:8px;padding:14px;margin-bottom:12px}
+.card h2{font-size:.91rem;margin-bottom:10px;color:#f2f4f7}
+.card p{font-size:.82rem;color:#a8b0bd}
+.agent-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px}
+.agent-name{font-weight:700;font-size:.9rem}
+.badge{display:inline-flex;align-items:center;border-radius:999px;padding:3px 8px;font-size:.72rem;font-weight:680}
+.badge.ok{background:#123323;color:#6ee7a8}
+.badge.warn{background:#3a2b0d;color:#f7c66f}
+.badge.err{background:#3a1717;color:#ff8a8a}
+.badge.neutral{background:#27313c;color:#a8c7e6}
+.kv{display:grid;grid-template-columns:82px minmax(0,1fr);gap:5px 8px;font-size:.78rem;margin-top:8px}
+.k{color:#8792a2}
+.v{color:#dde3ec;overflow-wrap:anywhere}
+.check-list{display:grid;gap:8px}
+.check-item{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 12px;background:#15171b;border:1px solid #262a31;border-radius:8px}
+.check-title{font-size:.84rem;font-weight:620}
+.check-desc{font-size:.74rem;color:#8d96a5;margin-top:2px}
+details{background:#191b20;border:1px solid #292d35;border-radius:8px;margin-bottom:8px}
+summary{cursor:pointer;padding:13px 14px;font-size:.88rem;font-weight:650;color:#eef2f7;list-style:none;display:flex;align-items:center;justify-content:space-between;gap:12px}
+summary::before{content:'>';color:#8d96a5;margin-right:8px}
+details[open]>summary::before{content:'v'}
+.summary-note{font-size:.72rem;color:#8d96a5;font-weight:500}
+.details-body{padding:0 14px 14px}
 .field{margin-bottom:10px}
-label{display:block;font-size:.75rem;color:#667;margin-bottom:3px}
-input{width:100%;padding:8px 10px;border-radius:6px;border:1px solid #2a3050;background:#0e0e1c;color:#dde;font-size:.85rem}
-input:focus{outline:none;border-color:#4a6fa5}
-.hint{font-size:.72rem;color:#445;font-weight:400}
+label{display:block;font-size:.75rem;color:#9aa4b2;margin-bottom:4px}
+input{width:100%;padding:9px 10px;border-radius:6px;border:1px solid #343944;background:#0f1115;color:#eef2f7;font-size:.86rem}
+input:focus{outline:none;border-color:#5585d9}
+input[type=checkbox]{width:auto;margin-right:7px}
 .row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-.sep{height:1px;background:#1e1e32;margin:10px 0}
-.actions{display:flex;gap:10px;margin-top:20px;position:sticky;bottom:0;background:#12121e;padding:12px 0}
-button{padding:10px 18px;border-radius:8px;border:none;cursor:pointer;font-size:.88rem;font-weight:600;transition:opacity .15s}
-button:hover{opacity:.85}
-#save-btn{background:#4a6fa5;color:#fff;flex:1}
-#test-btn{background:#1e2a3e;color:#8ab}
-#close-btn{background:#1e1e2e;color:#778}
-#msg{font-size:.8rem;padding:8px 12px;border-radius:6px;display:none;margin-bottom:8px}
-#msg.ok{background:#0d2a1a;color:#4ade80;display:block}
-#msg.err{background:#2a0d0d;color:#f87171;display:block}
+.msg{font-size:.82rem;padding:10px 12px;border-radius:8px;margin-bottom:12px;display:none}
+.msg.ok{display:block;background:#10291e;color:#7ee2a8;border:1px solid #1d6b45}
+.msg.err{display:block;background:#341515;color:#ff9b9b;border:1px solid #793333}
+.help-list{display:grid;gap:9px;font-size:.84rem;color:#c7ced9}
+.help-list li{margin-left:18px}
+.actions{position:fixed;left:0;right:0;bottom:0;background:rgba(16,17,20,.96);border-top:1px solid #2a2e36;padding:10px 16px}
+.actions-inner{max-width:1040px;margin:0 auto;display:flex;gap:8px;justify-content:flex-end}
+button{padding:9px 14px;border-radius:7px;border:1px solid #343944;background:#20242b;color:#eef2f7;cursor:pointer;font-size:.86rem;font-weight:650}
+button:hover{background:#2a3039}
+button.primary{background:#2f6fed;border-color:#2f6fed;color:#fff}
+button.primary:hover{background:#275fce}
+button.ghost{background:#15171b;color:#a8b0bd}
+@media (max-width: 860px){
+  .top{display:block}
+  .header-actions{justify-content:flex-start;margin-top:12px}
+  .status-strip,.grid,.agent-grid{grid-template-columns:1fr}
+  .row2{grid-template-columns:1fr}
+}
 </style></head><body>
 <div class="wrap">
-  <h1>MultiAgent RP — Full판 설정</h1>
-  <p class="subtitle">변경사항은 즉시 서버에 저장됩니다.</p>
-
-  <div class="status">
-    <span class="dot ${connected ? 'ok' : 'err'}"></span>
-    <span id="status-text">${connected ? `연결됨 — ${escHtml(serverUrl)}` : `연결 실패 — ${escHtml(serverUrl)}`}</span>
+  <div class="top">
+    <div>
+      <h1>MultiAgent RP Full판</h1>
+      <p class="subtitle">서버 연결, 에이전트 준비 상태, 파이프라인 설정을 확인합니다.</p>
+    </div>
+    <div class="header-actions">
+      <button id="refresh-btn" class="ghost">새로고침</button>
+      <button id="test-btn">연결 테스트</button>
+    </div>
   </div>
 
-  <div id="msg"></div>
-
-  <!-- 기본 설정 -->
-  <div class="card">
-    <h2>기본 설정 (DEFAULT)</h2>
-    <p class="hint" style="margin-bottom:12px">에이전트별 설정이 비어있을 때 사용됩니다.</p>
-    ${field('default_base_url', 'Base URL', 'text', 'https://api.openai.com/v1')}
-    ${field('default_api_key',  'API Key',  'password', 'sk-...')}
-    ${field('default_model',    'Model',    'text', 'gpt-4o-mini')}
+  <div class="status-strip">
+    <div class="metric">
+      <div class="metric-label">서버</div>
+      <div class="metric-value">${connected ? '연결됨' : '연결 실패'}</div>
+      <div class="metric-sub">${escHtml(serverUrl)}</div>
+    </div>
+    <div class="metric">
+      <div class="metric-label">준비 상태</div>
+      <div class="metric-value">${ready ? '실행 가능' : '설정 필요'}</div>
+      <div class="metric-sub">${ready ? '4개 에이전트 준비 완료' : 'API Key 또는 모델 설정 확인 필요'}</div>
+    </div>
+    <div class="metric">
+      <div class="metric-label">컨텍스트 윈도우</div>
+      <div class="metric-value">${escHtml(publicCfg.context_window ?? v('context_window', '10'))}개</div>
+      <div class="metric-sub">최근 메시지 기준</div>
+    </div>
+    <div class="metric">
+      <div class="metric-label">디버그 모드</div>
+      <div class="metric-value">${publicCfg.debug_mode ? '켜짐' : '꺼짐'}</div>
+      <div class="metric-sub">${publicCfg.debug_mode ? '분석 컨텍스트 반환' : '최종 응답만 반환'}</div>
+    </div>
   </div>
 
-  <!-- 에이전트별 설정 -->
-  ${agentSection('worldbuilding', '세계관 에이전트')}
-  ${agentSection('plot',          '플롯 에이전트')}
-  ${agentSection('character',     '등장인물 에이전트')}
-  ${agentSection('reviewer',      '검수 에이전트')}
+  <div id="msg" class="msg"></div>
 
-  <!-- 파이프라인 설정 -->
-  <div class="card">
-    <h2>파이프라인 설정</h2>
-    <div class="row2">
-      <div class="field">
-        <label for="context_window">컨텍스트 윈도우 (메시지 수)</label>
-        <input id="context_window" type="number" min="1" max="50" value="${escHtml(v('context_window', '10'))}">
+  <div class="tabs" role="tablist">
+    <button class="tab-btn active" data-tab="overview">개요</button>
+    <button class="tab-btn" data-tab="pipeline">파이프라인</button>
+    <button class="tab-btn" data-tab="settings">설정</button>
+    <button class="tab-btn" data-tab="help">도움말</button>
+  </div>
+
+  <section id="tab-overview" class="panel active">
+    <div class="grid">
+      <div class="card">
+        <h2>준비 체크</h2>
+        <div class="check-list">
+          ${checkItem('Full 서버 연결', connected, data.statusError || '서버 상태 API 응답 확인')}
+          ${checkItem('기본 API Key', Boolean(publicCfg.default_api_key_set || cfg.default_api_key), '기본값 또는 에이전트별 키 사용')}
+          ${checkItem('에이전트 준비', ready, ready ? '전체 에이전트 실행 가능' : '파이프라인 탭에서 누락 항목 확인')}
+          ${checkItem('Reviewer 모델', Boolean(findAgent(agents, 'reviewer')?.model), '최종 응답 품질에 가장 큰 영향')}
+        </div>
       </div>
-      <div class="field">
-        <label for="request_timeout">타임아웃 (초)</label>
-        <input id="request_timeout" type="number" min="10" max="300" value="${escHtml(v('request_timeout', '60'))}">
+      <div class="card">
+        <h2>현재 구성</h2>
+        <div class="kv">
+          <div class="k">서버 버전</div><div class="v">${escHtml(status?.version || '-')}</div>
+          <div class="k">기본 모델</div><div class="v">${escHtml(publicCfg.default_model || v('default_model', 'gpt-4o-mini'))}</div>
+          <div class="k">기본 URL</div><div class="v">${escHtml(publicCfg.default_base_url || v('default_base_url', 'https://api.openai.com/v1'))}</div>
+          <div class="k">타임아웃</div><div class="v">${escHtml(publicCfg.request_timeout ?? v('request_timeout', '60'))}초</div>
+        </div>
       </div>
     </div>
-    <div class="field" style="margin-top:4px">
+  </section>
+
+  <section id="tab-pipeline" class="panel">
+    <div class="agent-grid">
+      ${agents.map(agentCard).join('')}
+    </div>
+  </section>
+
+  <section id="tab-settings" class="panel">
+    <div class="card">
+      <h2>서버</h2>
+      <div class="field">
+        <label for="server_url">Full판 서버 URL</label>
+        <input id="server_url" type="text" value="${escHtml(serverUrl)}" placeholder="http://localhost:8000">
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>기본 설정</h2>
+      <p>에이전트별 설정이 비어 있을 때 사용됩니다.</p>
+      <div style="height:10px"></div>
+      ${field('default_base_url', 'Base URL', 'text', 'https://api.openai.com/v1')}
+      ${apiKeyField('default_api_key', 'API Key', Boolean(publicCfg.default_api_key_set || cfg.default_api_key))}
+      ${field('default_model', 'Model', 'text', 'gpt-4o-mini')}
+    </div>
+
+    ${agentSettings('worldbuilding', '세계관 에이전트', Boolean(findAgent(agents, 'worldbuilding')?.api_key_set || cfg.worldbuilding_api_key))}
+    ${agentSettings('plot', '플롯 에이전트', Boolean(findAgent(agents, 'plot')?.api_key_set || cfg.plot_api_key))}
+    ${agentSettings('character', '등장인물 에이전트', Boolean(findAgent(agents, 'character')?.api_key_set || cfg.character_api_key))}
+    ${agentSettings('reviewer', '검수 에이전트', Boolean(findAgent(agents, 'reviewer')?.api_key_set || cfg.reviewer_api_key))}
+
+    <div class="card">
+      <h2>파이프라인 설정</h2>
+      <div class="row2">
+        <div class="field">
+          <label for="context_window">컨텍스트 윈도우</label>
+          <input id="context_window" type="number" min="1" max="50" value="${escHtml(v('context_window', '10'))}">
+        </div>
+        <div class="field">
+          <label for="request_timeout">타임아웃 초</label>
+          <input id="request_timeout" type="number" min="10" max="300" value="${escHtml(v('request_timeout', '60'))}">
+        </div>
+      </div>
       <label>
-        <input id="debug_mode" type="checkbox" style="width:auto;margin-right:6px" ${cfg.debug_mode ? 'checked' : ''}>
-        디버그 모드 (응답에 에이전트 컨텍스트 포함)
+        <input id="debug_mode" type="checkbox" ${cfg.debug_mode ? 'checked' : ''}>
+        디버그 모드
       </label>
     </div>
-  </div>
+  </section>
 
-  <div class="actions">
-    <button id="test-btn">연결 테스트</button>
-    <button id="save-btn">저장</button>
-    <button id="close-btn">닫기</button>
+  <section id="tab-help" class="panel">
+    <div class="card">
+      <h2>운영 메모</h2>
+      <ul class="help-list">
+        <li>RisuAI는 이 플러그인을 Custom AI Provider로 호출하고, Full 서버가 4단계 에이전트 파이프라인을 실행합니다.</li>
+        <li>API Key 입력칸은 저장된 값을 다시 표시하지 않습니다. 빈칸으로 두면 기존 값이 유지됩니다.</li>
+        <li>디버그 모드는 서버 응답에 에이전트 분석 컨텍스트를 포함합니다. RP 몰입이 필요할 때는 꺼두는 편이 좋습니다.</li>
+        <li>서버가 연결되지 않으면 Docker 컨테이너 실행 상태와 서버 URL을 먼저 확인하세요.</li>
+      </ul>
+    </div>
+  </section>
+</div>
+
+<div class="actions">
+  <div class="actions-inner">
+    <button id="close-btn" class="ghost">닫기</button>
+    <button id="save-btn" class="primary">저장</button>
   </div>
 </div>
-<script>
-  const serverUrl = ${JSON.stringify(serverUrl)};
-
-  function showMsg(text, isOk) {
-    const el = document.getElementById('msg');
-    el.textContent = text;
-    el.className = isOk ? 'ok' : 'err';
-    setTimeout(() => el.className = '', 4000);
-  }
-
-  function collectConfig() {
-    const get = id => document.getElementById(id)?.value?.trim() || '';
-    return {
-      default_base_url:       get('default_base_url'),
-      default_api_key:        get('default_api_key'),
-      default_model:          get('default_model'),
-      worldbuilding_base_url: get('worldbuilding_base_url'),
-      worldbuilding_api_key:  get('worldbuilding_api_key'),
-      worldbuilding_model:    get('worldbuilding_model'),
-      plot_base_url:          get('plot_base_url'),
-      plot_api_key:           get('plot_api_key'),
-      plot_model:             get('plot_model'),
-      character_base_url:     get('character_base_url'),
-      character_api_key:      get('character_api_key'),
-      character_model:        get('character_model'),
-      reviewer_base_url:      get('reviewer_base_url'),
-      reviewer_api_key:       get('reviewer_api_key'),
-      reviewer_model:         get('reviewer_model'),
-      context_window:         parseInt(get('context_window')) || 10,
-      request_timeout:        parseFloat(get('request_timeout')) || 60,
-      debug_mode:             document.getElementById('debug_mode')?.checked || false,
-    };
-  }
-
-  document.getElementById('test-btn').addEventListener('click', async () => {
-    try {
-      const res = await fetch(serverUrl + '/health');
-      if (res.ok) showMsg('✓ 서버 연결 성공', true);
-      else showMsg('✗ 서버 응답 오류: ' + res.status, false);
-    } catch (e) {
-      showMsg('✗ 연결 실패: ' + e.message, false);
-    }
-  });
-
-  document.getElementById('save-btn').addEventListener('click', async () => {
-    try {
-      const res = await fetch(serverUrl + '/config', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(collectConfig()),
-      });
-      if (res.ok) showMsg('✓ 저장 완료', true);
-      else showMsg('✗ 저장 실패: ' + res.status, false);
-    } catch (e) {
-      showMsg('✗ 오류: ' + e.message, false);
-    }
-  });
-
-  document.getElementById('close-btn').addEventListener('click', () => {
-    window.parent?.postMessage({ type: 'hideContainer' }, '*');
-  });
-</script>
 </body></html>`;
     }
 
@@ -268,8 +361,166 @@ button:hover{opacity:.85}
         .replace(/>/g, '&gt;');
     }
 
-    function setupHandlers(_serverUrl) {
-      // 핸들러는 buildUI 내부 <script> 태그로 처리 (iframe 표준 DOM 사용)
+    function checkItem(title, ok, desc) {
+      return `
+        <div class="check-item">
+          <div>
+            <div class="check-title">${escHtml(title)}</div>
+            <div class="check-desc">${escHtml(desc)}</div>
+          </div>
+          <span class="badge ${ok ? 'ok' : 'err'}">${ok ? '정상' : '확인 필요'}</span>
+        </div>`;
+    }
+
+    function agentCard(agent) {
+      const readyClass = agent.ready ? 'ok' : 'err';
+      return `
+        <div class="card">
+          <div class="agent-head">
+            <div class="agent-name">${escHtml(agent.label)}</div>
+            <span class="badge ${readyClass}">${agent.ready ? '준비됨' : '미완료'}</span>
+          </div>
+          <div class="kv">
+            <div class="k">모델</div><div class="v">${escHtml(agent.model || '-')}</div>
+            <div class="k">Endpoint</div><div class="v">${escHtml(formatEndpoint(agent.base_url))}</div>
+            <div class="k">API Key</div><div class="v">${agent.api_key_set ? '설정됨' : '없음'}</div>
+            <div class="k">상속</div><div class="v">${sourceText(agent)}</div>
+          </div>
+        </div>`;
+    }
+
+    function fallbackAgents(cfg) {
+      const labels = {
+        worldbuilding: '세계관 에이전트',
+        plot: '플롯 에이전트',
+        character: '등장인물 에이전트',
+        reviewer: '검수 에이전트',
+      };
+      return Object.entries(labels).map(([name, label]) => {
+        const baseUrl = cfg[`${name}_base_url`] || cfg.default_base_url || '';
+        const apiKey = cfg[`${name}_api_key`] || cfg.default_api_key || '';
+        const model = cfg[`${name}_model`] || cfg.default_model || '';
+        return {
+          name,
+          label,
+          base_url: baseUrl,
+          model,
+          base_url_source: cfg[`${name}_base_url`] ? 'override' : 'default',
+          api_key_source: cfg[`${name}_api_key`] ? 'override' : 'default',
+          model_source: cfg[`${name}_model`] ? 'override' : 'default',
+          api_key_set: Boolean(apiKey),
+          ready: Boolean(baseUrl && apiKey && model),
+        };
+      });
+    }
+
+    function findAgent(agents, name) {
+      return agents.find(agent => agent.name === name);
+    }
+
+    function formatEndpoint(baseUrl) {
+      try {
+        const url = new URL(baseUrl);
+        return url.host || baseUrl;
+      } catch (_) {
+        return baseUrl || '-';
+      }
+    }
+
+    function sourceText(agent) {
+      const parts = [];
+      if (agent.base_url_source === 'override') parts.push('URL 개별');
+      if (agent.api_key_source === 'override') parts.push('키 개별');
+      if (agent.model_source === 'override') parts.push('모델 개별');
+      return parts.length ? parts.join(', ') : '전체 기본값';
+    }
+
+    function setupHandlers(data, serverUrl) {
+      const initialConfig = data.config || {};
+
+      document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
+          document.querySelectorAll('.panel').forEach(el => el.classList.remove('active'));
+          btn.classList.add('active');
+          document.getElementById(`tab-${btn.dataset.tab}`)?.classList.add('active');
+        });
+      });
+
+      document.getElementById('refresh-btn')?.addEventListener('click', openDashboard);
+
+      document.getElementById('test-btn')?.addEventListener('click', async () => {
+        const currentServerUrl = normalizeUrl(getInputValue('server_url') || serverUrl);
+        try {
+          const res = await Risuai.nativeFetch(`${currentServerUrl}/health`);
+          if (res.ok) showMsg('서버 연결 성공', true);
+          else showMsg(`서버 응답 오류: HTTP ${res.status}`, false);
+        } catch (err) {
+          showMsg(`연결 실패: ${err.message}`, false);
+        }
+      });
+
+      document.getElementById('save-btn')?.addEventListener('click', async () => {
+        const currentServerUrl = normalizeUrl(getInputValue('server_url') || serverUrl);
+        try {
+          await Risuai.setArgument('server_url', currentServerUrl);
+          const res = await Risuai.nativeFetch(`${currentServerUrl}/config`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(collectConfig(initialConfig)),
+          });
+          if (res.ok) showMsg('저장 완료', true);
+          else showMsg(`저장 실패: HTTP ${res.status}`, false);
+        } catch (err) {
+          showMsg(`저장 오류: ${err.message}`, false);
+        }
+      });
+
+      document.getElementById('close-btn')?.addEventListener('click', async () => {
+        await Risuai.hideContainer();
+      });
+    }
+
+    function collectConfig(initialConfig) {
+      const secret = key => getInputValue(key) || initialConfig[key] || '';
+      return {
+        default_base_url:       getInputValue('default_base_url'),
+        default_api_key:        secret('default_api_key'),
+        default_model:          getInputValue('default_model'),
+        worldbuilding_base_url: getInputValue('worldbuilding_base_url'),
+        worldbuilding_api_key:  secret('worldbuilding_api_key'),
+        worldbuilding_model:    getInputValue('worldbuilding_model'),
+        plot_base_url:          getInputValue('plot_base_url'),
+        plot_api_key:           secret('plot_api_key'),
+        plot_model:             getInputValue('plot_model'),
+        character_base_url:     getInputValue('character_base_url'),
+        character_api_key:      secret('character_api_key'),
+        character_model:        getInputValue('character_model'),
+        reviewer_base_url:      getInputValue('reviewer_base_url'),
+        reviewer_api_key:       secret('reviewer_api_key'),
+        reviewer_model:         getInputValue('reviewer_model'),
+        context_window:         parseInt(getInputValue('context_window')) || 10,
+        request_timeout:        parseFloat(getInputValue('request_timeout')) || 60,
+        debug_mode:             document.getElementById('debug_mode')?.checked || false,
+      };
+    }
+
+    function getInputValue(id) {
+      return document.getElementById(id)?.value?.trim() || '';
+    }
+
+    function normalizeUrl(url) {
+      return String(url || 'http://localhost:8000').replace(/\/$/, '');
+    }
+
+    function showMsg(text, isOk) {
+      const el = document.getElementById('msg');
+      if (!el) return;
+      el.textContent = text;
+      el.className = `msg ${isOk ? 'ok' : 'err'}`;
+      setTimeout(() => {
+        if (el.textContent === text) el.className = 'msg';
+      }, 4000);
     }
 
     console.log('MultiAgent RP Full판 플러그인 v1.0.0 로드됨');
