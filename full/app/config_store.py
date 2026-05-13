@@ -32,6 +32,13 @@ DEFAULTS: dict = {
     "request_timeout":        60.0,
 }
 
+AGENTS: tuple[tuple[str, str], ...] = (
+    ("worldbuilding", "세계관 에이전트"),
+    ("plot", "플롯 에이전트"),
+    ("character", "등장인물 에이전트"),
+    ("reviewer", "검수 에이전트"),
+)
+
 
 def load() -> dict:
     if CONFIG_PATH.exists():
@@ -89,4 +96,37 @@ def get_agent_config(agent_name: str) -> dict:
         "base_url": cfg.get(f"{prefix}_base_url") or cfg["default_base_url"],
         "api_key":  cfg.get(f"{prefix}_api_key")  or cfg["default_api_key"],
         "model":    cfg.get(f"{prefix}_model")     or cfg["default_model"],
+    }
+
+
+def public_status() -> dict:
+    cfg = load()
+    agents = []
+
+    for name, label in AGENTS:
+        base_url = cfg.get(f"{name}_base_url") or cfg["default_base_url"]
+        api_key = cfg.get(f"{name}_api_key") or cfg["default_api_key"]
+        model = cfg.get(f"{name}_model") or cfg["default_model"]
+        agent_status = {
+            "name": name,
+            "label": label,
+            "base_url": base_url,
+            "model": model,
+            "base_url_source": "override" if cfg.get(f"{name}_base_url") else "default",
+            "api_key_source": "override" if cfg.get(f"{name}_api_key") else "default",
+            "model_source": "override" if cfg.get(f"{name}_model") else "default",
+            "api_key_set": bool(api_key),
+            "ready": bool(base_url and api_key and model),
+        }
+        agents.append(agent_status)
+
+    return {
+        "default_base_url": cfg["default_base_url"],
+        "default_model": cfg["default_model"],
+        "default_api_key_set": bool(cfg["default_api_key"]),
+        "context_window": int(cfg["context_window"]),
+        "debug_mode": bool(cfg["debug_mode"]),
+        "request_timeout": float(cfg["request_timeout"]),
+        "agents": agents,
+        "ready": all(agent["ready"] for agent in agents),
     }

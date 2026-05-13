@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import httpx
 
 from app import config_store
-from app.models import GenerateRequest, GenerateResponse, ConfigModel
+from app.models import GenerateRequest, GenerateResponse, ConfigModel, StatusResponse
 from app.pipeline import run_pipeline
 
 
@@ -32,6 +32,25 @@ app.add_middleware(
 @app.get("/health")
 async def health():
     return {"status": "ok"}
+
+
+@app.get("/status", response_model=StatusResponse)
+async def status():
+    public = config_store.public_status()
+    return StatusResponse(
+        status="ok",
+        version=app.version,
+        ready=public["ready"],
+        config={
+            "default_base_url": public["default_base_url"],
+            "default_model": public["default_model"],
+            "default_api_key_set": public["default_api_key_set"],
+            "context_window": public["context_window"],
+            "debug_mode": public["debug_mode"],
+            "request_timeout": public["request_timeout"],
+        },
+        agents=public["agents"],
+    )
 
 
 @app.get("/config", response_model=ConfigModel)

@@ -26,6 +26,35 @@ class GenerateResponse(BaseModel):
     debug: DebugInfo | None = None
 
 
+class PublicConfigStatus(BaseModel):
+    default_base_url: str
+    default_model: str
+    default_api_key_set: bool
+    context_window: int
+    debug_mode: bool
+    request_timeout: float
+
+
+class AgentStatus(BaseModel):
+    name: str
+    label: str
+    base_url: str
+    model: str
+    base_url_source: str
+    api_key_source: str
+    model_source: str
+    api_key_set: bool
+    ready: bool
+
+
+class StatusResponse(BaseModel):
+    status: str
+    version: str
+    ready: bool
+    config: PublicConfigStatus
+    agents: list[AgentStatus]
+
+
 class ConfigModel(BaseModel):
     default_base_url: str = "https://api.openai.com/v1"
     default_api_key: str = ""
