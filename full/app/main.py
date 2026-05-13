@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+import json
 from time import perf_counter
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -135,10 +136,30 @@ async def _test_llm_agent(
     }
 
     if not agent_cfg["api_key"]:
-        result["error"] = "API Key가 설정되지 않았습니다."
+        result["error"] = "Credential이 설정되지 않았습니다."
         return result
     if not base_url:
         result["error"] = "Endpoint URL이 설정되지 않았습니다."
+        return result
+
+    if _is_vertex_provider(agent_cfg["provider"]):
+        result["example_url"] = "service-account-json"
+        result["latency_ms"] = int((perf_counter() - started) * 1000)
+        try:
+            credential = json.loads(agent_cfg["api_key"])
+        except json.JSONDecodeError as exc:
+            result["error"] = f"Vertex AI 서비스 계정 JSON 파싱 실패: {exc}"
+            return result
+
+        missing = [
+            key for key in ("type", "project_id", "client_email", "private_key")
+            if not credential.get(key)
+        ]
+        if missing:
+            result["error"] = f"Vertex AI 서비스 계정 JSON 필드 누락: {', '.join(missing)}"
+            return result
+
+        result["success"] = True
         return result
 
     try:
@@ -158,3 +179,8 @@ async def _test_llm_agent(
         result["error"] = str(exc)
 
     return result
+
+
+def _is_vertex_provider(provider: str) -> bool:
+    normalized = provider.strip().lower().replace("_", "-").replace(" ", "-")
+    return normalized in {"vertex-ai", "vertex"}

@@ -2,7 +2,7 @@
 //@display-name MultiAgent RP Pipeline
 //@api 3.0
 //@version 1.0.0
-//@arg agent_provider string Analysis agent provider label. e.g. openai-compatible
+//@arg agent_provider string Analysis agent provider label. e.g. openai
 //@arg agent_base_url string Analysis agent API base URL (OpenAI-compatible). e.g. https://api.openai.com/v1
 //@arg agent_api_key string Analysis agent API key
 //@arg agent_model string Analysis agent model. e.g. gpt-4o-mini
@@ -29,7 +29,7 @@
     // ── 설정 로드 ─────────────────────────────────────────────────────────────
 
     async function getConfig() {
-      const provider = (await Risuai.getArgument('agent_provider')) || 'openai-compatible';
+      const provider = (await Risuai.getArgument('agent_provider')) || 'openai';
       const baseUrl = normalizeUrl((await Risuai.getArgument('agent_base_url')) || 'https://api.openai.com/v1');
       const apiKey  = (await Risuai.getArgument('agent_api_key'))  || '';
       const model   = (await Risuai.getArgument('agent_model'))    || 'gpt-4o-mini';
@@ -50,6 +50,10 @@
     // ── LLM 호출 헬퍼 ─────────────────────────────────────────────────────────
 
     async function callAgent(conf, messages) {
+      if (isVertexProvider(conf.provider)) {
+        throw new Error('Lite판은 Vertex AI JSON credential 저장/검증만 지원합니다. 실제 Vertex AI 호출은 Full판 어댑터가 필요합니다.');
+      }
+
       const payload = {
         model: conf.model,
         messages,
@@ -214,6 +218,12 @@
     }
 
     Risuai.registerSetting('MultiAgent Lite판 상태', openLiteDashboard, 'Lite', 'html');
+    await Risuai.registerButton({
+      name: 'MultiAgent Lite',
+      icon: 'Lite',
+      iconType: 'html',
+      location: 'hamburger',
+    }, openLiteDashboard);
 
     function buildLiteUI(conf) {
       return `<!DOCTYPE html><html><head><meta charset="utf-8">
@@ -238,8 +248,14 @@ h1{font-size:1.34rem;font-weight:720;letter-spacing:0;margin-bottom:4px}
 .k{color:#8792a2}.v{color:#dde3ec;overflow-wrap:anywhere}
 .field{margin-bottom:10px}
 label{display:block;font-size:.75rem;color:#9aa4b2;margin-bottom:4px}
-input{width:100%;padding:9px 10px;border-radius:6px;border:1px solid #343944;background:#0f1115;color:#eef2f7;font-size:.86rem}
-input:focus{outline:none;border-color:#5585d9}
+input,select,textarea{width:100%;padding:9px 10px;border-radius:6px;border:1px solid #343944;background:#0f1115;color:#eef2f7;font-size:.86rem}
+textarea{min-height:92px;resize:vertical}
+input:focus,select:focus,textarea:focus{outline:none;border-color:#5585d9}
+.custom-provider,.vertex-credential{display:none;margin-top:8px}
+.credential-json{display:none}
+.provider-custom-active .custom-provider{display:block}
+.credential-vertex-active .api-key-credential{display:none}
+.credential-vertex-active .vertex-credential{display:block}
 .row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .example-url{font-size:.73rem;color:#8d96a5;background:#111318;border:1px solid #272c34;border-radius:6px;padding:7px 9px;margin:-3px 0 10px;overflow-wrap:anywhere}
 .msg{font-size:.82rem;padding:10px 12px;border-radius:8px;margin-bottom:12px;display:none}
@@ -322,18 +338,15 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
   <div class="card">
     <h2>설정</h2>
     <div class="field">
-      <label for="agent_provider">Provider</label>
-      <input id="agent_provider" type="text" value="${escHtml(conf.provider)}" placeholder="openai-compatible">
+      <label for="agent_provider_select">Provider</label>
+      ${providerSelect('agent_provider', conf.provider)}
     </div>
     <div class="field">
       <label for="agent_base_url">Endpoint Base URL</label>
       <input id="agent_base_url" type="text" value="${escHtml(conf.baseUrl)}" placeholder="https://api.openai.com/v1">
     </div>
     <div class="example-url">예시 URL: ${escHtml(exampleChatUrl(conf.baseUrl))}</div>
-    <div class="field">
-      <label for="agent_api_key">API Key</label>
-      <input id="agent_api_key" type="password" value="" placeholder="${conf.apiKey ? '설정됨 - 비워두면 유지' : '입력 필요'}" autocomplete="off">
-    </div>
+    ${credentialField('agent_api_key', conf.apiKey)}
     <div class="field">
       <label for="agent_model">Model</label>
       <input id="agent_model" type="text" value="${escHtml(conf.model)}" placeholder="gpt-4o-mini">
@@ -360,6 +373,7 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
       <li>Lite판은 별도 FastAPI 사이드카 없이 RisuAI 플러그인 안에서 보조 에이전트 3개를 호출합니다.</li>
       <li>Endpoint Base URL은 OpenAI-compatible API의 /v1 주소입니다. 예시는 https://api.openai.com/v1 입니다.</li>
       <li>API Key 입력칸은 저장된 값을 다시 표시하지 않습니다. 빈칸으로 저장하면 기존 값을 유지합니다.</li>
+      <li>Vertex AI를 선택하면 API Key 대신 서비스 계정 JSON 파일을 불러옵니다. Lite판은 JSON 유효성 확인까지만 수행합니다.</li>
       <li>전체 테스트는 Lite판에서 가능한 전체 범위인 LLM 연결 테스트를 실행합니다.</li>
     </ul>
   </div>
@@ -375,6 +389,8 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
     }
 
     function setupLiteHandlers(initialConf) {
+      setupProviderControls();
+      setupCredentialFiles();
       document.getElementById('llm-test-btn')?.addEventListener('click', testLiteLlm);
       document.getElementById('all-test-btn')?.addEventListener('click', testLiteLlm);
       document.getElementById('save-btn')?.addEventListener('click', async () => {
@@ -393,9 +409,9 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
 
     function collectLiteConfig(initialConf) {
       return {
-        provider: getInputValue('agent_provider') || 'openai-compatible',
+        provider: getProviderValue('agent_provider', 'openai'),
         baseUrl: normalizeUrl(getInputValue('agent_base_url') || 'https://api.openai.com/v1'),
-        apiKey: getInputValue('agent_api_key') || initialConf.apiKey || '',
+        apiKey: getCredentialValue('agent_api_key') || initialConf.apiKey || '',
         model: getInputValue('agent_model') || 'gpt-4o-mini',
         temperature: requiredFloat('agent_temperature', 0.7),
         maxTokens: parseOptionalInt(getInputValue('agent_max_tokens')),
@@ -415,15 +431,22 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
 
     async function testLiteLlm() {
       const conf = {
-        provider: getInputValue('agent_provider') || 'openai-compatible',
+        provider: getProviderValue('agent_provider', 'openai'),
         baseUrl: normalizeUrl(getInputValue('agent_base_url') || 'https://api.openai.com/v1'),
-        apiKey: getInputValue('agent_api_key') || (await Risuai.getArgument('agent_api_key')) || '',
+        apiKey: getCredentialValue('agent_api_key') || (await Risuai.getArgument('agent_api_key')) || '',
         model: getInputValue('agent_model') || 'gpt-4o-mini',
       };
 
       if (!conf.apiKey) {
-        showMsg('API Key가 설정되지 않았습니다.', false);
-        setTestResults(testResultHtml(conf, false, null, null, 'API Key가 설정되지 않았습니다.'));
+        showMsg('Credential이 설정되지 않았습니다.', false);
+        setTestResults(testResultHtml(conf, false, null, null, 'Credential이 설정되지 않았습니다.'));
+        return;
+      }
+
+      if (isVertexProvider(conf.provider)) {
+        const result = validateVertexCredential(conf.apiKey);
+        showMsg(result.ok ? 'Vertex AI JSON credential 확인 완료' : 'Vertex AI JSON credential 오류', result.ok);
+        setTestResults(testResultHtml(conf, result.ok, null, 0, result.error, 'service-account-json'));
         return;
       }
 
@@ -448,7 +471,7 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
       }
     }
 
-    function testResultHtml(conf, success, status, latency, error) {
+    function testResultHtml(conf, success, status, latency, error, urlOverride = null) {
       return `
         <div class="card">
           <h2>LLM 연결 테스트</h2>
@@ -456,7 +479,7 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
             <div class="k">결과</div><div class="v"><span class="badge ${success ? 'ok' : 'err'}">${success ? '성공' : '실패'}</span></div>
             <div class="k">Provider</div><div class="v">${escHtml(conf.provider)}</div>
             <div class="k">Model</div><div class="v">${escHtml(conf.model)}</div>
-            <div class="k">URL</div><div class="v">${escHtml(`${conf.baseUrl}/models`)}</div>
+            <div class="k">URL</div><div class="v">${escHtml(urlOverride || `${conf.baseUrl}/models`)}</div>
             <div class="k">HTTP</div><div class="v">${escHtml(status ?? '-')}</div>
             <div class="k">Latency</div><div class="v">${escHtml(latency ?? '-')}ms</div>
           </div>
@@ -481,6 +504,110 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
 
     function getInputValue(id) {
       return document.getElementById(id)?.value?.trim() || '';
+    }
+
+    function getProviderValue(id, fallback) {
+      const selected = document.getElementById(`${id}_select`)?.value || '';
+      if (selected === 'custom') return getInputValue(`${id}_custom`) || 'custom';
+      return selected || fallback;
+    }
+
+    function getCredentialValue(id) {
+      if (isVertexProvider(getProviderValue('agent_provider', 'openai'))) {
+        return document.getElementById(`${id}_json`)?.value?.trim() || getInputValue(id);
+      }
+      return getInputValue(id);
+    }
+
+    function providerSelect(id, value) {
+      const options = providerOptions();
+      const normalized = normalizeProviderValue(value || '');
+      const known = options.some(option => option.value === normalized);
+      const selected = known ? normalized : 'custom';
+      const customValue = selected === 'custom' && value && !known ? value : '';
+      return `
+        <div class="provider-field" data-provider="${id}">
+          <select id="${id}_select" data-provider-select="${id}">
+            ${options.map(option => `<option value="${option.value}" ${selected === option.value ? 'selected' : ''}>${option.label}</option>`).join('')}
+          </select>
+          <input id="${id}_custom" class="custom-provider" type="text" value="${escHtml(customValue)}" placeholder="custom provider id">
+        </div>`;
+    }
+
+    function credentialField(id, value) {
+      return `
+        <div class="field credential-field" data-credential="${id}">
+          <div class="api-key-credential">
+            <label for="${id}">API Key</label>
+            <input id="${id}" type="password" value="" placeholder="${value ? '설정됨 - 비워두면 유지' : '입력 필요'}" autocomplete="off">
+          </div>
+          <div class="vertex-credential">
+            <label for="${id}_file">Vertex AI Service Account JSON</label>
+            <input id="${id}_file" type="file" accept="application/json,.json">
+            <textarea id="${id}_json" class="credential-json" aria-label="Vertex AI service account JSON"></textarea>
+            <div class="example-url">JSON 파일을 선택하면 credential로 저장됩니다. 원문은 화면에 표시하지 않습니다.</div>
+          </div>
+        </div>`;
+    }
+
+    function providerOptions() {
+      return [
+        { value: 'openai', label: 'OpenAI' },
+        { value: 'claude', label: 'Claude' },
+        { value: 'vertex-ai', label: 'Vertex AI' },
+        { value: 'google', label: 'Google' },
+        { value: 'custom', label: 'Custom' },
+      ];
+    }
+
+    function setupProviderControls() {
+      document.querySelectorAll('[data-provider-select]').forEach(select => {
+        const update = () => {
+          const id = select.dataset.providerSelect;
+          const wrapper = document.querySelector(`[data-provider="${id}"]`);
+          wrapper?.classList.toggle('provider-custom-active', select.value === 'custom');
+          const credential = document.querySelector('[data-credential="agent_api_key"]');
+          credential?.classList.toggle('credential-vertex-active', select.value === 'vertex-ai');
+        };
+        select.addEventListener('change', update);
+        update();
+      });
+    }
+
+    function setupCredentialFiles() {
+      document.querySelectorAll('input[type="file"][id$="_file"]').forEach(input => {
+        input.addEventListener('change', async () => {
+          const file = input.files?.[0];
+          if (!file) return;
+          const text = await file.text();
+          const targetId = input.id.replace(/_file$/, '_json');
+          const target = document.getElementById(targetId);
+          if (target) target.value = text;
+          showMsg('Vertex AI JSON credential을 불러왔습니다.', true);
+        });
+      });
+    }
+
+    function validateVertexCredential(text) {
+      try {
+        const parsed = JSON.parse(text);
+        const missing = ['type', 'project_id', 'client_email', 'private_key'].filter(key => !parsed[key]);
+        if (missing.length) {
+          return { ok: false, error: `필수 필드 누락: ${missing.join(', ')}` };
+        }
+        return { ok: true, error: '' };
+      } catch (err) {
+        return { ok: false, error: `JSON 파싱 실패: ${err.message}` };
+      }
+    }
+
+    function isVertexProvider(provider) {
+      const normalized = normalizeProviderValue(provider);
+      return normalized === 'vertex-ai' || normalized === 'vertex';
+    }
+
+    function normalizeProviderValue(value) {
+      return String(value || '').trim().toLowerCase().replace(/_/g, '-').replace(/\s+/g, '-');
     }
 
     function normalizeUrl(url) {

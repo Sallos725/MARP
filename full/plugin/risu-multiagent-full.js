@@ -113,6 +113,12 @@
     }
 
     Risuai.registerSetting('MultiAgent Full판 상태', openDashboard, 'MA', 'html');
+    await Risuai.registerButton({
+      name: 'MultiAgent Full',
+      icon: 'MA',
+      iconType: 'html',
+      location: 'hamburger',
+    }, openDashboard);
 
     async function loadDashboardData(serverUrl) {
       const data = {
@@ -165,10 +171,18 @@
           <input id="${id}" type="${type}" value="${escHtml(fieldValue(cfg, id))}" placeholder="${escHtml(placeholder)}">
         </div>`;
 
-      const apiKeyField = (id, label, isSet) => `
-        <div class="field">
-          <label for="${id}">${label}</label>
-          <input id="${id}" type="password" value="" placeholder="${isSet ? '설정됨 - 비워두면 유지' : '입력 필요'}" autocomplete="off">
+      const credentialField = (id, isSet) => `
+        <div class="field credential-field" data-credential="${id}">
+          <div class="api-key-credential">
+            <label for="${id}">API Key</label>
+            <input id="${id}" type="password" value="" placeholder="${isSet ? '설정됨 - 비워두면 유지' : '입력 필요'}" autocomplete="off">
+          </div>
+          <div class="vertex-credential">
+            <label for="${id}_file">Vertex AI Service Account JSON</label>
+            <input id="${id}_file" type="file" accept="application/json,.json">
+            <textarea id="${id}_json" class="credential-json" aria-label="Vertex AI service account JSON"></textarea>
+            <div class="example-url">JSON 파일을 선택하면 credential로 저장됩니다. 원문은 화면에 표시하지 않습니다.</div>
+          </div>
         </div>`;
 
       const agentSettings = (name, label, apiKeySet) => `
@@ -178,10 +192,10 @@
             <span class="summary-note">비워두면 기본값 사용</span>
           </summary>
           <div class="details-body">
-            ${field(`${name}_provider`, 'Provider', 'text', '기본값 사용')}
+            ${providerSelect(`${name}_provider`, 'Provider', v(`${name}_provider`), true)}
             ${field(`${name}_base_url`, 'Endpoint Base URL', 'text', '기본값 사용')}
             <div class="example-url">예시 URL: ${escHtml(exampleChatUrl(v(`${name}_base_url`) || v('default_base_url', 'https://api.openai.com/v1')))}</div>
-            ${apiKeyField(`${name}_api_key`, 'API Key', apiKeySet)}
+            ${credentialField(`${name}_api_key`, apiKeySet)}
             ${field(`${name}_model`, 'Model', 'text', '기본값 사용')}
             <div class="row2">
               ${field(`${name}_temperature`, 'Temperature', 'number', '기본값 사용')}
@@ -243,9 +257,15 @@ details[open]>summary::before{content:'v'}
 .details-body{padding:0 14px 14px}
 .field{margin-bottom:10px}
 label{display:block;font-size:.75rem;color:#9aa4b2;margin-bottom:4px}
-input{width:100%;padding:9px 10px;border-radius:6px;border:1px solid #343944;background:#0f1115;color:#eef2f7;font-size:.86rem}
-input:focus{outline:none;border-color:#5585d9}
+input,select,textarea{width:100%;padding:9px 10px;border-radius:6px;border:1px solid #343944;background:#0f1115;color:#eef2f7;font-size:.86rem}
+textarea{min-height:92px;resize:vertical}
+input:focus,select:focus,textarea:focus{outline:none;border-color:#5585d9}
 input[type=checkbox]{width:auto;margin-right:7px}
+.custom-provider,.vertex-credential{display:none;margin-top:8px}
+.credential-json{display:none}
+.provider-custom-active .custom-provider{display:block}
+.credential-vertex-active .api-key-credential{display:none}
+.credential-vertex-active .vertex-credential{display:block}
 .row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .msg{font-size:.82rem;padding:10px 12px;border-radius:8px;margin-bottom:12px;display:none}
 .msg.ok{display:block;background:#10291e;color:#7ee2a8;border:1px solid #1d6b45}
@@ -295,7 +315,7 @@ button.ghost{background:#15171b;color:#a8b0bd}
     </div>
     <div class="metric">
       <div class="metric-label">Provider</div>
-      <div class="metric-value">${escHtml(publicCfg.default_provider || v('default_provider', 'openai-compatible'))}</div>
+      <div class="metric-value">${escHtml(publicCfg.default_provider || v('default_provider', 'openai'))}</div>
       <div class="metric-sub">${escHtml(publicCfg.default_model || v('default_model', 'gpt-4o-mini'))}</div>
     </div>
     <div class="metric">
@@ -332,7 +352,7 @@ button.ghost{background:#15171b;color:#a8b0bd}
         <div class="kv">
           <div class="k">서버 버전</div><div class="v">${escHtml(status?.version || '-')}</div>
           <div class="k">사이드카</div><div class="v">${escHtml(serverUrl)}</div>
-          <div class="k">Provider</div><div class="v">${escHtml(publicCfg.default_provider || v('default_provider', 'openai-compatible'))}</div>
+          <div class="k">Provider</div><div class="v">${escHtml(publicCfg.default_provider || v('default_provider', 'openai'))}</div>
           <div class="k">기본 모델</div><div class="v">${escHtml(publicCfg.default_model || v('default_model', 'gpt-4o-mini'))}</div>
           <div class="k">기본 URL</div><div class="v">${escHtml(publicCfg.default_base_url || v('default_base_url', 'https://api.openai.com/v1'))}</div>
           <div class="k">예시 URL</div><div class="v">${escHtml(exampleChatUrl(publicCfg.default_base_url || v('default_base_url', 'https://api.openai.com/v1')))}</div>
@@ -368,10 +388,10 @@ button.ghost{background:#15171b;color:#a8b0bd}
       <h2>기본 LLM 설정</h2>
       <p>에이전트별 설정이 비어 있을 때 사용됩니다.</p>
       <div style="height:10px"></div>
-      ${field('default_provider', 'Provider', 'text', 'openai-compatible')}
+      ${providerSelect('default_provider', 'Provider', publicCfg.default_provider || v('default_provider', 'openai'), false)}
       ${field('default_base_url', 'Endpoint Base URL', 'text', 'https://api.openai.com/v1')}
       <div class="example-url">예시 URL: ${escHtml(exampleChatUrl(v('default_base_url', 'https://api.openai.com/v1')))}</div>
-      ${apiKeyField('default_api_key', 'API Key', Boolean(publicCfg.default_api_key_set || cfg.default_api_key))}
+      ${credentialField('default_api_key', Boolean(publicCfg.default_api_key_set || cfg.default_api_key))}
       ${field('default_model', 'Model', 'text', 'gpt-4o-mini')}
       <div class="row2">
         ${field('default_temperature', 'Temperature', 'number', '0.7')}
@@ -440,6 +460,38 @@ button.ghost{background:#15171b;color:#a8b0bd}
       return value !== undefined && value !== null ? String(value) : '';
     }
 
+    function providerSelect(id, label, value, allowDefault) {
+      const options = providerOptions();
+      const normalized = normalizeProviderValue(value || '');
+      const known = options.some(option => option.value === normalized);
+      const selected = allowDefault && !value ? '' : (known ? normalized : 'custom');
+      const customValue = selected === 'custom' && value && !known ? value : '';
+      const defaultOption = allowDefault ? '<option value="">기본값 사용</option>' : '';
+      return `
+        <div class="field provider-field" data-provider="${id}">
+          <label for="${id}_select">${label}</label>
+          <select id="${id}_select" data-provider-select="${id}">
+            ${defaultOption}
+            ${options.map(option => `<option value="${option.value}" ${selected === option.value ? 'selected' : ''}>${option.label}</option>`).join('')}
+          </select>
+          <input id="${id}_custom" class="custom-provider" type="text" value="${escHtml(customValue)}" placeholder="custom provider id">
+        </div>`;
+    }
+
+    function providerOptions() {
+      return [
+        { value: 'openai', label: 'OpenAI' },
+        { value: 'claude', label: 'Claude' },
+        { value: 'vertex-ai', label: 'Vertex AI' },
+        { value: 'google', label: 'Google' },
+        { value: 'custom', label: 'Custom' },
+      ];
+    }
+
+    function normalizeProviderValue(value) {
+      return String(value || '').trim().toLowerCase().replace(/_/g, '-').replace(/\s+/g, '-');
+    }
+
     function checkItem(title, ok, desc) {
       return `
         <div class="check-item">
@@ -488,7 +540,7 @@ button.ghost{background:#15171b;color:#a8b0bd}
         return {
           name,
           label,
-          provider: cfg[`${name}_provider`] || cfg.default_provider || 'openai-compatible',
+          provider: cfg[`${name}_provider`] || cfg.default_provider || 'openai',
           base_url: baseUrl,
           model,
           temperature,
@@ -586,6 +638,9 @@ button.ghost{background:#15171b;color:#a8b0bd}
     function setupHandlers(data, serverUrl) {
       const initialConfig = data.config || {};
 
+      setupProviderControls();
+      setupCredentialFiles();
+
       document.querySelectorAll('.tab-btn').forEach(btn => {
         btn.addEventListener('click', () => {
           document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
@@ -623,33 +678,33 @@ button.ghost{background:#15171b;color:#a8b0bd}
     }
 
     function collectConfig(initialConfig) {
-      const secret = key => getInputValue(key) || initialConfig[key] || '';
+      const secret = key => getCredentialValue(key) || initialConfig[key] || '';
       return {
-        default_provider:       getInputValue('default_provider') || 'openai-compatible',
+        default_provider:       getProviderValue('default_provider', 'openai'),
         default_base_url:       getInputValue('default_base_url'),
         default_api_key:        secret('default_api_key'),
         default_model:          getInputValue('default_model'),
         default_temperature:    requiredFloat('default_temperature', 0.7),
         default_max_tokens:     optionalInt('default_max_tokens'),
-        worldbuilding_provider: getInputValue('worldbuilding_provider'),
+        worldbuilding_provider: getProviderValue('worldbuilding_provider', ''),
         worldbuilding_base_url: getInputValue('worldbuilding_base_url'),
         worldbuilding_api_key:  secret('worldbuilding_api_key'),
         worldbuilding_model:    getInputValue('worldbuilding_model'),
         worldbuilding_temperature: optionalFloat('worldbuilding_temperature'),
         worldbuilding_max_tokens:  optionalInt('worldbuilding_max_tokens'),
-        plot_provider:          getInputValue('plot_provider'),
+        plot_provider:          getProviderValue('plot_provider', ''),
         plot_base_url:          getInputValue('plot_base_url'),
         plot_api_key:           secret('plot_api_key'),
         plot_model:             getInputValue('plot_model'),
         plot_temperature:       optionalFloat('plot_temperature'),
         plot_max_tokens:        optionalInt('plot_max_tokens'),
-        character_provider:     getInputValue('character_provider'),
+        character_provider:     getProviderValue('character_provider', ''),
         character_base_url:     getInputValue('character_base_url'),
         character_api_key:      secret('character_api_key'),
         character_model:        getInputValue('character_model'),
         character_temperature:  optionalFloat('character_temperature'),
         character_max_tokens:   optionalInt('character_max_tokens'),
-        reviewer_provider:      getInputValue('reviewer_provider'),
+        reviewer_provider:      getProviderValue('reviewer_provider', ''),
         reviewer_base_url:      getInputValue('reviewer_base_url'),
         reviewer_api_key:       secret('reviewer_api_key'),
         reviewer_model:         getInputValue('reviewer_model'),
@@ -663,6 +718,49 @@ button.ghost{background:#15171b;color:#a8b0bd}
 
     function getInputValue(id) {
       return document.getElementById(id)?.value?.trim() || '';
+    }
+
+    function getProviderValue(id, fallback) {
+      const selected = document.getElementById(`${id}_select`)?.value || '';
+      if (selected === 'custom') return getInputValue(`${id}_custom`) || 'custom';
+      return selected || fallback;
+    }
+
+    function getCredentialValue(id) {
+      const providerId = id.replace(/_api_key$/, '_provider');
+      if (getProviderValue(providerId, '') === 'vertex-ai') {
+        return document.getElementById(`${id}_json`)?.value?.trim() || getInputValue(id);
+      }
+      return getInputValue(id);
+    }
+
+    function setupProviderControls() {
+      document.querySelectorAll('[data-provider-select]').forEach(select => {
+        const update = () => {
+          const id = select.dataset.providerSelect;
+          const wrapper = document.querySelector(`[data-provider="${id}"]`);
+          wrapper?.classList.toggle('provider-custom-active', select.value === 'custom');
+          const credentialId = id.replace(/_provider$/, '_api_key');
+          const credential = document.querySelector(`[data-credential="${credentialId}"]`);
+          credential?.classList.toggle('credential-vertex-active', select.value === 'vertex-ai');
+        };
+        select.addEventListener('change', update);
+        update();
+      });
+    }
+
+    function setupCredentialFiles() {
+      document.querySelectorAll('input[type="file"][id$="_file"]').forEach(input => {
+        input.addEventListener('change', async () => {
+          const file = input.files?.[0];
+          if (!file) return;
+          const text = await file.text();
+          const targetId = input.id.replace(/_file$/, '_json');
+          const target = document.getElementById(targetId);
+          if (target) target.value = text;
+          showMsg('Vertex AI JSON credential을 불러왔습니다.', true);
+        });
+      });
     }
 
     function optionalFloat(id) {

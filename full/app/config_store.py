@@ -12,7 +12,7 @@ CONFIG_PATH = Path(os.getenv("CONFIG_PATH", "data/config.json"))
 _lock = Lock()
 
 DEFAULTS: dict = {
-    "default_provider":       "openai-compatible",
+    "default_provider":       "openai",
     "default_base_url":       "https://api.openai.com/v1",
     "default_api_key":        "",
     "default_model":          "gpt-4o-mini",

@@ -7,7 +7,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     # 기본 LLM 설정 (에이전트별 미지정 시 사용)
-    default_provider: str = "openai-compatible"
+    default_provider: str = "openai"
     default_base_url: str = "https://api.openai.com/v1"
     default_api_key: str = ""
     default_model: str = "gpt-4o-mini"
