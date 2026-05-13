@@ -140,7 +140,7 @@ API Key 원문은 반환하지 않고, 설정 여부만 boolean으로 반환한�
   "version": "0.1.0",
   "ready": true,
   "config": {
-    "default_provider": "openai-compatible",
+    "default_provider": "openai",
     "default_base_url": "https://api.openai.com/v1",
     "default_model": "gpt-4o-mini",
     "default_api_key_set": true,
@@ -154,7 +154,7 @@ API Key 원문은 반환하지 않고, 설정 여부만 boolean으로 반환한�
     {
       "name": "worldbuilding",
       "label": "세계관 에이전트",
-      "provider": "openai-compatible",
+      "provider": "openai",
       "base_url": "https://api.openai.com/v1",
       "model": "gpt-4o-mini",
       "temperature": 0.7,
@@ -177,6 +177,8 @@ API Key 원문은 반환하지 않고, 설정 여부만 boolean으로 반환한�
 Full판 서버가 저장된 LLM 설정으로 각 에이전트의 OpenAI-compatible `/models`
 엔드포인트를 호출해 연결 상태를 확인한다.
 API Key 원문은 반환하지 않는다.
+단, provider가 Vertex AI이면 네트워크 호출 대신 서비스 계정 JSON credential의
+필수 필드 유효성을 확인한다.
 
 쿼리 파라미터:
 - `agent`: 선택. `worldbuilding`, `plot`, `character`, `reviewer` 중 하나.
@@ -190,7 +192,7 @@ API Key 원문은 반환하지 않는다.
     {
       "name": "worldbuilding",
       "label": "세계관 에이전트",
-      "provider": "openai-compatible",
+      "provider": "openai",
       "base_url": "https://api.openai.com/v1",
       "example_url": "https://api.openai.com/v1/models",
       "model": "gpt-4o-mini",
@@ -209,6 +211,8 @@ API Key 원문은 반환하지 않는다.
 
 RisuAI Plugin API v3의 `registerSetting` + `showContainer('fullscreen')` 방식으로
 Full판 운영 대시보드를 표시한다.
+동일한 화면은 `registerButton`으로 등록한 hamburger 메뉴의 **MultiAgent Full**
+버튼에서도 바로 열 수 있다.
 
 ### 화면 구성
 
@@ -233,9 +237,16 @@ Full판 운영 대시보드를 표시한다.
 
 4. **설정**
    - Full판 사이드카 URL
-   - DEFAULT provider/base URL/API Key/model/temperature/max tokens
-   - 에이전트별 provider/base URL/API Key/model/temperature/max tokens override
+   - DEFAULT provider/base URL/credential/model/temperature/max tokens
+   - 에이전트별 provider/base URL/credential/model/temperature/max tokens override
    - context window, timeout, debug mode
+
+Provider 드롭다운 기본 항목:
+- OpenAI
+- Claude
+- Vertex AI
+- Google
+- Custom
 
 5. **도움말**
    - Full 서버와 Custom AI Provider 호출 구조
@@ -252,6 +263,9 @@ Full판 운영 대시보드를 표시한다.
 
 - API Key 입력칸에는 저장된 값을 다시 표시하지 않는다.
 - 저장 시 API Key 칸을 비워두면 기존 값을 유지한다.
+- Vertex AI 선택 시 API Key 대신 서비스 계정 JSON 파일을 불러온다.
+- Vertex AI 연결 테스트는 저장된 JSON을 파싱하고 `type`, `project_id`,
+  `client_email`, `private_key` 필수 필드 존재 여부를 확인한다.
 - 최근 실행 기록은 원문 입력/응답을 저장하지 않고 길이, 성공 여부, 소요 시간 등 메타데이터만 저장한다.
 - 디버그 컨텍스트 원문은 `pluginStorage`에 저장하지 않고 현재 플러그인 세션 메모리에서만 표시한다.
 
@@ -261,7 +275,7 @@ Full판 운영 대시보드를 표시한다.
 
 ```env
 # 에이전트별 독립 설정 (미지정 시 DEFAULT 사용)
-DEFAULT_PROVIDER=openai-compatible
+DEFAULT_PROVIDER=openai
 DEFAULT_BASE_URL=https://api.openai.com/v1
 DEFAULT_API_KEY=sk-...
 DEFAULT_MODEL=gpt-4o-mini
@@ -333,15 +347,17 @@ end
 
 RisuAI Plugin API v3의 `registerSetting` + `showContainer('fullscreen')` 방식으로
 `MultiAgent Lite판 상태` 설정 화면을 제공한다.
+동일한 화면은 `registerButton`으로 등록한 hamburger 메뉴의 **MultiAgent Lite**
+버튼에서도 바로 열 수 있다.
 
 Lite판은 별도 FastAPI 사이드카가 없으므로 Full판의 Sidecar URL은 표시하지 않고,
 대신 “사이드카 없음” 상태와 LLM endpoint 설정을 보여준다.
 
 GUI에서 확인/수정하는 항목:
-- Provider 라벨
+- Provider 드롭다운: OpenAI, Claude, Vertex AI, Google, Custom
 - LLM endpoint base URL
 - 예시 URL: `{base_url}/chat/completions`
-- API Key 설정 여부
+- Credential 설정 여부
 - Model
 - Temperature
 - Max Tokens
@@ -350,12 +366,28 @@ GUI에서 확인/수정하는 항목:
 
 연결 테스트:
 - **LLM 테스트**: `{base_url}/models`를 호출해 API Key와 endpoint 연결 상태를 확인한다.
+- Vertex AI 선택 시 API Key 대신 서비스 계정 JSON 파일을 불러오고,
+  테스트는 JSON 파싱 및 필수 필드 존재 여부를 확인한다.
 - **전체 테스트**: Lite판에서 가능한 전체 범위인 LLM 테스트와 동일하게 동작한다.
 
 정보 저장 정책:
 - API Key 입력칸에는 저장된 값을 다시 표시하지 않는다.
 - 저장 시 API Key 칸을 비워두면 기존 값을 유지한다.
+- Vertex AI JSON 원문은 화면에 표시하지 않고 credential 값으로 저장한다.
 - Lite판에는 사이드카 테스트가 없다.
+
+### Lite판 에이전트 호출 구조
+
+Lite판은 RisuAI의 `beforeRequest` 훅에서 보조 에이전트 3개를 순차 호출한다:
+
+1. 세계관 에이전트: `nativeFetch`로 보조 LLM 호출
+2. 플롯 에이전트: `nativeFetch`로 보조 LLM 호출
+3. 등장인물 에이전트: `nativeFetch`로 보조 LLM 호출
+4. 검수 에이전트: 별도 `nativeFetch`가 아니라 RisuAI의 현재 메인 LLM 호출이 담당
+
+따라서 실제 RP 생성 흐름은 4단계지만, Lite 플러그인 코드 안에서 직접 호출하는
+보조 LLM은 3번이다. GUI의 LLM 테스트는 공통 endpoint/credential 설정 검증용이므로
+에이전트별 호출을 반복하지 않고 1회만 수행한다.
 
 ---
 
