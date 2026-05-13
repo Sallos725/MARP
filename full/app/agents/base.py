@@ -27,6 +27,14 @@ class BaseAgent(ABC):
     def model(self) -> str:
         return self._cfg["model"]
 
+    @property
+    def temperature(self) -> float:
+        return self._cfg["temperature"]
+
+    @property
+    def max_tokens(self) -> int | None:
+        return self._cfg["max_tokens"]
+
     @abstractmethod
     def build_system_prompt(self, pipeline_context: dict) -> str:
         pass
@@ -48,7 +56,13 @@ class BaseAgent(ABC):
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
         }
-        payload = {"model": self.model, "messages": messages, "temperature": 0.7}
+        payload = {
+            "model": self.model,
+            "messages": messages,
+            "temperature": self.temperature,
+        }
+        if self.max_tokens is not None:
+            payload["max_tokens"] = self.max_tokens
 
         async with httpx.AsyncClient(timeout=timeout) as client:
             response = await client.post(

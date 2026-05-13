@@ -27,9 +27,12 @@ class GenerateResponse(BaseModel):
 
 
 class PublicConfigStatus(BaseModel):
+    default_provider: str
     default_base_url: str
     default_model: str
     default_api_key_set: bool
+    default_temperature: float
+    default_max_tokens: int | None
     context_window: int
     debug_mode: bool
     request_timeout: float
@@ -38,11 +41,17 @@ class PublicConfigStatus(BaseModel):
 class AgentStatus(BaseModel):
     name: str
     label: str
+    provider: str
     base_url: str
     model: str
+    temperature: float
+    max_tokens: int | None
+    provider_source: str
     base_url_source: str
     api_key_source: str
     model_source: str
+    temperature_source: str
+    max_tokens_source: str
     api_key_set: bool
     ready: bool
 
@@ -55,26 +64,59 @@ class StatusResponse(BaseModel):
     agents: list[AgentStatus]
 
 
+class LlmTestResult(BaseModel):
+    name: str
+    label: str
+    provider: str
+    base_url: str
+    example_url: str
+    model: str
+    success: bool
+    status_code: int | None = None
+    latency_ms: int | None = None
+    error: str = ""
+
+
+class LlmTestResponse(BaseModel):
+    success: bool
+    results: list[LlmTestResult]
+
+
 class ConfigModel(BaseModel):
+    default_provider: str = "openai-compatible"
     default_base_url: str = "https://api.openai.com/v1"
     default_api_key: str = ""
     default_model: str = "gpt-4o-mini"
+    default_temperature: float = 0.7
+    default_max_tokens: int | None = None
 
+    worldbuilding_provider: str = ""
     worldbuilding_base_url: str = ""
     worldbuilding_api_key: str = ""
     worldbuilding_model: str = ""
+    worldbuilding_temperature: float | None = None
+    worldbuilding_max_tokens: int | None = None
 
+    plot_provider: str = ""
     plot_base_url: str = ""
     plot_api_key: str = ""
     plot_model: str = ""
+    plot_temperature: float | None = None
+    plot_max_tokens: int | None = None
 
+    character_provider: str = ""
     character_base_url: str = ""
     character_api_key: str = ""
     character_model: str = ""
+    character_temperature: float | None = None
+    character_max_tokens: int | None = None
 
+    reviewer_provider: str = ""
     reviewer_base_url: str = ""
     reviewer_api_key: str = ""
     reviewer_model: str = ""
+    reviewer_temperature: float | None = None
+    reviewer_max_tokens: int | None = None
 
     context_window: int = 10
     debug_mode: bool = False

@@ -1,10 +1,17 @@
 from contextlib import asynccontextmanager
+from time import perf_counter
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import httpx
 
 from app import config_store
-from app.models import GenerateRequest, GenerateResponse, ConfigModel, StatusResponse
+from app.models import (
+    GenerateRequest,
+    GenerateResponse,
+    ConfigModel,
+    StatusResponse,
+    LlmTestResponse,
+)
 from app.pipeline import run_pipeline
 
 
@@ -42,14 +49,41 @@ async def status():
         version=app.version,
         ready=public["ready"],
         config={
+            "default_provider": public["default_provider"],
             "default_base_url": public["default_base_url"],
             "default_model": public["default_model"],
             "default_api_key_set": public["default_api_key_set"],
+            "default_temperature": public["default_temperature"],
+            "default_max_tokens": public["default_max_tokens"],
             "context_window": public["context_window"],
             "debug_mode": public["debug_mode"],
             "request_timeout": public["request_timeout"],
         },
         agents=public["agents"],
+    )
+
+
+@app.get("/test/llm", response_model=LlmTestResponse)
+async def test_llm(agent: str | None = None):
+    targets = config_store.AGENTS
+    if agent:
+        targets = tuple(item for item in targets if item[0] == agent)
+        if not targets:
+            raise HTTPException(status_code=404, detail=f"알 수 없는 에이전트: {agent}")
+
+    cfg = config_store.load()
+    timeout = min(float(cfg.get("request_timeout", 60.0)), 30.0)
+    results = []
+
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        for name, label in targets:
+            agent_cfg = config_store.get_agent_config(name)
+            result = await _test_llm_agent(client, name, label, agent_cfg)
+            results.append(result)
+
+    return LlmTestResponse(
+        success=all(result["success"] for result in results),
+        results=results,
     )
 
 
@@ -75,3 +109,52 @@ async def generate(request: GenerateRequest):
         )
     except httpx.RequestError as e:
         raise HTTPException(status_code=502, detail=f"LLM API 연결 실패: {e}")
+
+
+async def _test_llm_agent(
+    client: httpx.AsyncClient,
+    name: str,
+    label: str,
+    agent_cfg: dict,
+) -> dict:
+    base_url = str(agent_cfg["base_url"]).rstrip("/")
+    example_url = f"{base_url}/models"
+    started = perf_counter()
+
+    result = {
+        "name": name,
+        "label": label,
+        "provider": agent_cfg["provider"],
+        "base_url": agent_cfg["base_url"],
+        "example_url": example_url,
+        "model": agent_cfg["model"],
+        "success": False,
+        "status_code": None,
+        "latency_ms": None,
+        "error": "",
+    }
+
+    if not agent_cfg["api_key"]:
+        result["error"] = "API Key가 설정되지 않았습니다."
+        return result
+    if not base_url:
+        result["error"] = "Endpoint URL이 설정되지 않았습니다."
+        return result
+
+    try:
+        response = await client.get(
+            example_url,
+            headers={"Authorization": f"Bearer {agent_cfg['api_key']}"},
+        )
+        result["status_code"] = response.status_code
+        result["latency_ms"] = int((perf_counter() - started) * 1000)
+        if response.status_code < 400:
+            result["success"] = True
+        else:
+            error_text = response.text[:200]
+            result["error"] = f"HTTP {response.status_code}: {error_text}"
+    except httpx.RequestError as exc:
+        result["latency_ms"] = int((perf_counter() - started) * 1000)
+        result["error"] = str(exc)
+
+    return result
