@@ -329,6 +329,34 @@ end
 - **세계관/플롯/등장인물:** `simpleLLM():await()` — 경량, 빠름
 - **검수 에이전트:** `LLM()` 또는 `axLLM()` — 메인/대체 모델
 
+### Lite판 플러그인 GUI
+
+RisuAI Plugin API v3의 `registerSetting` + `showContainer('fullscreen')` 방식으로
+`MultiAgent Lite판 상태` 설정 화면을 제공한다.
+
+Lite판은 별도 FastAPI 사이드카가 없으므로 Full판의 Sidecar URL은 표시하지 않고,
+대신 “사이드카 없음” 상태와 LLM endpoint 설정을 보여준다.
+
+GUI에서 확인/수정하는 항목:
+- Provider 라벨
+- LLM endpoint base URL
+- 예시 URL: `{base_url}/chat/completions`
+- API Key 설정 여부
+- Model
+- Temperature
+- Max Tokens
+- Context Window
+- Lite판 동작 구조: 세계관/플롯/등장인물은 보조 LLM, 검수는 RisuAI 메인 모델
+
+연결 테스트:
+- **LLM 테스트**: `{base_url}/models`를 호출해 API Key와 endpoint 연결 상태를 확인한다.
+- **전체 테스트**: Lite판에서 가능한 전체 범위인 LLM 테스트와 동일하게 동작한다.
+
+정보 저장 정책:
+- API Key 입력칸에는 저장된 값을 다시 표시하지 않는다.
+- 저장 시 API Key 칸을 비워두면 기존 값을 유지한다.
+- Lite판에는 사이드카 테스트가 없다.
+
 ---
 
 ## 7. 미결 사항
