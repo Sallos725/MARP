@@ -140,9 +140,12 @@ API Key 원문은 반환하지 않고, 설정 여부만 boolean으로 반환한�
   "version": "0.1.0",
   "ready": true,
   "config": {
+    "default_provider": "openai-compatible",
     "default_base_url": "https://api.openai.com/v1",
     "default_model": "gpt-4o-mini",
     "default_api_key_set": true,
+    "default_temperature": 0.7,
+    "default_max_tokens": null,
     "context_window": 10,
     "debug_mode": false,
     "request_timeout": 60.0
@@ -151,13 +154,50 @@ API Key 원문은 반환하지 않고, 설정 여부만 boolean으로 반환한�
     {
       "name": "worldbuilding",
       "label": "세계관 에이전트",
+      "provider": "openai-compatible",
       "base_url": "https://api.openai.com/v1",
       "model": "gpt-4o-mini",
+      "temperature": 0.7,
+      "max_tokens": null,
+      "provider_source": "default",
       "base_url_source": "default",
       "api_key_source": "default",
       "model_source": "default",
+      "temperature_source": "default",
+      "max_tokens_source": "default",
       "api_key_set": true,
       "ready": true
+    }
+  ]
+}
+```
+
+### GET /test/llm
+
+Full판 서버가 저장된 LLM 설정으로 각 에이전트의 OpenAI-compatible `/models`
+엔드포인트를 호출해 연결 상태를 확인한다.
+API Key 원문은 반환하지 않는다.
+
+쿼리 파라미터:
+- `agent`: 선택. `worldbuilding`, `plot`, `character`, `reviewer` 중 하나.
+  생략 시 전체 에이전트를 테스트한다.
+
+**응답 예시:**
+```json
+{
+  "success": true,
+  "results": [
+    {
+      "name": "worldbuilding",
+      "label": "세계관 에이전트",
+      "provider": "openai-compatible",
+      "base_url": "https://api.openai.com/v1",
+      "example_url": "https://api.openai.com/v1/models",
+      "model": "gpt-4o-mini",
+      "success": true,
+      "status_code": 200,
+      "latency_ms": 320,
+      "error": ""
     }
   ]
 }
@@ -173,14 +213,16 @@ Full판 운영 대시보드를 표시한다.
 ### 화면 구성
 
 1. **개요**
-   - 서버 연결 상태
+   - Full판 사이드카 URL 및 연결 상태
    - 전체 실행 가능 여부
+   - Provider
+   - LLM endpoint base URL 및 예시 URL
    - 기본 API Key 설정 여부
-   - Reviewer 모델 설정 여부
 
 2. **파이프라인**
    - 세계관 → 플롯 → 등장인물 → 검수 에이전트 카드
-   - 에이전트별 모델, endpoint host, API Key 설정 여부
+   - 에이전트별 provider, endpoint, 예시 URL, API Key 설정 여부
+   - 에이전트별 모델, temperature, max tokens
    - 기본값 상속/개별 설정 여부
 
 3. **최근 실행**
@@ -190,15 +232,21 @@ Full판 운영 대시보드를 표시한다.
    - 디버그 모드 응답이 있을 때 현재 플러그인 세션 안에서만 상세 컨텍스트 표시
 
 4. **설정**
-   - Full판 서버 URL
-   - DEFAULT base URL/API Key/model
-   - 에이전트별 override
+   - Full판 사이드카 URL
+   - DEFAULT provider/base URL/API Key/model/temperature/max tokens
+   - 에이전트별 provider/base URL/API Key/model/temperature/max tokens override
    - context window, timeout, debug mode
 
 5. **도움말**
    - Full 서버와 Custom AI Provider 호출 구조
    - API Key 표시 정책
    - Docker 서버 점검 안내
+
+### 연결 테스트 버튼
+
+- **사이드카 테스트**: GUI에 설정된 Sidecar URL의 `/health`를 호출한다.
+- **LLM 테스트**: Sidecar의 `/test/llm`을 호출해 전체 에이전트 LLM 설정을 점검한다.
+- **전체 테스트**: Sidecar 테스트가 성공하면 LLM 테스트를 이어서 실행한다.
 
 ### 정보 저장 정책
 
@@ -213,28 +261,44 @@ Full판 운영 대시보드를 표시한다.
 
 ```env
 # 에이전트별 독립 설정 (미지정 시 DEFAULT 사용)
+DEFAULT_PROVIDER=openai-compatible
 DEFAULT_BASE_URL=https://api.openai.com/v1
 DEFAULT_API_KEY=sk-...
 DEFAULT_MODEL=gpt-4o-mini
+DEFAULT_TEMPERATURE=0.7
+DEFAULT_MAX_TOKENS=
 
+WORLDBUILDING_PROVIDER=
 WORLDBUILDING_BASE_URL=
 WORLDBUILDING_API_KEY=
 WORLDBUILDING_MODEL=
+WORLDBUILDING_TEMPERATURE=
+WORLDBUILDING_MAX_TOKENS=
 
+PLOT_PROVIDER=
 PLOT_BASE_URL=
 PLOT_API_KEY=
 PLOT_MODEL=
+PLOT_TEMPERATURE=
+PLOT_MAX_TOKENS=
 
+CHARACTER_PROVIDER=
 CHARACTER_BASE_URL=
 CHARACTER_API_KEY=
 CHARACTER_MODEL=
+CHARACTER_TEMPERATURE=
+CHARACTER_MAX_TOKENS=
 
+REVIEWER_PROVIDER=
 REVIEWER_BASE_URL=
 REVIEWER_API_KEY=
 REVIEWER_MODEL=gpt-4o
+REVIEWER_TEMPERATURE=
+REVIEWER_MAX_TOKENS=
 
 CONTEXT_WINDOW=10
 DEBUG_MODE=false
+REQUEST_TIMEOUT=60.0
 ```
 
 ---
