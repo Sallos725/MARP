@@ -128,6 +128,85 @@ pipeline_context = {
 
 서버 상태 확인용.
 
+### GET /status
+
+Full판 플러그인 GUI가 사용하는 공개 상태 API.
+API Key 원문은 반환하지 않고, 설정 여부만 boolean으로 반환한다.
+
+**응답 예시:**
+```json
+{
+  "status": "ok",
+  "version": "0.1.0",
+  "ready": true,
+  "config": {
+    "default_base_url": "https://api.openai.com/v1",
+    "default_model": "gpt-4o-mini",
+    "default_api_key_set": true,
+    "context_window": 10,
+    "debug_mode": false,
+    "request_timeout": 60.0
+  },
+  "agents": [
+    {
+      "name": "worldbuilding",
+      "label": "세계관 에이전트",
+      "base_url": "https://api.openai.com/v1",
+      "model": "gpt-4o-mini",
+      "base_url_source": "default",
+      "api_key_source": "default",
+      "model_source": "default",
+      "api_key_set": true,
+      "ready": true
+    }
+  ]
+}
+```
+
+---
+
+## 4-1. Full판 플러그인 GUI
+
+RisuAI Plugin API v3의 `registerSetting` + `showContainer('fullscreen')` 방식으로
+Full판 운영 대시보드를 표시한다.
+
+### 화면 구성
+
+1. **개요**
+   - 서버 연결 상태
+   - 전체 실행 가능 여부
+   - 기본 API Key 설정 여부
+   - Reviewer 모델 설정 여부
+
+2. **파이프라인**
+   - 세계관 → 플롯 → 등장인물 → 검수 에이전트 카드
+   - 에이전트별 모델, endpoint host, API Key 설정 여부
+   - 기본값 상속/개별 설정 여부
+
+3. **최근 실행**
+   - 마지막 요청 성공/실패
+   - 완료 시각, 소요 시간, HTTP 상태
+   - 입력/시스템/히스토리/응답 길이
+   - 디버그 모드 응답이 있을 때 현재 플러그인 세션 안에서만 상세 컨텍스트 표시
+
+4. **설정**
+   - Full판 서버 URL
+   - DEFAULT base URL/API Key/model
+   - 에이전트별 override
+   - context window, timeout, debug mode
+
+5. **도움말**
+   - Full 서버와 Custom AI Provider 호출 구조
+   - API Key 표시 정책
+   - Docker 서버 점검 안내
+
+### 정보 저장 정책
+
+- API Key 입력칸에는 저장된 값을 다시 표시하지 않는다.
+- 저장 시 API Key 칸을 비워두면 기존 값을 유지한다.
+- 최근 실행 기록은 원문 입력/응답을 저장하지 않고 길이, 성공 여부, 소요 시간 등 메타데이터만 저장한다.
+- 디버그 컨텍스트 원문은 `pluginStorage`에 저장하지 않고 현재 플러그인 세션 메모리에서만 표시한다.
+
 ---
 
 ## 5. 에이전트 설정 (Full판 .env)
