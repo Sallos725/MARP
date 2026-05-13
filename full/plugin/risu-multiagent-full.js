@@ -25,11 +25,14 @@
       return ((await Risuai.getArgument('server_url')) || 'http://localhost:8000').replace(/\/$/, '');
     }
 
+    let lastRunState = null;
+
     // ── Custom AI Provider 등록 ───────────────────────────────────────────────
 
     await Risuai.addProvider('MultiAgent-Full', async (args, abortSignal) => {
       const serverUrl = await getServerUrl();
       const messages  = args.prompt_chat || [];
+      const startedAt = Date.now();
 
       // OpenAI messages → /generate 요청 형식 변환
       const systemMsg    = messages.find(m => m.role === 'system');
@@ -38,6 +41,14 @@
       const userInput    = userMsgs.length ? userMsgs[userMsgs.length - 1].content : '';
       // 마지막 유저 메시지를 제외한 나머지를 히스토리로
       const chatHistory  = nonSystem.slice(0, -1).map(m => ({ role: m.role, content: m.content }));
+      const runBase = {
+        provider: 'MultiAgent-Full',
+        server_url: serverUrl,
+        started_at: new Date(startedAt).toISOString(),
+        input_chars: stringLength(userInput),
+        system_chars: stringLength(systemMsg ? systemMsg.content : ''),
+        history_messages: chatHistory.length,
+      };
 
       try {
         const res = await Risuai.nativeFetch(`${serverUrl}/generate`, {
@@ -54,15 +65,39 @@
 
         if (!res.ok) {
           const errText = await res.text().catch(() => '');
-          return { success: false, content: `서버 오류 ${res.status}: ${errText.slice(0, 200)}` };
+          const content = `서버 오류 ${res.status}: ${errText.slice(0, 200)}`;
+          await recordLastRun({
+            ...runBase,
+            success: false,
+            status_code: res.status,
+            duration_ms: Date.now() - startedAt,
+            error: content,
+          });
+          return { success: false, content };
         }
 
         const data = await res.json();
+        await recordLastRun({
+          ...runBase,
+          success: true,
+          status_code: res.status,
+          duration_ms: Date.now() - startedAt,
+          response_chars: stringLength(data.response),
+          debug_available: Boolean(data.debug),
+          debug: data.debug || null,
+        });
         return { success: true, content: data.response };
 
       } catch (err) {
-        if (err.name === 'AbortError') return { success: false, content: '요청이 취소되었습니다.' };
-        return { success: false, content: `연결 실패: ${err.message}` };
+        const content = err.name === 'AbortError' ? '요청이 취소되었습니다.' : `연결 실패: ${err.message}`;
+        await recordLastRun({
+          ...runBase,
+          success: false,
+          aborted: err.name === 'AbortError',
+          duration_ms: Date.now() - startedAt,
+          error: content,
+        });
+        return { success: false, content };
       }
     });
 
@@ -83,6 +118,7 @@
       const data = {
         status: null,
         config: {},
+        lastRun: await loadLastRun(),
         connected: false,
         statusError: '',
       };
@@ -116,6 +152,7 @@
       const connected = data.connected;
       const ready = Boolean(status?.ready);
       const agents = status?.agents || fallbackAgents(cfg);
+      const lastRun = data.lastRun || null;
 
       const v = (key, fallback = '') => {
         const val = cfg[key];
@@ -202,6 +239,8 @@ input[type=checkbox]{width:auto;margin-right:7px}
 .msg.err{display:block;background:#341515;color:#ff9b9b;border:1px solid #793333}
 .help-list{display:grid;gap:9px;font-size:.84rem;color:#c7ced9}
 .help-list li{margin-left:18px}
+.debug-block{white-space:pre-wrap;overflow:auto;max-height:220px;background:#0f1115;border:1px solid #303640;border-radius:7px;padding:10px;color:#d9e1ec;font-size:.78rem;line-height:1.5;margin-top:8px}
+.error-text{color:#ff9b9b;overflow-wrap:anywhere}
 .actions{position:fixed;left:0;right:0;bottom:0;background:rgba(16,17,20,.96);border-top:1px solid #2a2e36;padding:10px 16px}
 .actions-inner{max-width:1040px;margin:0 auto;display:flex;gap:8px;justify-content:flex-end}
 button{padding:9px 14px;border-radius:7px;border:1px solid #343944;background:#20242b;color:#eef2f7;cursor:pointer;font-size:.86rem;font-weight:650}
@@ -256,6 +295,7 @@ button.ghost{background:#15171b;color:#a8b0bd}
   <div class="tabs" role="tablist">
     <button class="tab-btn active" data-tab="overview">개요</button>
     <button class="tab-btn" data-tab="pipeline">파이프라인</button>
+    <button class="tab-btn" data-tab="recent">최근 실행</button>
     <button class="tab-btn" data-tab="settings">설정</button>
     <button class="tab-btn" data-tab="help">도움말</button>
   </div>
@@ -287,6 +327,10 @@ button.ghost{background:#15171b;color:#a8b0bd}
     <div class="agent-grid">
       ${agents.map(agentCard).join('')}
     </div>
+  </section>
+
+  <section id="tab-recent" class="panel">
+    ${lastRunPanel(lastRun)}
   </section>
 
   <section id="tab-settings" class="panel">
@@ -435,6 +479,60 @@ button.ghost{background:#15171b;color:#a8b0bd}
       return parts.length ? parts.join(', ') : '전체 기본값';
     }
 
+    function lastRunPanel(lastRun) {
+      if (!lastRun) {
+        return `
+          <div class="card">
+            <h2>최근 실행 기록 없음</h2>
+            <p>MultiAgent-Full Provider로 응답을 생성하면 이곳에 실행 결과가 표시됩니다.</p>
+          </div>`;
+      }
+
+      const debug = lastRun.debug;
+      return `
+        <div class="grid">
+          <div class="card">
+            <h2>마지막 요청</h2>
+            <div class="kv">
+              <div class="k">결과</div><div class="v"><span class="badge ${lastRun.success ? 'ok' : 'err'}">${lastRun.success ? '성공' : '실패'}</span></div>
+              <div class="k">완료 시각</div><div class="v">${escHtml(formatDateTime(lastRun.completed_at))}</div>
+              <div class="k">소요 시간</div><div class="v">${escHtml(formatDuration(lastRun.duration_ms))}</div>
+              <div class="k">서버</div><div class="v">${escHtml(lastRun.server_url || '-')}</div>
+              <div class="k">HTTP</div><div class="v">${escHtml(lastRun.status_code || '-')}</div>
+            </div>
+            ${lastRun.error ? `<div class="error-text" style="margin-top:10px">${escHtml(lastRun.error)}</div>` : ''}
+          </div>
+          <div class="card">
+            <h2>요청 규모</h2>
+            <div class="kv">
+              <div class="k">현재 입력</div><div class="v">${escHtml(lastRun.input_chars ?? '-')}자</div>
+              <div class="k">시스템</div><div class="v">${escHtml(lastRun.system_chars ?? '-')}자</div>
+              <div class="k">히스토리</div><div class="v">${escHtml(lastRun.history_messages ?? '-')}개 메시지</div>
+              <div class="k">응답</div><div class="v">${escHtml(lastRun.response_chars ?? '-')}자</div>
+              <div class="k">디버그</div><div class="v">${lastRun.debug_available ? '반환됨' : '없음'}</div>
+            </div>
+          </div>
+        </div>
+        ${debug ? `
+          <div class="card">
+            <h2>디버그 컨텍스트</h2>
+            ${debugBlock('세계관', debug.context_world)}
+            ${debugBlock('플롯', debug.context_plot)}
+            ${debugBlock('등장인물', debug.context_char)}
+            ${debugBlock('검수', debug.reviewer_notes)}
+          </div>` : ''}
+      `;
+    }
+
+    function debugBlock(label, text) {
+      if (!text) return '';
+      return `
+        <details>
+          <summary><span>${escHtml(label)}</span><span class="summary-note">펼쳐 보기</span></summary>
+          <pre class="debug-block">${escHtml(text)}</pre>
+        </details>`;
+    }
+
     function setupHandlers(data, serverUrl) {
       const initialConfig = data.config || {};
 
@@ -521,6 +619,48 @@ button.ghost{background:#15171b;color:#a8b0bd}
       setTimeout(() => {
         if (el.textContent === text) el.className = 'msg';
       }, 4000);
+    }
+
+    async function recordLastRun(run) {
+      const completedRun = {
+        completed_at: new Date().toISOString(),
+        ...run,
+      };
+      lastRunState = completedRun;
+
+      const persistedRun = { ...completedRun };
+      delete persistedRun.debug;
+
+      try {
+        await Risuai.pluginStorage.setItem('last_run', JSON.stringify(persistedRun));
+      } catch (_) {}
+    }
+
+    async function loadLastRun() {
+      if (lastRunState) return lastRunState;
+      try {
+        const raw = await Risuai.pluginStorage.getItem('last_run');
+        return raw ? JSON.parse(raw) : null;
+      } catch (_) {
+        return null;
+      }
+    }
+
+    function stringLength(value) {
+      return String(value || '').length;
+    }
+
+    function formatDateTime(value) {
+      if (!value) return '-';
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return value;
+      return date.toLocaleString();
+    }
+
+    function formatDuration(ms) {
+      if (!Number.isFinite(ms)) return '-';
+      if (ms < 1000) return `${ms}ms`;
+      return `${(ms / 1000).toFixed(1)}초`;
     }
 
     console.log('MultiAgent RP Full판 플러그인 v1.0.0 로드됨');
