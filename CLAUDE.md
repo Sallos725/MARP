@@ -22,8 +22,8 @@ RisuAI용 멀티 에이전트 RP 파이프라인.
 | | Lite판 | Full판 |
 |---|---|---|
 | 위치 | `lite/` | `full/` |
-| 동작 방식 | RisuAI Lua 내장 | FastAPI + Docker |
-| 모델 지정 | RisuAI 설정에 종속 | 엔드포인트/모델/키 자유 지정 |
+| 동작 방식 | RisuAI 플러그인 (.js, 브라우저) | FastAPI + Docker |
+| 모델 지정 | 플러그인 arg로 분석 에이전트 설정, 최종 응답은 RisuAI 메인 모델 | 엔드포인트/모델/키 완전 자유 지정 |
 | 대상 | 배포/공유용 | 홈서버 자가 운용용 |
 | 서버 필요 | 없음 | 있음 (Docker) |
 
@@ -39,27 +39,18 @@ risu-multiagent/
 │   ├── design.md               ← 설계 문서
 │   └── agent-prompts.md        ← 각 에이전트 프롬프트 설계
 │
-├── lite/                       ← Lite판 (RisuAI 내장)
-│   ├── build.ps1               ← 빌드 스크립트
-│   ├── lua/
-│   │   ├── 01_config.lua       ← 커스텀 엔드포인트 설정 (선택)
-│   │   ├── 02_pipeline.lua     ← 에이전트 순차 파이프라인
-│   │   ├── 03_agents.lua       ← 각 에이전트 호출 로직
-│   │   └── 04_output.lua       ← 응답 후처리
-│   ├── lorebook/
-│   │   └── agent_system_prompts.json
-│   ├── globalnote/
-│   │   └── 01_system.txt
-│   ├── regex/
-│   │   └── 001_cleanup.json
-│   └── risu/                   ← 빌드 출력 (직접 수정 금지)
+├── lite/                       ← Lite판 (RisuAI 플러그인, 브라우저)
+│   └── risu-multiagent.js      ← 단일 플러그인 파일 (Plugin API v3.0)
 │
 └── full/                       ← Full판 (FastAPI + Docker)
     ├── docker-compose.yml
     ├── Dockerfile
     ├── .env.example
     ├── requirements.txt
+    ├── plugin/
+    │   └── risu-multiagent-full.js  ← Full판 설정 GUI + Custom AI Provider 플러그인
     └── app/
+        ├── __init__.py
         ├── main.py             ← FastAPI 엔트리포인트
         ├── config.py           ← 설정 로드 (env)
         ├── pipeline.py         ← 순차 파이프라인 오케스트레이터
@@ -78,7 +69,7 @@ risu-multiagent/
 ## 개발 순서
 
 1. **Full판 먼저** 개발 — Python으로 파이프라인 로직 확정
-2. **Lite판** — Full판 로직을 Lua로 포팅
+2. **Lite판** — Full판 로직을 RisuAI Plugin JS로 포팅
 
 Full판이 검증된 뒤 Lite판을 만드세요. 반대로 하지 말 것.
 
@@ -97,10 +88,11 @@ Full판이 검증된 뒤 Lite판을 만드세요. 반대로 하지 말 것.
 
 ## Lite판 기술 스택
 
-- **Lua** (RisuAI 내장 Lua 5.4)
-- **RisuAI CBS** — 변수/조건 템플릿
-- RisuAI API: `LLM()`, `axLLM()`, `simpleLLM():await()`
-- 빌드: `build.ps1` (PowerShell)
+- **JavaScript** (RisuAI Plugin API v3.0, 브라우저 sandboxed iframe)
+- **`Risuai.addRisuReplacer('beforeRequest', ...)`** — LLM 호출 전 메시지 가로채기
+- **`Risuai.nativeFetch()`** — 분석 에이전트 API 호출
+- **`Risuai.getArgument()`** — 플러그인 설정값 읽기
+- 빌드 불필요 — 단일 `.js` 파일을 RisuAI Plugin Settings에서 Import
 
 ---
 
@@ -157,12 +149,11 @@ Full판이 검증된 뒤 Lite판을 만드세요. 반대로 하지 말 것.
 ## 현재 상태
 
 - [x] 프로젝트 구조 scaffold
-- [ ] Full판 — BaseAgent, config, models 구현
-- [ ] Full판 — 4개 에이전트 구현
-- [ ] Full판 — pipeline.py 구현
-- [ ] Full판 — FastAPI main.py 구현
-- [ ] Full판 — Docker 설정
+- [x] Full판 — BaseAgent, config, models 구현
+- [x] Full판 — 4개 에이전트 구현
+- [x] Full판 — pipeline.py 구현
+- [x] Full판 — FastAPI main.py 구현
+- [x] Full판 — Docker 설정
 - [ ] Full판 — 테스트
-- [ ] Lite판 — Lua 파이프라인 포팅
-- [ ] Lite판 — 로어북/글로벌노트 작성
-- [ ] Lite판 — 빌드 스크립트
+- [x] Lite판 — risu-multiagent.js 구현 (Plugin API v3.0)
+- [ ] Lite판 — 실기기 테스트

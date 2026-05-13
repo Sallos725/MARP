@@ -1,0 +1,12 @@
+services:
+  risu-multiagent:
+    build: .
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    volumes:
+      - ./data:/data
+    environment:
+      - CONFIG_PATH=/data/config.json
+    restart: unless-stopped
