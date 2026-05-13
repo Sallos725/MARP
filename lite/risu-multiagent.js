@@ -2,9 +2,12 @@
 //@display-name MultiAgent RP Pipeline
 //@api 3.0
 //@version 1.0.0
+//@arg agent_provider string Analysis agent provider label. e.g. openai-compatible
 //@arg agent_base_url string Analysis agent API base URL (OpenAI-compatible). e.g. https://api.openai.com/v1
 //@arg agent_api_key string Analysis agent API key
 //@arg agent_model string Analysis agent model. e.g. gpt-4o-mini
+//@arg agent_temperature string Analysis agent temperature (default: 0.7)
+//@arg agent_max_tokens string Analysis agent max tokens (blank = provider default)
 //@arg context_window int Recent messages per agent (default: 10)
 //@link https://github.com/your-repo/risu-multiagent Documentation
 
@@ -26,23 +29,41 @@
     // ── 설정 로드 ─────────────────────────────────────────────────────────────
 
     async function getConfig() {
-      const baseUrl = (await Risuai.getArgument('agent_base_url')) || 'https://api.openai.com/v1';
+      const provider = (await Risuai.getArgument('agent_provider')) || 'openai-compatible';
+      const baseUrl = normalizeUrl((await Risuai.getArgument('agent_base_url')) || 'https://api.openai.com/v1');
       const apiKey  = (await Risuai.getArgument('agent_api_key'))  || '';
       const model   = (await Risuai.getArgument('agent_model'))    || 'gpt-4o-mini';
+      const temperature = parseFloat((await Risuai.getArgument('agent_temperature')) || '0.7');
+      const maxTokens = parseOptionalInt(await Risuai.getArgument('agent_max_tokens'));
       const window  = Math.max(1, parseInt((await Risuai.getArgument('context_window')) || '10') || 10);
-      return { baseUrl, apiKey, model, window };
+      return {
+        provider,
+        baseUrl,
+        apiKey,
+        model,
+        temperature: Number.isFinite(temperature) ? temperature : 0.7,
+        maxTokens,
+        window,
+      };
     }
 
     // ── LLM 호출 헬퍼 ─────────────────────────────────────────────────────────
 
-    async function callAgent(baseUrl, apiKey, model, messages) {
-      const res = await Risuai.nativeFetch(`${baseUrl}/chat/completions`, {
+    async function callAgent(conf, messages) {
+      const payload = {
+        model: conf.model,
+        messages,
+        temperature: conf.temperature,
+      };
+      if (conf.maxTokens !== null) payload.max_tokens = conf.maxTokens;
+
+      const res = await Risuai.nativeFetch(`${conf.baseUrl}/chat/completions`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`,
+          'Authorization': `Bearer ${conf.apiKey}`,
         },
-        body: JSON.stringify({ model, messages, temperature: 0.7 }),
+        body: JSON.stringify(payload),
       });
 
       if (!res.ok) {
@@ -183,6 +204,322 @@
       );
     }
 
+    // ── 설정 GUI ──────────────────────────────────────────────────────────────
+
+    async function openLiteDashboard() {
+      const conf = await getConfig();
+      document.body.innerHTML = buildLiteUI(conf);
+      setupLiteHandlers(conf);
+      await Risuai.showContainer('fullscreen');
+    }
+
+    Risuai.registerSetting('MultiAgent Lite판 상태', openLiteDashboard, 'Lite', 'html');
+
+    function buildLiteUI(conf) {
+      return `<!DOCTYPE html><html><head><meta charset="utf-8">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#101114;color:#eceff4;min-height:100vh;line-height:1.45}
+.wrap{max-width:920px;margin:0 auto;padding:22px 16px 84px}
+.top{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:16px}
+h1{font-size:1.34rem;font-weight:720;letter-spacing:0;margin-bottom:4px}
+.subtitle{color:#98a2b3;font-size:.84rem}
+.header-actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+.status-strip{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:16px}
+.metric{background:#191b20;border:1px solid #292d35;border-radius:8px;padding:12px;min-height:72px}
+.metric-label{font-size:.72rem;color:#8d96a5;margin-bottom:5px}
+.metric-value{font-size:.92rem;font-weight:680;overflow-wrap:anywhere}
+.metric-sub{font-size:.74rem;color:#a8b0bd;margin-top:2px;overflow-wrap:anywhere}
+.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.card{background:#191b20;border:1px solid #292d35;border-radius:8px;padding:14px;margin-bottom:12px}
+.card h2{font-size:.91rem;margin-bottom:10px;color:#f2f4f7}
+.card p{font-size:.82rem;color:#a8b0bd}
+.kv{display:grid;grid-template-columns:110px minmax(0,1fr);gap:6px 8px;font-size:.8rem}
+.k{color:#8792a2}.v{color:#dde3ec;overflow-wrap:anywhere}
+.field{margin-bottom:10px}
+label{display:block;font-size:.75rem;color:#9aa4b2;margin-bottom:4px}
+input{width:100%;padding:9px 10px;border-radius:6px;border:1px solid #343944;background:#0f1115;color:#eef2f7;font-size:.86rem}
+input:focus{outline:none;border-color:#5585d9}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.example-url{font-size:.73rem;color:#8d96a5;background:#111318;border:1px solid #272c34;border-radius:6px;padding:7px 9px;margin:-3px 0 10px;overflow-wrap:anywhere}
+.msg{font-size:.82rem;padding:10px 12px;border-radius:8px;margin-bottom:12px;display:none}
+.msg.ok{display:block;background:#10291e;color:#7ee2a8;border:1px solid #1d6b45}
+.msg.err{display:block;background:#341515;color:#ff9b9b;border:1px solid #793333}
+.badge{display:inline-flex;align-items:center;border-radius:999px;padding:3px 8px;font-size:.72rem;font-weight:680}
+.badge.ok{background:#123323;color:#6ee7a8}.badge.err{background:#3a1717;color:#ff8a8a}.badge.neutral{background:#27313c;color:#a8c7e6}
+.error-text{color:#ff9b9b;overflow-wrap:anywhere}
+.help-list{display:grid;gap:9px;font-size:.84rem;color:#c7ced9}.help-list li{margin-left:18px}
+.actions{position:fixed;left:0;right:0;bottom:0;background:rgba(16,17,20,.96);border-top:1px solid #2a2e36;padding:10px 16px}
+.actions-inner{max-width:920px;margin:0 auto;display:flex;gap:8px;justify-content:flex-end}
+button{padding:9px 14px;border-radius:7px;border:1px solid #343944;background:#20242b;color:#eef2f7;cursor:pointer;font-size:.86rem;font-weight:650}
+button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#2f6fed;color:#fff}button.primary:hover{background:#275fce}button.ghost{background:#15171b;color:#a8b0bd}
+@media (max-width: 760px){.top{display:block}.header-actions{justify-content:flex-start;margin-top:12px}.status-strip,.grid,.row2{grid-template-columns:1fr}}
+</style></head><body>
+<div class="wrap">
+  <div class="top">
+    <div>
+      <h1>MultiAgent RP Lite판</h1>
+      <p class="subtitle">RisuAI 내부에서 보조 분석 에이전트를 실행합니다. 별도 사이드카 서버는 없습니다.</p>
+    </div>
+    <div class="header-actions">
+      <button id="llm-test-btn">LLM 테스트</button>
+      <button id="all-test-btn" class="primary">전체 테스트</button>
+    </div>
+  </div>
+
+  <div class="status-strip">
+    <div class="metric">
+      <div class="metric-label">사이드카</div>
+      <div class="metric-value">없음</div>
+      <div class="metric-sub">Lite판은 RisuAI 플러그인 내부 실행</div>
+    </div>
+    <div class="metric">
+      <div class="metric-label">Provider</div>
+      <div class="metric-value">${escHtml(conf.provider)}</div>
+      <div class="metric-sub">${escHtml(conf.model)}</div>
+    </div>
+    <div class="metric">
+      <div class="metric-label">Endpoint</div>
+      <div class="metric-value">${escHtml(formatEndpoint(conf.baseUrl))}</div>
+      <div class="metric-sub">${escHtml(exampleChatUrl(conf.baseUrl))}</div>
+    </div>
+    <div class="metric">
+      <div class="metric-label">API Key</div>
+      <div class="metric-value">${conf.apiKey ? '설정됨' : '없음'}</div>
+      <div class="metric-sub">GUI에는 원문을 표시하지 않음</div>
+    </div>
+  </div>
+
+  <div id="msg" class="msg"></div>
+  <div id="test-results"></div>
+
+  <div class="grid">
+    <div class="card">
+      <h2>현재 LLM 설정</h2>
+      <div class="kv">
+        <div class="k">Provider</div><div class="v">${escHtml(conf.provider)}</div>
+        <div class="k">Endpoint</div><div class="v">${escHtml(conf.baseUrl)}</div>
+        <div class="k">예시 URL</div><div class="v">${escHtml(exampleChatUrl(conf.baseUrl))}</div>
+        <div class="k">API Key</div><div class="v">${conf.apiKey ? '설정됨' : '없음'}</div>
+        <div class="k">Model</div><div class="v">${escHtml(conf.model)}</div>
+        <div class="k">Temperature</div><div class="v">${escHtml(conf.temperature)}</div>
+        <div class="k">Max Tokens</div><div class="v">${escHtml(conf.maxTokens ?? '제한 없음')}</div>
+        <div class="k">Context</div><div class="v">${escHtml(conf.window)}개 메시지</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>동작 구조</h2>
+      <div class="kv">
+        <div class="k">세계관</div><div class="v">보조 LLM 호출</div>
+        <div class="k">플롯</div><div class="v">보조 LLM 호출</div>
+        <div class="k">등장인물</div><div class="v">보조 LLM 호출</div>
+        <div class="k">검수</div><div class="v">RisuAI 현재 메인 모델</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>설정</h2>
+    <div class="field">
+      <label for="agent_provider">Provider</label>
+      <input id="agent_provider" type="text" value="${escHtml(conf.provider)}" placeholder="openai-compatible">
+    </div>
+    <div class="field">
+      <label for="agent_base_url">Endpoint Base URL</label>
+      <input id="agent_base_url" type="text" value="${escHtml(conf.baseUrl)}" placeholder="https://api.openai.com/v1">
+    </div>
+    <div class="example-url">예시 URL: ${escHtml(exampleChatUrl(conf.baseUrl))}</div>
+    <div class="field">
+      <label for="agent_api_key">API Key</label>
+      <input id="agent_api_key" type="password" value="" placeholder="${conf.apiKey ? '설정됨 - 비워두면 유지' : '입력 필요'}" autocomplete="off">
+    </div>
+    <div class="field">
+      <label for="agent_model">Model</label>
+      <input id="agent_model" type="text" value="${escHtml(conf.model)}" placeholder="gpt-4o-mini">
+    </div>
+    <div class="row2">
+      <div class="field">
+        <label for="agent_temperature">Temperature</label>
+        <input id="agent_temperature" type="number" value="${escHtml(conf.temperature)}" placeholder="0.7">
+      </div>
+      <div class="field">
+        <label for="agent_max_tokens">Max Tokens</label>
+        <input id="agent_max_tokens" type="number" value="${escHtml(conf.maxTokens ?? '')}" placeholder="비우면 provider 기본값">
+      </div>
+    </div>
+    <div class="field">
+      <label for="context_window">Context Window</label>
+      <input id="context_window" type="number" min="1" max="50" value="${escHtml(conf.window)}">
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>도움말</h2>
+    <ul class="help-list">
+      <li>Lite판은 별도 FastAPI 사이드카 없이 RisuAI 플러그인 안에서 보조 에이전트 3개를 호출합니다.</li>
+      <li>Endpoint Base URL은 OpenAI-compatible API의 /v1 주소입니다. 예시는 https://api.openai.com/v1 입니다.</li>
+      <li>API Key 입력칸은 저장된 값을 다시 표시하지 않습니다. 빈칸으로 저장하면 기존 값을 유지합니다.</li>
+      <li>전체 테스트는 Lite판에서 가능한 전체 범위인 LLM 연결 테스트를 실행합니다.</li>
+    </ul>
+  </div>
+</div>
+
+<div class="actions">
+  <div class="actions-inner">
+    <button id="close-btn" class="ghost">닫기</button>
+    <button id="save-btn" class="primary">저장</button>
+  </div>
+</div>
+</body></html>`;
+    }
+
+    function setupLiteHandlers(initialConf) {
+      document.getElementById('llm-test-btn')?.addEventListener('click', testLiteLlm);
+      document.getElementById('all-test-btn')?.addEventListener('click', testLiteLlm);
+      document.getElementById('save-btn')?.addEventListener('click', async () => {
+        try {
+          const next = collectLiteConfig(initialConf);
+          await saveLiteConfig(next);
+          showMsg('저장 완료', true);
+        } catch (err) {
+          showMsg(`저장 오류: ${err.message}`, false);
+        }
+      });
+      document.getElementById('close-btn')?.addEventListener('click', async () => {
+        await Risuai.hideContainer();
+      });
+    }
+
+    function collectLiteConfig(initialConf) {
+      return {
+        provider: getInputValue('agent_provider') || 'openai-compatible',
+        baseUrl: normalizeUrl(getInputValue('agent_base_url') || 'https://api.openai.com/v1'),
+        apiKey: getInputValue('agent_api_key') || initialConf.apiKey || '',
+        model: getInputValue('agent_model') || 'gpt-4o-mini',
+        temperature: requiredFloat('agent_temperature', 0.7),
+        maxTokens: parseOptionalInt(getInputValue('agent_max_tokens')),
+        window: Math.max(1, parseInt(getInputValue('context_window')) || 10),
+      };
+    }
+
+    async function saveLiteConfig(conf) {
+      await Risuai.setArgument('agent_provider', conf.provider);
+      await Risuai.setArgument('agent_base_url', conf.baseUrl);
+      await Risuai.setArgument('agent_api_key', conf.apiKey);
+      await Risuai.setArgument('agent_model', conf.model);
+      await Risuai.setArgument('agent_temperature', String(conf.temperature));
+      await Risuai.setArgument('agent_max_tokens', conf.maxTokens === null ? '' : String(conf.maxTokens));
+      await Risuai.setArgument('context_window', String(conf.window));
+    }
+
+    async function testLiteLlm() {
+      const conf = {
+        provider: getInputValue('agent_provider') || 'openai-compatible',
+        baseUrl: normalizeUrl(getInputValue('agent_base_url') || 'https://api.openai.com/v1'),
+        apiKey: getInputValue('agent_api_key') || (await Risuai.getArgument('agent_api_key')) || '',
+        model: getInputValue('agent_model') || 'gpt-4o-mini',
+      };
+
+      if (!conf.apiKey) {
+        showMsg('API Key가 설정되지 않았습니다.', false);
+        setTestResults(testResultHtml(conf, false, null, null, 'API Key가 설정되지 않았습니다.'));
+        return;
+      }
+
+      const started = Date.now();
+      try {
+        const res = await Risuai.nativeFetch(`${conf.baseUrl}/models`, {
+          method: 'GET',
+          headers: { 'Authorization': `Bearer ${conf.apiKey}` },
+        });
+        const latency = Date.now() - started;
+        if (res.ok) {
+          showMsg('LLM 연결 테스트 성공', true);
+          setTestResults(testResultHtml(conf, true, res.status, latency, ''));
+        } else {
+          const text = await res.text().catch(() => '');
+          showMsg(`LLM 연결 테스트 실패: HTTP ${res.status}`, false);
+          setTestResults(testResultHtml(conf, false, res.status, latency, text.slice(0, 180)));
+        }
+      } catch (err) {
+        showMsg(`LLM 연결 테스트 실패: ${err.message}`, false);
+        setTestResults(testResultHtml(conf, false, null, Date.now() - started, err.message));
+      }
+    }
+
+    function testResultHtml(conf, success, status, latency, error) {
+      return `
+        <div class="card">
+          <h2>LLM 연결 테스트</h2>
+          <div class="kv">
+            <div class="k">결과</div><div class="v"><span class="badge ${success ? 'ok' : 'err'}">${success ? '성공' : '실패'}</span></div>
+            <div class="k">Provider</div><div class="v">${escHtml(conf.provider)}</div>
+            <div class="k">Model</div><div class="v">${escHtml(conf.model)}</div>
+            <div class="k">URL</div><div class="v">${escHtml(`${conf.baseUrl}/models`)}</div>
+            <div class="k">HTTP</div><div class="v">${escHtml(status ?? '-')}</div>
+            <div class="k">Latency</div><div class="v">${escHtml(latency ?? '-')}ms</div>
+          </div>
+          ${error ? `<div class="error-text" style="margin-top:10px">${escHtml(error)}</div>` : ''}
+        </div>`;
+    }
+
+    function setTestResults(html) {
+      const el = document.getElementById('test-results');
+      if (el) el.innerHTML = html;
+    }
+
+    function showMsg(text, isOk) {
+      const el = document.getElementById('msg');
+      if (!el) return;
+      el.textContent = text;
+      el.className = `msg ${isOk ? 'ok' : 'err'}`;
+      setTimeout(() => {
+        if (el.textContent === text) el.className = 'msg';
+      }, 4000);
+    }
+
+    function getInputValue(id) {
+      return document.getElementById(id)?.value?.trim() || '';
+    }
+
+    function normalizeUrl(url) {
+      return String(url || 'https://api.openai.com/v1').replace(/\/$/, '');
+    }
+
+    function exampleChatUrl(baseUrl) {
+      return `${normalizeUrl(baseUrl)}/chat/completions`;
+    }
+
+    function formatEndpoint(baseUrl) {
+      try {
+        const url = new URL(baseUrl);
+        return url.host || baseUrl;
+      } catch (_) {
+        return baseUrl || '-';
+      }
+    }
+
+    function parseOptionalInt(value) {
+      const raw = String(value || '').trim();
+      if (!raw) return null;
+      const parsed = parseInt(raw);
+      return Number.isFinite(parsed) ? parsed : null;
+    }
+
+    function requiredFloat(id, fallback) {
+      const parsed = parseFloat(getInputValue(id));
+      return Number.isFinite(parsed) ? parsed : fallback;
+    }
+
+    function escHtml(str) {
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+    }
+
     // ── beforeRequest 훅 등록 ─────────────────────────────────────────────────
 
     Risuai.addRisuReplacer('beforeRequest', async (messages, type) => {
@@ -200,19 +537,19 @@
 
         // 1. 세계관 에이전트
         const contextWorld = await callAgent(
-          conf.baseUrl, conf.apiKey, conf.model,
+          conf,
           buildWorldPrompt(systemContent, history, userInput)
         );
 
         // 2. 플롯 에이전트
         const contextPlot = await callAgent(
-          conf.baseUrl, conf.apiKey, conf.model,
+          conf,
           buildPlotPrompt(contextWorld, history, userInput)
         );
 
         // 3. 캐릭터 에이전트
         const contextChar = await callAgent(
-          conf.baseUrl, conf.apiKey, conf.model,
+          conf,
           buildCharPrompt(systemContent, contextWorld, contextPlot, history, userInput)
         );
 
