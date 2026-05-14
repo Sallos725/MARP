@@ -153,10 +153,12 @@
       await Risuai.showContainer('fullscreen');
     }
 
-    Risuai.registerSetting('MultiAgent Full판 상태', openDashboard, 'MA', 'html');
+    const menuIcon = '<span style="display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;line-height:1;text-align:center;font-size:10px;font-weight:700;letter-spacing:0;color:inherit;">MA</span>';
+
+    Risuai.registerSetting('MultiAgent Full판 상태', openDashboard, menuIcon, 'html');
     await Risuai.registerButton({
       name: 'MultiAgent Full',
-      icon: 'MA',
+      icon: menuIcon,
       iconType: 'html',
       location: 'hamburger',
     }, openDashboard);
