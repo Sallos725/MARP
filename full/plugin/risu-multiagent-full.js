@@ -3,7 +3,6 @@
 //@api 3.0
 //@version 2.0.0
 //@arg server_url string Full판 서버 URL (e.g. http://localhost:6009 or https://example.com/multi-agent)
-//@link https://github.com/your-repo/risu-multiagent Documentation
 
 /**
  * MultiAgent RP Pipeline — Full판 플러그인 (RisuAI Plugin API v3.0)

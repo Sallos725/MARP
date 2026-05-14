@@ -3,13 +3,12 @@
 //@api 3.0
 //@version 1.0.0
 //@arg agent_provider string Analysis agent provider label. e.g. openai
-//@arg agent_base_url string Analysis agent API base URL. e.g. https://api.openai.com/v1 or https://api.anthropic.com/v1
+//@arg agent_base_url string Analysis agent API base URL. e.g. https://api.openai.com/v1, https://api.anthropic.com/v1, or Vertex AI OpenAI-compatible endpoint
 //@arg agent_api_key string Analysis agent API key
 //@arg agent_model string Analysis agent model. e.g. gpt-4o-mini
 //@arg agent_temperature string Analysis agent temperature (default: 0.7)
 //@arg agent_max_tokens string Analysis agent max tokens (blank = provider default)
 //@arg context_window int Recent messages per agent (default: 10)
-//@link https://github.com/your-repo/risu-multiagent Documentation
 
 /**
  * MultiAgent RP Pipeline — RisuAI Plugin (Browser, API v3.0)
@@ -686,8 +685,8 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
           model: 'claude-3-5-sonnet-latest',
         },
         'vertex-ai': {
-          baseUrl: 'https://LOCATION-aiplatform.googleapis.com/v1/projects/PROJECT_ID/locations/LOCATION/endpoints/openapi',
-          model: 'google/gemini-1.5-pro',
+          baseUrl: 'https://aiplatform.googleapis.com/v1/projects/PROJECT_ID/locations/global/endpoints/openapi',
+          model: 'google/gemini-2.5-flash',
         },
         google: {
           baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
