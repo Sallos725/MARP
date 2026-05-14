@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
-import httpx
 from app import config_store
+from app.llm_client import call_llm
 
 
 class BaseAgent(ABC):
@@ -52,26 +52,7 @@ class BaseAgent(ABC):
 
     async def _call_llm(self, messages: list[dict]) -> str:
         timeout = float(config_store.load().get("request_timeout", 60.0))
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json",
-        }
-        payload = {
-            "model": self.model,
-            "messages": messages,
-            "temperature": self.temperature,
-        }
-        if self.max_tokens is not None:
-            payload["max_tokens"] = self.max_tokens
-
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            response = await client.post(
-                f"{self.base_url}/chat/completions",
-                headers=headers,
-                json=payload,
-            )
-            response.raise_for_status()
-            return response.json()["choices"][0]["message"]["content"]
+        return await call_llm(self._cfg, messages, timeout)
 
     def _format_history(self, pipeline_context: dict) -> str:
         history = pipeline_context.get("chat_history", [])

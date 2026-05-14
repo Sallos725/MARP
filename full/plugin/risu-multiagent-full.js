@@ -344,7 +344,7 @@ button.ghost{background:#15171b;color:#a8b0bd}
     <div class="header-actions">
       <button id="refresh-btn" class="ghost">새로고침</button>
       <button id="sidecar-test-btn">사이드카 테스트</button>
-      <button id="llm-test-btn">LLM 테스트</button>
+      <button id="llm-test-btn">LLM 인증 테스트</button>
       <button id="all-test-btn" class="primary">전체 테스트</button>
     </div>
   </div>
@@ -478,6 +478,7 @@ button.ghost{background:#15171b;color:#a8b0bd}
         <li>Full판의 Sidecar URL은 분석 파이프라인을 호스팅하는 FastAPI 서버 주소입니다. 예시는 http://localhost:6009 입니다.</li>
         <li>LLM Endpoint Base URL은 분석 에이전트가 호출할 OpenAI-compatible API의 /v1 주소입니다.</li>
         <li>API Key 입력칸은 저장된 값을 다시 표시하지 않습니다. 빈칸으로 두면 기존 값이 유지됩니다.</li>
+        <li>LLM 인증 테스트는 생성 호출 없이 provider별 인증/모델 조회 경로만 확인합니다. 실제 분석은 토큰을 사용합니다.</li>
         <li>분석 실패 시에도 채팅은 막히지 않습니다. 원본 프롬프트가 그대로 메인 모델에 전달됩니다.</li>
         <li>디버그 모드를 켜면 최근 분석 탭에서 각 에이전트 출력을 펼쳐 볼 수 있습니다.</li>
       </ul>
@@ -963,24 +964,24 @@ button.ghost{background:#15171b;color:#a8b0bd}
       try {
         const res = await Risuai.nativeFetch(`${currentServerUrl}/test/llm`, { method: 'GET' });
         if (!res.ok) {
-          showMsg(`LLM 테스트 호출 실패: HTTP ${res.status}`, false);
+          showMsg(`LLM 인증 테스트 호출 실패: HTTP ${res.status}`, false);
           setTestResults(`
             <div class="card">
-              <h2>LLM 테스트</h2>
+              <h2>LLM 인증 테스트</h2>
               <div class="error-text">HTTP ${escHtml(res.status)}</div>
             </div>`);
           return false;
         }
 
         const data = await res.json();
-        showMsg(data.success ? 'LLM 연결 테스트 성공' : 'LLM 연결 테스트 실패', data.success);
+        showMsg(data.success ? 'LLM 인증 테스트 성공' : 'LLM 인증 테스트 실패', data.success);
         setTestResults(renderLlmTestResults(data));
         return data.success;
       } catch (err) {
-        showMsg(`LLM 테스트 실패: ${err.message}`, false);
+        showMsg(`LLM 인증 테스트 실패: ${err.message}`, false);
         setTestResults(`
           <div class="card">
-            <h2>LLM 테스트</h2>
+            <h2>LLM 인증 테스트</h2>
             <div class="error-text">${escHtml(err.message)}</div>
           </div>`);
         return false;
@@ -997,7 +998,7 @@ button.ghost{background:#15171b;color:#a8b0bd}
       const results = data.results || [];
       return `
         <div class="card">
-          <h2>LLM 연결 테스트</h2>
+          <h2>LLM 인증 테스트</h2>
           <div class="test-grid">
             ${results.map(result => `
               <div class="test-card">

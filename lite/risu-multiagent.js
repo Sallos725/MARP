@@ -3,7 +3,7 @@
 //@api 3.0
 //@version 1.0.0
 //@arg agent_provider string Analysis agent provider label. e.g. openai
-//@arg agent_base_url string Analysis agent API base URL (OpenAI-compatible). e.g. https://api.openai.com/v1
+//@arg agent_base_url string Analysis agent API base URL. e.g. https://api.openai.com/v1 or https://api.anthropic.com/v1
 //@arg agent_api_key string Analysis agent API key
 //@arg agent_model string Analysis agent model. e.g. gpt-4o-mini
 //@arg agent_temperature string Analysis agent temperature (default: 0.7)
@@ -25,6 +25,7 @@
 
 (async () => {
   try {
+    let vertexTokenCache = null;
 
     // ── 설정 로드 ─────────────────────────────────────────────────────────────
 
@@ -50,10 +51,16 @@
     // ── LLM 호출 헬퍼 ─────────────────────────────────────────────────────────
 
     async function callAgent(conf, messages) {
-      if (isVertexProvider(conf.provider)) {
-        throw new Error('Lite판은 Vertex AI JSON credential 저장/검증만 지원합니다. 실제 Vertex AI 호출은 Full판 어댑터가 필요합니다.');
+      if (isAnthropicProvider(conf.provider)) {
+        return callAnthropicAgent(conf, messages);
       }
+      if (isVertexProvider(conf.provider)) {
+        return callVertexAgent(conf, messages);
+      }
+      return callOpenAICompatibleAgent(conf, messages);
+    }
 
+    async function callOpenAICompatibleAgent(conf, messages) {
       const payload = {
         model: conf.model,
         messages,
@@ -77,6 +84,88 @@
 
       const data = await res.json();
       return data.choices[0].message.content;
+    }
+
+    async function callAnthropicAgent(conf, messages) {
+      const { system, anthropicMessages } = toAnthropicMessages(messages);
+      const payload = {
+        model: conf.model,
+        messages: anthropicMessages,
+        temperature: conf.temperature,
+        max_tokens: conf.maxTokens || 1024,
+      };
+      if (system) payload.system = system;
+
+      const res = await Risuai.nativeFetch(`${conf.baseUrl}/messages`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': conf.apiKey,
+          'anthropic-version': '2023-06-01',
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) {
+        const errText = await res.text().catch(() => '');
+        throw new Error(`Anthropic API ${res.status}: ${errText.slice(0, 120)}`);
+      }
+
+      const data = await res.json();
+      return extractAnthropicText(data);
+    }
+
+    async function callVertexAgent(conf, messages) {
+      const accessToken = await getVertexAccessToken(conf.apiKey);
+      const payload = {
+        model: conf.model,
+        messages,
+        temperature: conf.temperature,
+      };
+      if (conf.maxTokens !== null) payload.max_tokens = conf.maxTokens;
+
+      const res = await Risuai.nativeFetch(`${conf.baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) {
+        const errText = await res.text().catch(() => '');
+        throw new Error(`Vertex AI API ${res.status}: ${errText.slice(0, 120)}`);
+      }
+
+      const data = await res.json();
+      return data.choices[0].message.content;
+    }
+
+    function toAnthropicMessages(messages) {
+      const systemParts = [];
+      const anthropicMessages = [];
+      for (const msg of messages) {
+        if (msg.role === 'system') {
+          if (msg.content) systemParts.push(String(msg.content));
+        } else if (msg.role === 'user' || msg.role === 'assistant') {
+          anthropicMessages.push({ role: msg.role, content: String(msg.content || '') });
+        }
+      }
+      if (!anthropicMessages.length) throw new Error('Anthropic 호출에는 user 또는 assistant 메시지가 필요합니다.');
+      return {
+        system: systemParts.join('\n\n'),
+        anthropicMessages,
+      };
+    }
+
+    function extractAnthropicText(data) {
+      const parts = (data.content || [])
+        .filter(block => block && block.type === 'text')
+        .map(block => block.text || '')
+        .filter(Boolean);
+      if (!parts.length) throw new Error('Anthropic 응답에서 text content를 찾을 수 없습니다.');
+      return parts.join('\n').trim();
     }
 
     // ── 메시지 유틸 ───────────────────────────────────────────────────────────
@@ -278,7 +367,7 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
       <p class="subtitle">RisuAI 내부에서 보조 분석 에이전트를 실행합니다. 별도 사이드카 서버는 없습니다.</p>
     </div>
     <div class="header-actions">
-      <button id="llm-test-btn">LLM 테스트</button>
+      <button id="llm-test-btn">LLM 인증 테스트</button>
       <button id="all-test-btn" class="primary">전체 테스트</button>
     </div>
   </div>
@@ -297,7 +386,7 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
     <div class="metric">
       <div class="metric-label">Endpoint</div>
       <div class="metric-value">${escHtml(formatEndpoint(conf.baseUrl))}</div>
-      <div class="metric-sub">${escHtml(exampleChatUrl(conf.baseUrl))}</div>
+      <div class="metric-sub">${escHtml(exampleApiUrl(conf))}</div>
     </div>
     <div class="metric">
       <div class="metric-label">API Key</div>
@@ -315,7 +404,7 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
       <div class="kv">
         <div class="k">Provider</div><div class="v">${escHtml(conf.provider)}</div>
         <div class="k">Endpoint</div><div class="v">${escHtml(conf.baseUrl)}</div>
-        <div class="k">예시 URL</div><div class="v">${escHtml(exampleChatUrl(conf.baseUrl))}</div>
+        <div class="k">예시 URL</div><div class="v">${escHtml(exampleApiUrl(conf))}</div>
         <div class="k">API Key</div><div class="v">${conf.apiKey ? '설정됨' : '없음'}</div>
         <div class="k">Model</div><div class="v">${escHtml(conf.model)}</div>
         <div class="k">Temperature</div><div class="v">${escHtml(conf.temperature)}</div>
@@ -345,7 +434,7 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
       <label for="agent_base_url">Endpoint Base URL</label>
       <input id="agent_base_url" type="text" value="${escHtml(conf.baseUrl)}" placeholder="https://api.openai.com/v1">
     </div>
-    <div class="example-url" data-example-for="agent_base_url">예시 URL: ${escHtml(exampleChatUrl(conf.baseUrl))}</div>
+    <div class="example-url" data-example-for="agent_base_url">예시 URL: ${escHtml(exampleApiUrl(conf))}</div>
     ${credentialField('agent_api_key', conf.apiKey)}
     <div class="field">
       <label for="agent_model">Model</label>
@@ -371,10 +460,10 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
     <h2>도움말</h2>
     <ul class="help-list">
       <li>Lite판은 별도 FastAPI 사이드카 없이 RisuAI 플러그인 안에서 보조 에이전트 3개를 호출합니다.</li>
-      <li>Endpoint Base URL은 OpenAI-compatible API의 /v1 주소입니다. 예시는 https://api.openai.com/v1 입니다.</li>
+      <li>Endpoint Base URL은 provider별 API base 주소입니다. OpenAI-compatible은 /v1, Anthropic은 https://api.anthropic.com/v1 형식을 사용합니다.</li>
       <li>API Key 입력칸은 저장된 값을 다시 표시하지 않습니다. 빈칸으로 저장하면 기존 값을 유지합니다.</li>
-      <li>Vertex AI를 선택하면 API Key 대신 서비스 계정 JSON 파일을 불러옵니다. Lite판은 JSON 유효성 확인까지만 수행합니다.</li>
-      <li>전체 테스트는 Lite판에서 가능한 전체 범위인 LLM 연결 테스트를 실행합니다.</li>
+      <li>Vertex AI를 선택하면 API Key 대신 서비스 계정 JSON 파일을 불러오고, Lite판 내부에서 OAuth access token을 발급해 호출합니다.</li>
+      <li>LLM 인증 테스트는 생성 호출 없이 provider별 인증/모델 조회 경로만 확인합니다. 실제 분석은 토큰을 사용합니다.</li>
     </ul>
   </div>
 </div>
@@ -444,43 +533,67 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
         return;
       }
 
-      if (isVertexProvider(conf.provider)) {
-        const result = validateVertexCredential(conf.apiKey);
-        showMsg(result.ok ? 'Vertex AI JSON credential 확인 완료' : 'Vertex AI JSON credential 오류', result.ok);
-        setTestResults(testResultHtml(conf, result.ok, null, 0, result.error, 'service-account-json'));
-        return;
-      }
-
       const started = Date.now();
       try {
-        const res = await Risuai.nativeFetch(`${conf.baseUrl}/models`, {
-          method: 'GET',
-          headers: { 'Authorization': `Bearer ${conf.apiKey}` },
-        });
+        const result = await testProviderEndpoint(conf);
         const latency = Date.now() - started;
-        if (res.ok) {
-          showMsg('LLM 연결 테스트 성공', true);
-          setTestResults(testResultHtml(conf, true, res.status, latency, ''));
-        } else {
-          const text = await res.text().catch(() => '');
-          showMsg(`LLM 연결 테스트 실패: HTTP ${res.status}`, false);
-          setTestResults(testResultHtml(conf, false, res.status, latency, text.slice(0, 180)));
-        }
+        showMsg('LLM 인증 테스트 성공', true);
+        setTestResults(testResultHtml(conf, true, result.status, latency, '', result.url));
       } catch (err) {
-        showMsg(`LLM 연결 테스트 실패: ${err.message}`, false);
-        setTestResults(testResultHtml(conf, false, null, Date.now() - started, err.message));
+        showMsg(`LLM 인증 테스트 실패: ${err.message}`, false);
+        setTestResults(testResultHtml(conf, false, null, Date.now() - started, err.message, testEndpointUrl(conf)));
       }
+    }
+
+    async function testProviderEndpoint(conf) {
+      if (isAnthropicProvider(conf.provider)) {
+        const url = `${conf.baseUrl}/models/${conf.model}`;
+        const res = await Risuai.nativeFetch(url, {
+          method: 'GET',
+          headers: {
+            'x-api-key': conf.apiKey,
+            'anthropic-version': '2023-06-01',
+          },
+        });
+        if (!res.ok) {
+          const text = await res.text().catch(() => '');
+          throw new Error(`HTTP ${res.status}: ${text.slice(0, 180)}`);
+        }
+        return { status: res.status, url };
+      }
+
+      if (isVertexProvider(conf.provider)) {
+        await getVertexAccessToken(conf.apiKey);
+        return { status: 200, url: 'https://oauth2.googleapis.com/token' };
+      }
+
+      const url = `${conf.baseUrl}/models`;
+      const res = await Risuai.nativeFetch(url, {
+        method: 'GET',
+        headers: { 'Authorization': `Bearer ${conf.apiKey}` },
+      });
+      if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        throw new Error(`HTTP ${res.status}: ${text.slice(0, 180)}`);
+      }
+      return { status: res.status, url };
+    }
+
+    function testEndpointUrl(conf) {
+      if (isAnthropicProvider(conf.provider)) return `${conf.baseUrl}/models/${conf.model}`;
+      if (isVertexProvider(conf.provider)) return 'https://oauth2.googleapis.com/token';
+      return `${conf.baseUrl}/models`;
     }
 
     function testResultHtml(conf, success, status, latency, error, urlOverride = null) {
       return `
         <div class="card">
-          <h2>LLM 연결 테스트</h2>
+          <h2>LLM 인증 테스트</h2>
           <div class="kv">
             <div class="k">결과</div><div class="v"><span class="badge ${success ? 'ok' : 'err'}">${success ? '성공' : '실패'}</span></div>
             <div class="k">Provider</div><div class="v">${escHtml(conf.provider)}</div>
             <div class="k">Model</div><div class="v">${escHtml(conf.model)}</div>
-            <div class="k">URL</div><div class="v">${escHtml(urlOverride || `${conf.baseUrl}/models`)}</div>
+            <div class="k">URL</div><div class="v">${escHtml(urlOverride || testEndpointUrl(conf))}</div>
             <div class="k">HTTP</div><div class="v">${escHtml(status ?? '-')}</div>
             <div class="k">Latency</div><div class="v">${escHtml(latency ?? '-')}ms</div>
           </div>
@@ -602,6 +715,7 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
           const credential = document.querySelector('[data-credential="agent_api_key"]');
           credential?.classList.toggle('credential-vertex-active', select.value === 'vertex-ai');
           applyProviderDefaults(select.value);
+          updateEndpointExample('agent_base_url');
         };
         select.addEventListener('change', update);
         update();
@@ -649,7 +763,10 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
       const example = document.querySelector(`[data-example-for="${baseId}"]`);
       const input = document.getElementById(baseId);
       if (!example || !input) return;
-      example.textContent = `예시 URL: ${exampleChatUrl(input.value || 'https://api.openai.com/v1')}`;
+      example.textContent = `예시 URL: ${exampleApiUrl({
+        provider: getProviderValue('agent_provider', 'openai'),
+        baseUrl: input.value || 'https://api.openai.com/v1',
+      })}`;
     }
 
     function setupCredentialFiles() {
@@ -679,6 +796,104 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
       }
     }
 
+    async function getVertexAccessToken(text) {
+      const now = Math.floor(Date.now() / 1000);
+      if (vertexTokenCache?.source === text && vertexTokenCache.expiresAt > now + 60) {
+        return vertexTokenCache.token;
+      }
+
+      const validation = validateVertexCredential(text);
+      if (!validation.ok) throw new Error(validation.error);
+
+      const info = JSON.parse(text);
+      const header = base64UrlJson({ alg: 'RS256', typ: 'JWT' });
+      const claim = base64UrlJson({
+        iss: info.client_email,
+        scope: 'https://www.googleapis.com/auth/cloud-platform',
+        aud: 'https://oauth2.googleapis.com/token',
+        exp: now + 3600,
+        iat: now,
+      });
+      const unsigned = `${header}.${claim}`;
+      const signature = await signRs256(unsigned, info.private_key);
+      const assertion = `${unsigned}.${signature}`;
+      const body = new URLSearchParams({
+        grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
+        assertion,
+      });
+
+      const res = await Risuai.nativeFetch('https://oauth2.googleapis.com/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: body.toString(),
+      });
+      if (!res.ok) {
+        const errText = await res.text().catch(() => '');
+        throw new Error(`Vertex AI access token 발급 실패: HTTP ${res.status}: ${errText.slice(0, 180)}`);
+      }
+
+      const data = await res.json();
+      if (!data.access_token) throw new Error('Vertex AI access token 응답이 비어 있습니다.');
+      vertexTokenCache = {
+        source: text,
+        token: data.access_token,
+        expiresAt: now + (data.expires_in || 3600),
+      };
+      return data.access_token;
+    }
+
+    async function signRs256(input, privateKeyPem) {
+      const cryptoApi = globalThis.crypto?.subtle;
+      if (!cryptoApi) throw new Error('이 환경에서는 WebCrypto 서명을 사용할 수 없어 Vertex AI Lite 호출을 실행할 수 없습니다.');
+
+      const key = await cryptoApi.importKey(
+        'pkcs8',
+        pemToArrayBuffer(privateKeyPem),
+        { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
+        false,
+        ['sign'],
+      );
+      const signature = await cryptoApi.sign(
+        'RSASSA-PKCS1-v1_5',
+        key,
+        new TextEncoder().encode(input),
+      );
+      return base64UrlBytes(new Uint8Array(signature));
+    }
+
+    function pemToArrayBuffer(pem) {
+      const b64 = String(pem || '')
+        .replace(/-----BEGIN PRIVATE KEY-----/g, '')
+        .replace(/-----END PRIVATE KEY-----/g, '')
+        .replace(/\s/g, '');
+      const binary = atob(b64);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i += 1) {
+        bytes[i] = binary.charCodeAt(i);
+      }
+      return bytes.buffer;
+    }
+
+    function base64UrlJson(value) {
+      return base64UrlBytes(new TextEncoder().encode(JSON.stringify(value)));
+    }
+
+    function base64UrlBytes(bytes) {
+      let binary = '';
+      for (const byte of bytes) {
+        binary += String.fromCharCode(byte);
+      }
+      return btoa(binary)
+        .replace(/\+/g, '-')
+        .replace(/\//g, '_')
+        .replace(/=+$/g, '');
+    }
+
+    function isAnthropicProvider(provider) {
+      const normalized = normalizeProviderValue(provider);
+      return normalized === 'anthropic' || normalized === 'claude';
+    }
+
     function isVertexProvider(provider) {
       const normalized = normalizeProviderValue(provider);
       return normalized === 'vertex-ai' || normalized === 'vertex';
@@ -692,8 +907,9 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
       return String(url || 'https://api.openai.com/v1').replace(/\/$/, '');
     }
 
-    function exampleChatUrl(baseUrl) {
-      return `${normalizeUrl(baseUrl)}/chat/completions`;
+    function exampleApiUrl(conf) {
+      if (isAnthropicProvider(conf.provider)) return `${normalizeUrl(conf.baseUrl)}/messages`;
+      return `${normalizeUrl(conf.baseUrl)}/chat/completions`;
     }
 
     function formatEndpoint(baseUrl) {

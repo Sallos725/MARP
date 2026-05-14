@@ -1,6 +1,4 @@
 from contextlib import asynccontextmanager
-import json
-from time import perf_counter
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import httpx
@@ -13,6 +11,7 @@ from app.models import (
     StatusResponse,
     LlmTestResponse,
 )
+from app.llm_client import LlmConfigError, test_llm as run_llm_test
 from app.pipeline import run_analysis
 
 
@@ -76,11 +75,10 @@ async def test_llm(agent: str | None = None):
     timeout = min(float(cfg.get("request_timeout", 60.0)), 30.0)
     results = []
 
-    async with httpx.AsyncClient(timeout=timeout) as client:
-        for name, label in targets:
-            agent_cfg = config_store.get_agent_config(name)
-            result = await _test_llm_agent(client, name, label, agent_cfg)
-            results.append(result)
+    for name, label in targets:
+        agent_cfg = config_store.get_agent_config(name)
+        result = await _test_llm_agent(name, label, agent_cfg, timeout)
+        results.append(result)
 
     return LlmTestResponse(
         success=all(result["success"] for result in results),
@@ -103,84 +101,28 @@ async def put_config(body: ConfigModel):
 async def analyze(request: AnalyzeRequest):
     try:
         return await run_analysis(request)
+    except LlmConfigError as e:
+        raise HTTPException(status_code=400, detail=f"LLM 설정 오류: {e}")
     except httpx.HTTPStatusError as e:
         raise HTTPException(
             status_code=502,
-            detail=f"LLM API 오류: {e.response.status_code} {e.response.text}",
+            detail=f"LLM API 오류: {e.response.status_code} {e.response.text[:1000]}",
         )
     except httpx.RequestError as e:
         raise HTTPException(status_code=502, detail=f"LLM API 연결 실패: {e}")
+    except (KeyError, IndexError, TypeError, ValueError) as e:
+        raise HTTPException(status_code=502, detail=f"LLM API 응답 파싱 실패: {e}")
 
 
 async def _test_llm_agent(
-    client: httpx.AsyncClient,
     name: str,
     label: str,
     agent_cfg: dict,
+    timeout: float,
 ) -> dict:
-    base_url = str(agent_cfg["base_url"]).rstrip("/")
-    example_url = f"{base_url}/models"
-    started = perf_counter()
-
-    result = {
+    result = await run_llm_test(agent_cfg, timeout)
+    return {
         "name": name,
         "label": label,
-        "provider": agent_cfg["provider"],
-        "base_url": agent_cfg["base_url"],
-        "example_url": example_url,
-        "model": agent_cfg["model"],
-        "success": False,
-        "status_code": None,
-        "latency_ms": None,
-        "error": "",
+        **result,
     }
-
-    if not agent_cfg["api_key"]:
-        result["error"] = "Credential이 설정되지 않았습니다."
-        return result
-    if not base_url:
-        result["error"] = "Endpoint URL이 설정되지 않았습니다."
-        return result
-
-    if _is_vertex_provider(agent_cfg["provider"]):
-        result["example_url"] = "service-account-json"
-        result["latency_ms"] = int((perf_counter() - started) * 1000)
-        try:
-            credential = json.loads(agent_cfg["api_key"])
-        except json.JSONDecodeError as exc:
-            result["error"] = f"Vertex AI 서비스 계정 JSON 파싱 실패: {exc}"
-            return result
-
-        missing = [
-            key for key in ("type", "project_id", "client_email", "private_key")
-            if not credential.get(key)
-        ]
-        if missing:
-            result["error"] = f"Vertex AI 서비스 계정 JSON 필드 누락: {', '.join(missing)}"
-            return result
-
-        result["success"] = True
-        return result
-
-    try:
-        response = await client.get(
-            example_url,
-            headers={"Authorization": f"Bearer {agent_cfg['api_key']}"},
-        )
-        result["status_code"] = response.status_code
-        result["latency_ms"] = int((perf_counter() - started) * 1000)
-        if response.status_code < 400:
-            result["success"] = True
-        else:
-            error_text = response.text[:200]
-            result["error"] = f"HTTP {response.status_code}: {error_text}"
-    except httpx.RequestError as exc:
-        result["latency_ms"] = int((perf_counter() - started) * 1000)
-        result["error"] = str(exc)
-
-    return result
-
-
-def _is_vertex_provider(provider: str) -> bool:
-    normalized = provider.strip().lower().replace("_", "-").replace(" ", "-")
-    return normalized in {"vertex-ai", "vertex"}
