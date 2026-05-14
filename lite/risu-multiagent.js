@@ -316,7 +316,7 @@
       await Risuai.showContainer('fullscreen');
     }
 
-    const menuIcon = '<span style="display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;line-height:1;text-align:center;font-size:9px;font-weight:700;letter-spacing:0;color:inherit;">Lite</span>';
+    const menuIcon = '🔱';
 
     Risuai.registerSetting('MultiAgent Lite판 상태', openLiteDashboard, menuIcon, 'html');
     await Risuai.registerButton({
