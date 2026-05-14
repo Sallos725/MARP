@@ -133,16 +133,11 @@
         '---',
       ].join('\n');
 
-      const hasSystem = messages.some(m => m.role === 'system');
-      if (hasSystem) {
-        let injected = false;
-        return messages.map(m => {
-          if (!injected && m.role === 'system') {
-            injected = true;
-            return { ...m, content: m.content + injection };
-          }
-          return m;
-        });
+      const lastSystemIdx = findLastIndex(messages, m => m.role === 'system');
+      if (lastSystemIdx >= 0) {
+        return messages.map((m, idx) =>
+          idx === lastSystemIdx ? { ...m, content: m.content + injection } : m
+        );
       }
       return [{ role: 'system', content: injection.replace(/^\n/, '') }, ...messages];
     }

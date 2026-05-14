@@ -187,6 +187,13 @@
       return recent.map(m => `[${m.role === 'user' ? '유저' : 'AI'}]: ${m.content}`).join('\n');
     }
 
+    function findLastIndex(arr, predicate) {
+      for (let i = arr.length - 1; i >= 0; i -= 1) {
+        if (predicate(arr[i])) return i;
+      }
+      return -1;
+    }
+
     // ── 에이전트 프롬프트 빌더 ────────────────────────────────────────────────
 
     function buildWorldPrompt(systemContent, history, userInput) {
@@ -291,9 +298,13 @@
         '---',
       ].join('\n');
 
-      return messages.map(m =>
-        m.role === 'system' ? { ...m, content: m.content + injection } : m
-      );
+      const lastSystemIdx = findLastIndex(messages, m => m.role === 'system');
+      if (lastSystemIdx >= 0) {
+        return messages.map((m, idx) =>
+          idx === lastSystemIdx ? { ...m, content: m.content + injection } : m
+        );
+      }
+      return [{ role: 'system', content: injection.replace(/^\n/, '') }, ...messages];
     }
 
     // ── 설정 GUI ──────────────────────────────────────────────────────────────
