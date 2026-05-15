@@ -183,8 +183,8 @@
       // 마지막 유저 메시지를 제외한 최근 N개
       const chatMsgs = messages.filter(m => m.role === 'user' || m.role === 'assistant');
       const recent = chatMsgs.slice(-(windowSize + 1), -1);
-      if (!recent.length) return '(대화 히스토리 없음)';
-      return recent.map(m => `[${m.role === 'user' ? '유저' : 'AI'}]: ${m.content}`).join('\n');
+      if (!recent.length) return '(No chat history)';
+      return recent.map(m => `[${m.role === 'user' ? 'User' : 'AI'}]: ${m.content}`).join('\n');
     }
 
     function findLastIndex(arr, predicate) {
@@ -201,23 +201,23 @@
         {
           role: 'system',
           content:
-            '당신은 세계관 일관성 에이전트입니다.\n' +
-            '주어진 설정과 대화 히스토리를 바탕으로 현재 씬의 세계관 주의사항과 보강 정보를 ' +
-            '간결한 불릿 포인트 메모로 작성하세요.\n\n' +
-            '포함할 항목:\n' +
-            '- 현재 씬/배경 정보\n' +
-            '- 활성화된 세계관 규칙 (마법 금지, 특수 조건 등)\n' +
-            '- 주의해야 할 기확립 설정\n' +
-            '- 세계관 보강 정보\n\n' +
-            '최종 RP 응답은 작성하지 마세요.',
+            'You are the worldbuilding consistency agent.\n' +
+            'Based on the given setting and chat history, write concise bullet-point notes ' +
+            'on worldbuilding concerns and useful reinforcement for the current scene.\n\n' +
+            'Include:\n' +
+            '- Current scene/background information\n' +
+            '- Active world rules (for example: no magic, special conditions, taboos)\n' +
+            '- Established details that must be preserved\n' +
+            '- Additional worldbuilding reinforcement\n\n' +
+            'Do not write the final RP response.',
         },
         {
           role: 'user',
           content:
-            `[설정]\n${systemContent}\n\n` +
-            `[최근 대화]\n${history}\n\n` +
-            `[현재 유저 입력]\n${userInput}\n\n` +
-            '세계관 일관성 메모를 작성하세요.',
+            `[Setting]\n${systemContent}\n\n` +
+            `[Recent Conversation]\n${history}\n\n` +
+            `[Current User Input]\n${userInput}\n\n` +
+            'Write the worldbuilding consistency notes.',
         },
       ];
     }
@@ -227,23 +227,23 @@
         {
           role: 'system',
           content:
-            '당신은 플롯 관리 에이전트입니다.\n' +
-            '세계관 메모와 대화 히스토리를 바탕으로 현재 서사 흐름을 분석하고 ' +
-            '이번 씬의 플롯 방향을 간결한 불릿 포인트 메모로 제시하세요.\n\n' +
-            '포함할 항목:\n' +
-            '- 현재 아크/스토리 진행 상황\n' +
-            '- 이번 씬 목적\n' +
-            '- 권장 전개 방향\n' +
-            '- 유지해야 할 복선/미공개 정보\n\n' +
-            '최종 RP 응답은 작성하지 마세요.',
+            'You are the plot management agent.\n' +
+            'Based on the worldbuilding notes and chat history, analyze the current ' +
+            'narrative flow and present concise bullet-point notes on the plot direction for this scene.\n\n' +
+            'Include:\n' +
+            '- Current arc/story progress\n' +
+            '- Purpose of this scene\n' +
+            '- Recommended direction for the next development\n' +
+            '- Foreshadowing or unrevealed information that must be preserved\n\n' +
+            'Do not write the final RP response.',
         },
         {
           role: 'user',
           content:
-            `[세계관 에이전트 메모]\n${contextWorld}\n\n` +
-            `[최근 대화]\n${history}\n\n` +
-            `[현재 유저 입력]\n${userInput}\n\n` +
-            '플롯 방향 메모를 작성하세요.',
+            `[Worldbuilding Agent Notes]\n${contextWorld}\n\n` +
+            `[Recent Conversation]\n${history}\n\n` +
+            `[Current User Input]\n${userInput}\n\n` +
+            'Write the plot direction notes.',
         },
       ];
     }
@@ -253,25 +253,25 @@
         {
           role: 'system',
           content:
-            '당신은 등장인물 에이전트입니다.\n' +
-            '설정과 이전 에이전트 메모를 바탕으로 이번 씬 캐릭터들의 성격과 말투를 ' +
-            '간결한 불릿 포인트 메모로 정리하세요.\n\n' +
-            '포함할 항목:\n' +
-            '- 주요 캐릭터 성격/말투 특성\n' +
-            '- 현재 캐릭터 심리 상태\n' +
-            '- OOC(Out of Character) 주의사항\n' +
-            '- 등장 예정 캐릭터 안내\n\n' +
-            '최종 RP 응답은 작성하지 마세요.',
+            'You are the character consistency agent.\n' +
+            'Based on the setting and previous agent notes, summarize the personalities and ' +
+            'speech patterns of the characters involved in this scene as concise bullet-point notes.\n\n' +
+            'Include:\n' +
+            '- Key character personality and speech traits\n' +
+            '- Current character emotional or psychological state\n' +
+            '- OOC (Out of Character) cautions\n' +
+            '- Characters likely to appear or be referenced\n\n' +
+            'Do not write the final RP response.',
         },
         {
           role: 'user',
           content:
-            `[설정]\n${systemContent}\n\n` +
-            `[세계관 에이전트 메모]\n${contextWorld}\n\n` +
-            `[플롯 에이전트 메모]\n${contextPlot}\n\n` +
-            `[최근 대화]\n${history}\n\n` +
-            `[현재 유저 입력]\n${userInput}\n\n` +
-            '캐릭터 보정 메모를 작성하세요.',
+            `[Setting]\n${systemContent}\n\n` +
+            `[Worldbuilding Agent Notes]\n${contextWorld}\n\n` +
+            `[Plot Agent Notes]\n${contextPlot}\n\n` +
+            `[Recent Conversation]\n${history}\n\n` +
+            `[Current User Input]\n${userInput}\n\n` +
+            'Write the character adjustment notes.',
         },
       ];
     }
@@ -282,19 +282,19 @@
       const injection = [
         '',
         '---',
-        '[MultiAgent RP 분석 컨텍스트]',
+        '[MultiAgent RP Analysis Context]',
         '',
-        '[세계관 에이전트]',
+        '[Worldbuilding Agent]',
         contextWorld,
         '',
-        '[플롯 에이전트]',
+        '[Plot Agent]',
         contextPlot,
         '',
-        '[캐릭터 에이전트]',
+        '[Character Agent]',
         contextChar,
         '',
-        '[검수 지침]',
-        '위 분석을 참고하여 세계관 위반·플롯 역행·OOC 오류를 감지하고 수정한 뒤 최종 RP 응답을 작성하세요.',
+        '[Review Instructions]',
+        'Use the analysis above to detect and correct worldbuilding violations, plot regressions, and OOC errors before writing the final RP response.',
         '---',
       ].join('\n');
 

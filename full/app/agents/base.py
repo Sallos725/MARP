@@ -59,7 +59,7 @@ class BaseAgent(ABC):
         window = pipeline_context.get("context_window", 10)
         recent = history[-window:] if len(history) > window else history
         lines = [
-            f"[{'유저' if m['role'] == 'user' else 'AI'}]: {m['content']}"
+            f"[{'User' if m['role'] == 'user' else 'AI'}]: {m['content']}"
             for m in recent
         ]
-        return "\n".join(lines) if lines else "(대화 히스토리 없음)"
+        return "\n".join(lines) if lines else "(No chat history)"
