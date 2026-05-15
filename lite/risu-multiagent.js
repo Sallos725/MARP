@@ -1,7 +1,7 @@
 //@name risu_multiagent
 //@display-name MultiAgent RP Pipeline
 //@api 3.0
-//@version 1.0.0
+//@version 1.0.1
 //@arg agent_provider string Analysis agent provider label. e.g. openai
 //@arg agent_base_url string Analysis agent API base URL. e.g. https://api.openai.com/v1, https://api.anthropic.com/v1, or Vertex AI OpenAI-compatible endpoint
 //@arg agent_api_key string Analysis agent API key
@@ -9,6 +9,8 @@
 //@arg agent_temperature string Analysis agent temperature (default: 0.7)
 //@arg agent_max_tokens string Analysis agent max tokens (blank = provider default)
 //@arg context_window int Recent messages per agent (default: 10)
+//@arg bypass_translate string Skip MultiAgent analysis for RisuAI built-in LLM translation requests (default: 1)
+//@arg bypass_lb_process string Skip MultiAgent analysis for <lb-process> helper LLM requests (default: 1)
 
 /**
  * MultiAgent RP Pipeline — RisuAI Plugin (Browser, API v3.0)
@@ -36,6 +38,8 @@
       const temperature = parseFloat((await Risuai.getArgument('agent_temperature')) || '0.7');
       const maxTokens = parseOptionalInt(await Risuai.getArgument('agent_max_tokens'));
       const window  = Math.max(1, parseInt((await Risuai.getArgument('context_window')) || '10') || 10);
+      const bypassTranslate = parseEnabled(await Risuai.getArgument('bypass_translate'), true);
+      const bypassLbProcess = parseEnabled(await Risuai.getArgument('bypass_lb_process'), true);
       return {
         provider,
         baseUrl,
@@ -44,6 +48,8 @@
         temperature: Number.isFinite(temperature) ? temperature : 0.7,
         maxTokens,
         window,
+        bypassTranslate,
+        bypassLbProcess,
       };
     }
 
@@ -352,6 +358,7 @@ label{display:block;font-size:.75rem;color:#9aa4b2;margin-bottom:4px}
 input,select,textarea{width:100%;padding:9px 10px;border-radius:6px;border:1px solid #343944;background:#0f1115;color:#eef2f7;font-size:.86rem}
 textarea{min-height:92px;resize:vertical}
 input:focus,select:focus,textarea:focus{outline:none;border-color:#5585d9}
+input[type=checkbox]{width:auto;margin-right:7px}
 .custom-provider,.vertex-credential{display:none;margin-top:8px}
 .credential-json{display:none}
 .provider-custom-active .custom-provider{display:block}
@@ -422,6 +429,8 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
         <div class="k">Temperature</div><div class="v">${escHtml(conf.temperature)}</div>
         <div class="k">Max Tokens</div><div class="v">${escHtml(conf.maxTokens ?? '제한 없음')}</div>
         <div class="k">Context</div><div class="v">${escHtml(conf.window)}개 메시지</div>
+        <div class="k">번역 우회</div><div class="v">${conf.bypassTranslate ? '켜짐' : '꺼짐'}</div>
+        <div class="k">LB 우회</div><div class="v">${conf.bypassLbProcess ? '켜짐' : '꺼짐'}</div>
       </div>
     </div>
 
@@ -466,6 +475,16 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
       <label for="context_window">Context Window</label>
       <input id="context_window" type="number" min="1" max="50" value="${escHtml(conf.window)}">
     </div>
+    <label>
+      <input id="bypass_translate" type="checkbox" ${checkedAttr(conf.bypassTranslate)}>
+      RisuAI 내장 번역 요청 우회
+    </label>
+    <div class="example-url">request mode가 translate인 LLM 번역 호출에서는 보조 에이전트를 실행하지 않습니다.</div>
+    <label>
+      <input id="bypass_lb_process" type="checkbox" ${checkedAttr(conf.bypassLbProcess)}>
+      &lt;lb-process&gt; LLM 요청 우회
+    </label>
+    <div class="example-url">&lt;lb-process&gt; 태그가 포함된 헬퍼 호출에서는 보조 에이전트를 실행하지 않습니다.</div>
   </div>
 
   <div class="card">
@@ -476,6 +495,7 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
       <li>API Key 입력칸은 저장된 값을 다시 표시하지 않습니다. 빈칸으로 저장하면 기존 값을 유지합니다.</li>
       <li>Vertex AI를 선택하면 API Key 대신 서비스 계정 JSON 파일을 불러오고, Lite판 내부에서 OAuth access token을 발급해 호출합니다.</li>
       <li>LLM 인증 테스트는 생성 호출 없이 provider별 인증/모델 조회 경로만 확인합니다. 실제 분석은 토큰을 사용합니다.</li>
+      <li>내장 LLM 번역과 &lt;lb-process&gt; 헬퍼 호출은 기본적으로 분석 파이프라인을 우회합니다.</li>
     </ul>
   </div>
 </div>
@@ -518,6 +538,8 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
         temperature: requiredFloat('agent_temperature', 0.7),
         maxTokens: parseOptionalInt(getInputValue('agent_max_tokens')),
         window: Math.max(1, parseInt(getInputValue('context_window')) || 10),
+        bypassTranslate: getCheckboxValue('bypass_translate'),
+        bypassLbProcess: getCheckboxValue('bypass_lb_process'),
       };
     }
 
@@ -529,6 +551,8 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
       await Risuai.setArgument('agent_temperature', String(conf.temperature));
       await Risuai.setArgument('agent_max_tokens', conf.maxTokens === null ? '' : String(conf.maxTokens));
       await Risuai.setArgument('context_window', String(conf.window));
+      await Risuai.setArgument('bypass_translate', conf.bypassTranslate ? '1' : '0');
+      await Risuai.setArgument('bypass_lb_process', conf.bypassLbProcess ? '1' : '0');
     }
 
     async function testLiteLlm() {
@@ -643,6 +667,10 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
         return document.getElementById(`${id}_json`)?.value?.trim() || getInputValue(id);
       }
       return getInputValue(id);
+    }
+
+    function getCheckboxValue(id) {
+      return Boolean(document.getElementById(id)?.checked);
     }
 
     function providerSelect(id, value) {
@@ -945,6 +973,35 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
       return Number.isFinite(parsed) ? parsed : fallback;
     }
 
+    function parseEnabled(value, fallback) {
+      const normalized = String(value ?? '').trim().toLowerCase();
+      if (!normalized) return fallback;
+      return !['0', 'false', 'off', 'no', 'disabled'].includes(normalized);
+    }
+
+    function checkedAttr(value) {
+      return value ? 'checked' : '';
+    }
+
+    function containsLbProcess(value) {
+      if (value === null || value === undefined) return false;
+      if (typeof value === 'string') return /<\/?\s*lb-process\b/i.test(value);
+      if (Array.isArray(value)) return value.some(containsLbProcess);
+      if (typeof value === 'object') return Object.values(value).some(containsLbProcess);
+      return /<\/?\s*lb-process\b/i.test(String(value));
+    }
+
+    function getBypassReason(messages, type, conf) {
+      const requestType = String(type || '').trim().toLowerCase();
+      if (conf.bypassTranslate && requestType === 'translate') {
+        return 'RisuAI translation request';
+      }
+      if (conf.bypassLbProcess && Array.isArray(messages) && messages.some(msg => containsLbProcess(msg?.content))) {
+        return '<lb-process> helper request';
+      }
+      return '';
+    }
+
     function escHtml(str) {
       return String(str)
         .replace(/&/g, '&amp;')
@@ -958,6 +1015,11 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
     Risuai.addRisuReplacer('beforeRequest', async (messages, type) => {
       try {
         const conf = await getConfig();
+        const bypassReason = getBypassReason(messages, type, conf);
+        if (bypassReason) {
+          console.log(`MultiAgent: ${bypassReason} bypassed`);
+          return messages;
+        }
 
         if (!conf.apiKey) {
           console.log('MultiAgent: agent_api_key not set — pipeline skipped');
@@ -995,7 +1057,7 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
       }
     });
 
-    console.log('MultiAgent RP Pipeline v1.0.0 loaded');
+    console.log('MultiAgent RP Pipeline v1.0.1 loaded');
 
   } catch (err) {
     console.log(`MultiAgent init error: ${err.message}`);

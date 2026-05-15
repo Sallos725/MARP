@@ -33,3 +33,11 @@ full/data/
 # 임시 파일
 *.tmp
 *.log
+
+# 로컬 작업용 에이전트/문서 자료 (remote에는 올리지 않음)
+CLAUDE.md
+docs/
+superpowers-*.md
+*.skill
+*.skills
+.skills

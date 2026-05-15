@@ -1,8 +1,10 @@
 //@name risu_multiagent_full
 //@display-name MultiAgent RP — Full판
 //@api 3.0
-//@version 2.0.0
+//@version 2.0.1
 //@arg server_url string Full판 서버 URL (e.g. http://localhost:6009 or https://example.com/multi-agent)
+//@arg bypass_translate string Skip MultiAgent analysis for RisuAI built-in LLM translation requests (default: 1)
+//@arg bypass_lb_process string Skip MultiAgent analysis for <lb-process> helper LLM requests (default: 1)
 
 /**
  * MultiAgent RP Pipeline — Full판 플러그인 (RisuAI Plugin API v3.0)
@@ -26,11 +28,25 @@
       return ((await Risuai.getArgument('server_url')) || 'http://localhost:6009').replace(/\/$/, '');
     }
 
+    async function getBypassSettings() {
+      return {
+        bypassTranslate: parseEnabled(await Risuai.getArgument('bypass_translate'), true),
+        bypassLbProcess: parseEnabled(await Risuai.getArgument('bypass_lb_process'), true),
+      };
+    }
+
     let lastRunState = null;
 
     // ── beforeRequest 훅 등록 ─────────────────────────────────────────────────
 
     Risuai.addRisuReplacer('beforeRequest', async (messages, type) => {
+      const bypass = await getBypassSettings();
+      const bypassReason = getBypassReason(messages, type, bypass);
+      if (bypassReason) {
+        console.log(`MultiAgent Full판: ${bypassReason} bypassed`);
+        return messages;
+      }
+
       const startedAt = Date.now();
       const serverUrl = await getServerUrl();
 
@@ -168,6 +184,7 @@
         status: null,
         config: {},
         lastRun: await loadLastRun(),
+        bypass: await getBypassSettings(),
         connected: false,
         statusError: '',
       };
@@ -202,6 +219,7 @@
       const ready = Boolean(status?.ready);
       const agents = status?.agents || fallbackAgents(cfg);
       const lastRun = data.lastRun || null;
+      const bypass = data.bypass || { bypassTranslate: true, bypassLbProcess: true };
 
       const v = (key, fallback = '') => {
         const val = cfg[key];
@@ -402,6 +420,8 @@ button.ghost{background:#15171b;color:#a8b0bd}
           <div class="k">Temperature</div><div class="v">${escHtml(publicCfg.default_temperature ?? v('default_temperature', '0.7'))}</div>
           <div class="k">Max Tokens</div><div class="v">${escHtml(publicCfg.default_max_tokens ?? v('default_max_tokens', '제한 없음'))}</div>
           <div class="k">타임아웃</div><div class="v">${escHtml(publicCfg.request_timeout ?? v('request_timeout', '60'))}초</div>
+          <div class="k">번역 우회</div><div class="v">${bypass.bypassTranslate ? '켜짐' : '꺼짐'}</div>
+          <div class="k">LB 우회</div><div class="v">${bypass.bypassLbProcess ? '켜짐' : '꺼짐'}</div>
         </div>
       </div>
     </div>
@@ -462,6 +482,16 @@ button.ghost{background:#15171b;color:#a8b0bd}
         <input id="debug_mode" type="checkbox" ${cfg.debug_mode ? 'checked' : ''}>
         디버그 모드
       </label>
+      <label>
+        <input id="bypass_translate" type="checkbox" ${checkedAttr(bypass.bypassTranslate)}>
+        RisuAI 내장 번역 요청 우회
+      </label>
+      <div class="example-url">request mode가 translate인 LLM 번역 호출에서는 분석 사이드카를 호출하지 않습니다.</div>
+      <label>
+        <input id="bypass_lb_process" type="checkbox" ${checkedAttr(bypass.bypassLbProcess)}>
+        &lt;lb-process&gt; LLM 요청 우회
+      </label>
+      <div class="example-url">&lt;lb-process&gt; 태그가 포함된 헬퍼 호출에서는 분석 사이드카를 호출하지 않습니다.</div>
     </div>
   </section>
 
@@ -477,6 +507,7 @@ button.ghost{background:#15171b;color:#a8b0bd}
         <li>LLM 인증 테스트는 생성 호출 없이 provider별 인증/모델 조회 경로만 확인합니다. 실제 분석은 토큰을 사용합니다.</li>
         <li>분석 실패 시에도 채팅은 막히지 않습니다. 원본 프롬프트가 그대로 메인 모델에 전달됩니다.</li>
         <li>디버그 모드를 켜면 최근 분석 탭에서 각 에이전트 출력을 펼쳐 볼 수 있습니다.</li>
+        <li>내장 LLM 번역과 &lt;lb-process&gt; 헬퍼 호출은 기본적으로 분석 파이프라인을 우회합니다.</li>
       </ul>
     </div>
   </section>
@@ -737,6 +768,7 @@ button.ghost{background:#15171b;color:#a8b0bd}
         const currentServerUrl = normalizeUrl(getInputValue('server_url') || serverUrl);
         try {
           await Risuai.setArgument('server_url', currentServerUrl);
+          await saveBypassSettings(collectBypassSettings());
           const res = await Risuai.nativeFetch(`${currentServerUrl}/config`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
@@ -803,6 +835,22 @@ button.ghost{background:#15171b;color:#a8b0bd}
         return document.getElementById(`${id}_json`)?.value?.trim() || getInputValue(id);
       }
       return getInputValue(id);
+    }
+
+    function getCheckboxValue(id) {
+      return Boolean(document.getElementById(id)?.checked);
+    }
+
+    function collectBypassSettings() {
+      return {
+        bypassTranslate: getCheckboxValue('bypass_translate'),
+        bypassLbProcess: getCheckboxValue('bypass_lb_process'),
+      };
+    }
+
+    async function saveBypassSettings(settings) {
+      await Risuai.setArgument('bypass_translate', settings.bypassTranslate ? '1' : '0');
+      await Risuai.setArgument('bypass_lb_process', settings.bypassLbProcess ? '1' : '0');
     }
 
     function setupProviderControls() {
@@ -900,6 +948,35 @@ button.ghost{background:#15171b;color:#a8b0bd}
     function requiredFloat(id, fallback) {
       const parsed = parseFloat(getInputValue(id));
       return Number.isFinite(parsed) ? parsed : fallback;
+    }
+
+    function parseEnabled(value, fallback) {
+      const normalized = String(value ?? '').trim().toLowerCase();
+      if (!normalized) return fallback;
+      return !['0', 'false', 'off', 'no', 'disabled'].includes(normalized);
+    }
+
+    function checkedAttr(value) {
+      return value ? 'checked' : '';
+    }
+
+    function containsLbProcess(value) {
+      if (value === null || value === undefined) return false;
+      if (typeof value === 'string') return /<\/?\s*lb-process\b/i.test(value);
+      if (Array.isArray(value)) return value.some(containsLbProcess);
+      if (typeof value === 'object') return Object.values(value).some(containsLbProcess);
+      return /<\/?\s*lb-process\b/i.test(String(value));
+    }
+
+    function getBypassReason(messages, type, settings) {
+      const requestType = String(type || '').trim().toLowerCase();
+      if (settings.bypassTranslate && requestType === 'translate') {
+        return 'RisuAI translation request';
+      }
+      if (settings.bypassLbProcess && Array.isArray(messages) && messages.some(msg => containsLbProcess(msg?.content))) {
+        return '<lb-process> helper request';
+      }
+      return '';
     }
 
     function normalizeUrl(url) {
@@ -1060,7 +1137,7 @@ button.ghost{background:#15171b;color:#a8b0bd}
       return `${(ms / 1000).toFixed(1)}초`;
     }
 
-    console.log('MultiAgent RP Full판 플러그인 v2.0.0 (beforeRequest 훅) 로드됨');
+    console.log('MultiAgent RP Full판 플러그인 v2.0.1 (beforeRequest 훅) 로드됨');
 
   } catch (err) {
     console.log(`MultiAgent Full판 init error: ${err.message}`);
