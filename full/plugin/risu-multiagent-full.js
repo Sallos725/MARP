@@ -1,7 +1,7 @@
 //@name risu_multiagent_full
 //@display-name MultiAgent RP — Full판
 //@api 3.0
-//@version 2.0.2
+//@version 2.0.3
 //@arg server_url string Full판 서버 URL (e.g. http://localhost:6009 or https://example.com/multi-agent)
 //@arg bypass_translate string Skip MultiAgent analysis for RisuAI built-in LLM translation requests (default: 1)
 //@arg bypass_lb_process string Skip MultiAgent analysis for <lb-process> helper LLM requests (default: 1)
@@ -591,8 +591,8 @@ button.ghost{background:#15171b;color:#a8b0bd}
           model: 'claude-3-5-sonnet-latest',
         },
         'vertex-ai': {
-          baseUrl: 'https://LOCATION-aiplatform.googleapis.com/v1/projects/PROJECT_ID/locations/LOCATION/endpoints/openapi',
-          model: 'google/gemini-1.5-pro',
+          baseUrl: 'https://aiplatform.googleapis.com/v1/projects/PROJECT_ID/locations/global/endpoints/openapi',
+          model: 'google/gemini-2.5-flash',
         },
         google: {
           baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
@@ -603,12 +603,15 @@ button.ghost{background:#15171b;color:#a8b0bd}
     }
 
     function knownProviderBaseUrls() {
-      return Object.values({
-        openai: providerDefaults('openai'),
-        claude: providerDefaults('claude'),
-        vertex: providerDefaults('vertex-ai'),
-        google: providerDefaults('google'),
-      }).map(item => item.baseUrl);
+      return [
+        ...Object.values({
+          openai: providerDefaults('openai'),
+          claude: providerDefaults('claude'),
+          vertex: providerDefaults('vertex-ai'),
+          google: providerDefaults('google'),
+        }).map(item => item.baseUrl),
+        'https://LOCATION-aiplatform.googleapis.com/v1/projects/PROJECT_ID/locations/LOCATION/endpoints/openapi',
+      ];
     }
 
     function normalizeProviderValue(value) {
