@@ -286,7 +286,7 @@
             'Include:\n' +
             '- Key character personality and speech traits\n' +
             '- Current character emotional or psychological state\n' +
-            '- OOC (Out of Character) cautions\n' +
+            '- Continuity notes for established voice and motivations\n' +
             '- Characters likely to appear or be referenced\n\n' +
             'Do not write the final RP response.',
         },
@@ -321,7 +321,7 @@
         contextChar,
         '',
         '[Review Instructions]',
-        'Use the analysis above to detect and correct worldbuilding violations, plot regressions, and OOC errors before writing the final RP response.',
+        'Use these notes quietly as background context. Preserve established world details, narrative continuity, character voice, and motivations while allowing natural development.',
         '---',
       ].join('\n');
 

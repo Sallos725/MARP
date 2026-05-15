@@ -14,7 +14,7 @@ class CharacterAgent(BaseAgent):
             "Output format (bullet points):\n"
             "- Key NPC personality and speech traits\n"
             "- Current character emotional or psychological state\n"
-            "- OOC (Out of Character) cautions\n"
+            "- Continuity notes for established voice and motivations\n"
             "- Characters likely to appear or be referenced\n\n"
             "Keep only the essential points. Do not write the final RP response."
         )

@@ -150,7 +150,7 @@
         contextChar || '(none)',
         '',
         '[Review Instructions]',
-        'Use the analysis above to detect and correct worldbuilding violations, plot regressions, and OOC errors before writing the final RP response.',
+        'Use these notes quietly as background context. Preserve established world details, narrative continuity, character voice, and motivations while allowing natural development.',
         '---',
       ].join('\n');
 
