@@ -1,7 +1,7 @@
 //@name risu_multiagent_full
 //@display-name MultiAgent RP — Full판
 //@api 3.0
-//@version 2.0.1
+//@version 2.0.2
 //@arg server_url string Full판 서버 URL (e.g. http://localhost:6009 or https://example.com/multi-agent)
 //@arg bypass_translate string Skip MultiAgent analysis for RisuAI built-in LLM translation requests (default: 1)
 //@arg bypass_lb_process string Skip MultiAgent analysis for <lb-process> helper LLM requests (default: 1)
@@ -21,17 +21,22 @@
 
 (async () => {
   try {
+    const PLUGIN_SETTINGS_KEY = 'risu_multiagent_full_plugin_settings_v1';
+    const SIDECAR_CONFIG_BACKUP_KEY = 'risu_multiagent_full_sidecar_config_backup_v1';
+    const STORAGE_VERSION = 1;
 
     // ── 서버 URL 헬퍼 ─────────────────────────────────────────────────────────
 
     async function getServerUrl() {
-      return ((await Risuai.getArgument('server_url')) || 'http://localhost:6009').replace(/\/$/, '');
+      const settings = await loadPluginSettings();
+      return ((await Risuai.getArgument('server_url')) || settings.serverUrl || 'http://localhost:6009').replace(/\/$/, '');
     }
 
     async function getBypassSettings() {
+      const settings = await loadPluginSettings();
       return {
-        bypassTranslate: parseEnabled(await Risuai.getArgument('bypass_translate'), true),
-        bypassLbProcess: parseEnabled(await Risuai.getArgument('bypass_lb_process'), true),
+        bypassTranslate: parseEnabled(await Risuai.getArgument('bypass_translate'), settings.bypassTranslate ?? true),
+        bypassLbProcess: parseEnabled(await Risuai.getArgument('bypass_lb_process'), settings.bypassLbProcess ?? true),
       };
     }
 
@@ -185,6 +190,7 @@
         config: {},
         lastRun: await loadLastRun(),
         bypass: await getBypassSettings(),
+        configBackup: await getSidecarConfigBackupInfo(),
         connected: false,
         statusError: '',
       };
@@ -203,8 +209,16 @@
 
       try {
         const configRes = await Risuai.nativeFetch(`${serverUrl}/config`, { method: 'GET' });
-        if (configRes.ok) data.config = await configRes.json();
-      } catch (_) {}
+        if (configRes.ok) {
+          data.config = await configRes.json();
+          await saveSidecarConfigBackup(serverUrl, data.config);
+          data.configBackup = await getSidecarConfigBackupInfo();
+        } else {
+          data.config = await loadSidecarConfigBackup(serverUrl) || {};
+        }
+      } catch (_) {
+        data.config = await loadSidecarConfigBackup(serverUrl) || {};
+      }
 
       return data;
     }
@@ -220,6 +234,7 @@
       const agents = status?.agents || fallbackAgents(cfg);
       const lastRun = data.lastRun || null;
       const bypass = data.bypass || { bypassTranslate: true, bypassLbProcess: true };
+      const configBackup = data.configBackup || { exists: false, savedAt: '' };
 
       const v = (key, fallback = '') => {
         const val = cfg[key];
@@ -422,6 +437,7 @@ button.ghost{background:#15171b;color:#a8b0bd}
           <div class="k">타임아웃</div><div class="v">${escHtml(publicCfg.request_timeout ?? v('request_timeout', '60'))}초</div>
           <div class="k">번역 우회</div><div class="v">${bypass.bypassTranslate ? '켜짐' : '꺼짐'}</div>
           <div class="k">LB 우회</div><div class="v">${bypass.bypassLbProcess ? '켜짐' : '꺼짐'}</div>
+          <div class="k">설정 백업</div><div class="v">${configBackup.exists ? `있음 (${escHtml(formatDateTime(configBackup.savedAt))})` : '없음'}</div>
         </div>
       </div>
     </div>
@@ -767,15 +783,23 @@ button.ghost{background:#15171b;color:#a8b0bd}
       document.getElementById('save-btn')?.addEventListener('click', async () => {
         const currentServerUrl = normalizeUrl(getInputValue('server_url') || serverUrl);
         try {
+          const nextBypass = collectBypassSettings();
+          const nextConfig = collectConfig(initialConfig);
           await Risuai.setArgument('server_url', currentServerUrl);
-          await saveBypassSettings(collectBypassSettings());
+          await saveBypassSettings(nextBypass);
+          await savePluginSettings(currentServerUrl, nextBypass);
           const res = await Risuai.nativeFetch(`${currentServerUrl}/config`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(collectConfig(initialConfig)),
+            body: JSON.stringify(nextConfig),
           });
-          if (res.ok) showMsg('저장 완료', true);
-          else showMsg(`저장 실패: HTTP ${res.status}`, false);
+          if (res.ok) {
+            const savedConfig = await res.json().catch(() => nextConfig);
+            await saveSidecarConfigBackup(currentServerUrl, savedConfig || nextConfig);
+            showMsg('저장 완료', true);
+          } else {
+            showMsg(`저장 실패: HTTP ${res.status}`, false);
+          }
         } catch (err) {
           showMsg(`저장 오류: ${err.message}`, false);
         }
@@ -851,6 +875,78 @@ button.ghost{background:#15171b;color:#a8b0bd}
     async function saveBypassSettings(settings) {
       await Risuai.setArgument('bypass_translate', settings.bypassTranslate ? '1' : '0');
       await Risuai.setArgument('bypass_lb_process', settings.bypassLbProcess ? '1' : '0');
+    }
+
+    async function loadPluginSettings() {
+      try {
+        const raw = await Risuai.pluginStorage.getItem(PLUGIN_SETTINGS_KEY);
+        const settings = typeof raw === 'string' ? JSON.parse(raw) : raw;
+        if (!settings || settings.version !== STORAGE_VERSION) return {};
+        return settings;
+      } catch (_) {
+        return {};
+      }
+    }
+
+    async function savePluginSettings(serverUrl, bypass) {
+      await Risuai.pluginStorage.setItem(PLUGIN_SETTINGS_KEY, {
+        version: STORAGE_VERSION,
+        serverUrl: normalizeUrl(serverUrl || 'http://localhost:6009'),
+        bypassTranslate: Boolean(bypass.bypassTranslate),
+        bypassLbProcess: Boolean(bypass.bypassLbProcess),
+        savedAt: new Date().toISOString(),
+      });
+    }
+
+    async function getSidecarConfigBackupInfo() {
+      const backup = await getSidecarConfigBackup();
+      return {
+        exists: Boolean(backup),
+        savedAt: backup?.savedAt || '',
+      };
+    }
+
+    async function loadSidecarConfigBackup(serverUrl) {
+      const backup = await getSidecarConfigBackup();
+      if (!backup) return null;
+      if (serverUrl && backup.serverUrl && normalizeUrl(serverUrl) !== normalizeUrl(backup.serverUrl)) {
+        return null;
+      }
+      return backup.config || null;
+    }
+
+    async function saveSidecarConfigBackup(serverUrl, config) {
+      if (!config || typeof config !== 'object' || !Object.keys(config).length) return;
+      const existing = await getSidecarConfigBackup();
+      if (existing?.config && hasConfigSecret(existing.config) && !hasConfigSecret(config)) {
+        return;
+      }
+      await Risuai.pluginStorage.setItem(SIDECAR_CONFIG_BACKUP_KEY, {
+        version: STORAGE_VERSION,
+        serverUrl: normalizeUrl(serverUrl || 'http://localhost:6009'),
+        savedAt: new Date().toISOString(),
+        config,
+      });
+    }
+
+    async function getSidecarConfigBackup() {
+      try {
+        const raw = await Risuai.pluginStorage.getItem(SIDECAR_CONFIG_BACKUP_KEY);
+        const backup = typeof raw === 'string' ? JSON.parse(raw) : raw;
+        if (!backup || backup.version !== STORAGE_VERSION) return null;
+        return backup;
+      } catch (_) {
+        return null;
+      }
+    }
+
+    function hasConfigSecret(config) {
+      return Boolean(
+        config?.default_api_key ||
+        config?.worldbuilding_api_key ||
+        config?.plot_api_key ||
+        config?.character_api_key
+      );
     }
 
     function setupProviderControls() {

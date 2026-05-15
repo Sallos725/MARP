@@ -1,7 +1,7 @@
 //@name risu_multiagent
 //@display-name MultiAgent RP Pipeline
 //@api 3.0
-//@version 1.0.1
+//@version 1.0.2
 //@arg agent_provider string Analysis agent provider label. e.g. openai
 //@arg agent_base_url string Analysis agent API base URL. e.g. https://api.openai.com/v1, https://api.anthropic.com/v1, or Vertex AI OpenAI-compatible endpoint
 //@arg agent_api_key string Analysis agent API key
@@ -27,19 +27,31 @@
 (async () => {
   try {
     let vertexTokenCache = null;
+    const CONFIG_VAULT_KEY = 'risu_multiagent_lite_config_vault_v1';
+    const CONFIG_VAULT_VERSION = 1;
 
     // ── 설정 로드 ─────────────────────────────────────────────────────────────
 
     async function getConfig() {
-      const provider = (await Risuai.getArgument('agent_provider')) || 'openai';
-      const baseUrl = normalizeUrl((await Risuai.getArgument('agent_base_url')) || 'https://api.openai.com/v1');
-      const apiKey  = (await Risuai.getArgument('agent_api_key'))  || '';
-      const model   = (await Risuai.getArgument('agent_model'))    || 'gpt-4o-mini';
-      const temperature = parseFloat((await Risuai.getArgument('agent_temperature')) || '0.7');
-      const maxTokens = parseOptionalInt(await Risuai.getArgument('agent_max_tokens'));
-      const window  = Math.max(1, parseInt((await Risuai.getArgument('context_window')) || '10') || 10);
-      const bypassTranslate = parseEnabled(await Risuai.getArgument('bypass_translate'), true);
-      const bypassLbProcess = parseEnabled(await Risuai.getArgument('bypass_lb_process'), true);
+      const stored = await loadConfigVault('lite');
+      const providerArg = await Risuai.getArgument('agent_provider');
+      const baseUrlArg = await Risuai.getArgument('agent_base_url');
+      const apiKeyArg = await Risuai.getArgument('agent_api_key');
+      const modelArg = await Risuai.getArgument('agent_model');
+      const temperatureArg = await Risuai.getArgument('agent_temperature');
+      const maxTokensArg = await Risuai.getArgument('agent_max_tokens');
+      const windowArg = await Risuai.getArgument('context_window');
+      const bypassTranslateArg = await Risuai.getArgument('bypass_translate');
+      const bypassLbProcessArg = await Risuai.getArgument('bypass_lb_process');
+      const provider = providerArg || stored.provider || 'openai';
+      const baseUrl = normalizeUrl(baseUrlArg || stored.baseUrl || 'https://api.openai.com/v1');
+      const apiKey  = apiKeyArg || stored.apiKey || '';
+      const model   = modelArg || stored.model || 'gpt-4o-mini';
+      const temperature = parseFloat(temperatureArg || stored.temperature || '0.7');
+      const maxTokens = parseOptionalInt(maxTokensArg ?? stored.maxTokens);
+      const window  = Math.max(1, parseInt(windowArg || stored.window || '10') || 10);
+      const bypassTranslate = parseEnabled(bypassTranslateArg, stored.bypassTranslate ?? true);
+      const bypassLbProcess = parseEnabled(bypassLbProcessArg, stored.bypassLbProcess ?? true);
       return {
         provider,
         baseUrl,
@@ -317,7 +329,8 @@
 
     async function openLiteDashboard() {
       const conf = await getConfig();
-      document.body.innerHTML = buildLiteUI(conf);
+      const vaultInfo = await getConfigVaultInfo();
+      document.body.innerHTML = buildLiteUI(conf, vaultInfo);
       setupLiteHandlers(conf);
       await Risuai.showContainer('fullscreen');
     }
@@ -332,7 +345,7 @@
       location: 'hamburger',
     }, openLiteDashboard);
 
-    function buildLiteUI(conf) {
+    function buildLiteUI(conf, vaultInfo) {
       return `<!DOCTYPE html><html><head><meta charset="utf-8">
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
@@ -488,6 +501,19 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
   </div>
 
   <div class="card">
+    <h2>RisuAI 저장소 설정 보관</h2>
+    <div class="kv">
+      <div class="k">Vault</div><div class="v">${vaultInfo.exists ? `있음 (${escHtml(formatDateTime(vaultInfo.savedAt))})` : '없음'}</div>
+      <div class="k">보관 내용</div><div class="v">URL, provider, model, API key, Vertex JSON, 우회 설정</div>
+    </div>
+    <div style="height:10px"></div>
+    <div class="header-actions">
+      <button id="vault-save-btn">백업 갱신</button>
+      <button id="vault-restore-btn">백업에서 복구</button>
+    </div>
+  </div>
+
+  <div class="card">
     <h2>도움말</h2>
     <ul class="help-list">
       <li>Lite판은 별도 FastAPI 사이드카 없이 RisuAI 플러그인 안에서 보조 에이전트 3개를 호출합니다.</li>
@@ -496,6 +522,7 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
       <li>Vertex AI를 선택하면 API Key 대신 서비스 계정 JSON 파일을 불러오고, Lite판 내부에서 OAuth access token을 발급해 호출합니다.</li>
       <li>LLM 인증 테스트는 생성 호출 없이 provider별 인증/모델 조회 경로만 확인합니다. 실제 분석은 토큰을 사용합니다.</li>
       <li>내장 LLM 번역과 &lt;lb-process&gt; 헬퍼 호출은 기본적으로 분석 파이프라인을 우회합니다.</li>
+      <li>설정 백업은 RisuAI save/passphrase가 보호하는 pluginStorage에 저장되어, 플러그인 JS 업데이트 후에도 복구됩니다.</li>
     </ul>
   </div>
 </div>
@@ -519,9 +546,30 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
         try {
           const next = collectLiteConfig(initialConf);
           await saveLiteConfig(next);
+          await saveConfigVault('lite', next);
           showMsg('저장 완료', true);
         } catch (err) {
           showMsg(`저장 오류: ${err.message}`, false);
+        }
+      });
+      document.getElementById('vault-save-btn')?.addEventListener('click', async () => {
+        try {
+          const next = collectLiteConfig(initialConf);
+          await saveConfigVault('lite', next);
+          showMsg('백업 저장 완료', true);
+          await openLiteDashboard();
+        } catch (err) {
+          showMsg(`백업 저장 실패: ${err.message}`, false);
+        }
+      });
+      document.getElementById('vault-restore-btn')?.addEventListener('click', async () => {
+        try {
+          const restored = await restoreConfigVault('lite');
+          await saveLiteConfig(restored);
+          showMsg('백업 복구 완료', true);
+          await openLiteDashboard();
+        } catch (err) {
+          showMsg(`백업 복구 실패: ${err.message}`, false);
         }
       });
       document.getElementById('close-btn')?.addEventListener('click', async () => {
@@ -650,6 +698,72 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
       setTimeout(() => {
         if (el.textContent === text) el.className = 'msg';
       }, 4000);
+    }
+
+    async function getConfigVaultInfo() {
+      const vault = await getConfigVault('lite');
+      return {
+        exists: Boolean(vault),
+        savedAt: vault?.savedAt || '',
+      };
+    }
+
+    async function loadConfigVault(scope) {
+      const vault = await getConfigVault(scope);
+      return vault?.config || {};
+    }
+
+    async function restoreConfigVault(scope) {
+      const config = await loadConfigVault(scope);
+      if (!Object.keys(config).length) {
+        throw new Error('저장된 설정 백업이 없습니다.');
+      }
+      return config;
+    }
+
+    async function saveConfigVault(scope, config) {
+      await Risuai.pluginStorage.setItem(CONFIG_VAULT_KEY, {
+        version: CONFIG_VAULT_VERSION,
+        scope,
+        savedAt: new Date().toISOString(),
+        config: normalizeVaultConfig(config),
+      });
+    }
+
+    async function getConfigVault(scope) {
+      try {
+        const raw = await Risuai.pluginStorage.getItem(CONFIG_VAULT_KEY);
+        const vault = typeof raw === 'string' ? JSON.parse(raw) : raw;
+        if (!vault || vault.version !== CONFIG_VAULT_VERSION || vault.scope !== scope) {
+          return null;
+        }
+        return vault;
+      } catch (_) {
+        return null;
+      }
+    }
+
+    function normalizeVaultConfig(config) {
+      return {
+        provider: String(config.provider || 'openai'),
+        baseUrl: normalizeUrl(config.baseUrl || 'https://api.openai.com/v1'),
+        apiKey: String(config.apiKey || ''),
+        model: String(config.model || 'gpt-4o-mini'),
+        temperature: Number.isFinite(Number(config.temperature)) ? Number(config.temperature) : 0.7,
+        maxTokens: config.maxTokens === null || config.maxTokens === undefined || config.maxTokens === ''
+          ? null
+          : parseOptionalInt(config.maxTokens),
+        window: Math.max(1, parseInt(config.window || '10') || 10),
+        bypassTranslate: Boolean(config.bypassTranslate),
+        bypassLbProcess: Boolean(config.bypassLbProcess),
+      };
+    }
+
+    function formatDateTime(value) {
+      if (!value) return '-';
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return value;
+      return date.toLocaleString();
     }
 
     function getInputValue(id) {
