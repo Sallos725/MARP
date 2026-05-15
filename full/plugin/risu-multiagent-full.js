@@ -1,7 +1,7 @@
 //@name risu_multiagent_full
 //@display-name MultiAgent RP — Full판
 //@api 3.0
-//@version 2.0.3
+//@version 2.0.4
 //@arg server_url string Full판 서버 URL (e.g. http://localhost:6009 or https://example.com/multi-agent)
 //@arg bypass_translate string Skip MultiAgent analysis for RisuAI built-in LLM translation requests (default: 1)
 //@arg bypass_lb_process string Skip MultiAgent analysis for <lb-process> helper LLM requests (default: 1)
@@ -256,8 +256,22 @@
           <div class="vertex-credential">
             <label for="${id}_file">Vertex AI Service Account JSON</label>
             <input id="${id}_file" type="file" accept="application/json,.json">
+            <div class="row2">
+              <div class="field">
+                <label for="${id}_project_id">Project ID</label>
+                <input id="${id}_project_id" type="text" autocomplete="off" placeholder="my-gcp-project">
+              </div>
+              <div class="field">
+                <label for="${id}_client_email">Client Email</label>
+                <input id="${id}_client_email" type="text" autocomplete="off" placeholder="service-account@project.iam.gserviceaccount.com">
+              </div>
+            </div>
+            <div class="field">
+              <label for="${id}_private_key">Private Key</label>
+              <textarea id="${id}_private_key" autocomplete="off" placeholder="-----BEGIN PRIVATE KEY-----"></textarea>
+            </div>
             <textarea id="${id}_json" class="credential-json" aria-label="Vertex AI service account JSON"></textarea>
-            <div class="example-url">JSON 파일을 선택하면 credential로 저장됩니다. 원문은 화면에 표시하지 않습니다.</div>
+            <div class="example-url">JSON 파일을 선택하면 필드가 자동으로 채워집니다. Project ID는 endpoint의 PROJECT_ID 자리에도 반영됩니다.</div>
           </div>
         </div>`;
 
@@ -859,7 +873,7 @@ button.ghost{background:#15171b;color:#a8b0bd}
     function getCredentialValue(id) {
       const providerId = id.replace(/_api_key$/, '_provider');
       if (getProviderValue(providerId, '') === 'vertex-ai') {
-        return document.getElementById(`${id}_json`)?.value?.trim() || getInputValue(id);
+        return getVertexCredentialValue(id) || getInputValue(id);
       }
       return getInputValue(id);
     }
@@ -1022,12 +1036,59 @@ button.ghost{background:#15171b;color:#a8b0bd}
           const file = input.files?.[0];
           if (!file) return;
           const text = await file.text();
-          const targetId = input.id.replace(/_file$/, '_json');
-          const target = document.getElementById(targetId);
-          if (target) target.value = text;
-          showMsg('Vertex AI JSON credential을 불러왔습니다.', true);
+          const credentialId = input.id.replace(/_file$/, '');
+          setVertexCredentialFields(credentialId, text);
+          showMsg('Vertex AI credential 필드를 불러왔습니다.', true);
         });
       });
+    }
+
+    function getVertexCredentialValue(id) {
+      const json = document.getElementById(`${id}_json`)?.value?.trim();
+      const projectId = getInputValue(`${id}_project_id`);
+      const clientEmail = getInputValue(`${id}_client_email`);
+      const privateKey = document.getElementById(`${id}_private_key`)?.value?.trim() || '';
+      if (projectId || clientEmail || privateKey) {
+        applyVertexProjectToEndpoint(id, projectId);
+        return JSON.stringify({
+          type: 'service_account',
+          project_id: projectId,
+          private_key: normalizePrivateKey(privateKey),
+          client_email: clientEmail,
+          token_uri: 'https://oauth2.googleapis.com/token',
+        });
+      }
+      return json;
+    }
+
+    function setVertexCredentialFields(id, text) {
+      const parsed = JSON.parse(text);
+      setElementValue(`${id}_project_id`, parsed.project_id || '');
+      setElementValue(`${id}_client_email`, parsed.client_email || '');
+      setElementValue(`${id}_private_key`, parsed.private_key || '');
+      setElementValue(`${id}_json`, text);
+      applyVertexProjectToEndpoint(id, parsed.project_id || '');
+    }
+
+    function setElementValue(id, value) {
+      const el = document.getElementById(id);
+      if (el) el.value = value;
+    }
+
+    function normalizePrivateKey(value) {
+      return String(value || '').replace(/\\n/g, '\n');
+    }
+
+    function applyVertexProjectToEndpoint(credentialId, projectId) {
+      const clean = String(projectId || '').trim();
+      if (!clean) return;
+      const baseId = credentialId.replace(/_api_key$/, '_base_url');
+      const input = document.getElementById(baseId);
+      if (!input) return;
+      if (input.value.includes('PROJECT_ID')) {
+        input.value = input.value.replace(/PROJECT_ID/g, clean);
+        updateEndpointExample(baseId);
+      }
     }
 
     function optionalFloat(id) {
