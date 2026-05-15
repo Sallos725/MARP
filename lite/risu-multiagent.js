@@ -1,13 +1,14 @@
 //@name risu_multiagent
 //@display-name MultiAgent RP Pipeline
 //@api 3.0
-//@version 1.0.3
+//@version 1.0.4
 //@arg agent_provider string Analysis agent provider label. e.g. openai
 //@arg agent_base_url string Analysis agent API base URL. e.g. https://api.openai.com/v1, https://api.anthropic.com/v1, or Vertex AI OpenAI-compatible endpoint
 //@arg agent_api_key string Analysis agent API key
 //@arg agent_model string Analysis agent model. e.g. gpt-4o-mini
 //@arg agent_temperature string Analysis agent temperature (default: 0.7)
 //@arg agent_max_tokens string Analysis agent max tokens (blank = provider default)
+//@arg agent_extra_body_json string Extra JSON body merged into OpenAI-compatible chat/completions requests
 //@arg context_window int Recent messages per agent (default: 10)
 //@arg bypass_translate string Skip MultiAgent analysis for RisuAI built-in LLM translation requests (default: 1)
 //@arg bypass_lb_process string Skip MultiAgent analysis for <lb-process> helper LLM requests (default: 1)
@@ -29,6 +30,8 @@
     let vertexTokenCache = null;
     const CONFIG_VAULT_KEY = 'risu_multiagent_lite_config_vault_v1';
     const CONFIG_VAULT_VERSION = 1;
+    const LAST_RUN_KEY = 'risu_multiagent_lite_last_run_v1';
+    const LAST_RUN_VERSION = 1;
 
     // ── 설정 로드 ─────────────────────────────────────────────────────────────
 
@@ -40,6 +43,7 @@
       const modelArg = await Risuai.getArgument('agent_model');
       const temperatureArg = await Risuai.getArgument('agent_temperature');
       const maxTokensArg = await Risuai.getArgument('agent_max_tokens');
+      const extraBodyArg = await Risuai.getArgument('agent_extra_body_json');
       const windowArg = await Risuai.getArgument('context_window');
       const bypassTranslateArg = await Risuai.getArgument('bypass_translate');
       const bypassLbProcessArg = await Risuai.getArgument('bypass_lb_process');
@@ -49,6 +53,7 @@
       const model   = modelArg || stored.model || 'gpt-4o-mini';
       const temperature = parseFloat(temperatureArg || stored.temperature || '0.7');
       const maxTokens = parseOptionalInt(maxTokensArg ?? stored.maxTokens);
+      const extraBodyJson = String(extraBodyArg || stored.extraBodyJson || '').trim();
       const window  = Math.max(1, parseInt(windowArg || stored.window || '10') || 10);
       const bypassTranslate = parseEnabled(bypassTranslateArg, stored.bypassTranslate ?? true);
       const bypassLbProcess = parseEnabled(bypassLbProcessArg, stored.bypassLbProcess ?? true);
@@ -59,6 +64,7 @@
         model,
         temperature: Number.isFinite(temperature) ? temperature : 0.7,
         maxTokens,
+        extraBodyJson,
         window,
         bypassTranslate,
         bypassLbProcess,
@@ -78,12 +84,7 @@
     }
 
     async function callOpenAICompatibleAgent(conf, messages) {
-      const payload = {
-        model: conf.model,
-        messages,
-        temperature: conf.temperature,
-      };
-      if (conf.maxTokens !== null) payload.max_tokens = conf.maxTokens;
+      const payload = buildChatCompletionPayload(conf, messages);
 
       const res = await Risuai.nativeFetch(`${conf.baseUrl}/chat/completions`, {
         method: 'POST',
@@ -134,12 +135,7 @@
 
     async function callVertexAgent(conf, messages) {
       const accessToken = await getVertexAccessToken(conf.apiKey);
-      const payload = {
-        model: conf.model,
-        messages,
-        temperature: conf.temperature,
-      };
-      if (conf.maxTokens !== null) payload.max_tokens = conf.maxTokens;
+      const payload = buildChatCompletionPayload(conf, messages);
 
       const res = await Risuai.nativeFetch(`${conf.baseUrl}/chat/completions`, {
         method: 'POST',
@@ -157,6 +153,19 @@
 
       const data = await res.json();
       return data.choices[0].message.content;
+    }
+
+    function buildChatCompletionPayload(conf, messages) {
+      const payload = {
+        model: conf.model,
+        messages,
+        temperature: conf.temperature,
+      };
+      if (conf.maxTokens !== null) payload.max_tokens = conf.maxTokens;
+
+      const extraBody = parseExtraBodyJson(conf.extraBodyJson);
+      if (!extraBody) return payload;
+      return deepMergeJson(payload, extraBody);
     }
 
     function toAnthropicMessages(messages) {
@@ -330,7 +339,8 @@
     async function openLiteDashboard() {
       const conf = await getConfig();
       const vaultInfo = await getConfigVaultInfo();
-      document.body.innerHTML = buildLiteUI(conf, vaultInfo);
+      const lastRun = await getLastRunDiagnostics();
+      document.body.innerHTML = buildLiteUI(conf, vaultInfo, lastRun);
       setupLiteHandlers(conf);
       await Risuai.showContainer('fullscreen');
     }
@@ -345,7 +355,7 @@
       location: 'hamburger',
     }, openLiteDashboard);
 
-    function buildLiteUI(conf, vaultInfo) {
+    function buildLiteUI(conf, vaultInfo, lastRun) {
       return `<!DOCTYPE html><html><head><meta charset="utf-8">
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
@@ -441,6 +451,7 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
         <div class="k">Model</div><div class="v">${escHtml(conf.model)}</div>
         <div class="k">Temperature</div><div class="v">${escHtml(conf.temperature)}</div>
         <div class="k">Max Tokens</div><div class="v">${escHtml(conf.maxTokens ?? '제한 없음')}</div>
+        <div class="k">추가 JSON</div><div class="v">${conf.extraBodyJson ? '적용됨' : '없음'}</div>
         <div class="k">Context</div><div class="v">${escHtml(conf.window)}개 메시지</div>
         <div class="k">번역 우회</div><div class="v">${conf.bypassTranslate ? '켜짐' : '꺼짐'}</div>
         <div class="k">LB 우회</div><div class="v">${conf.bypassLbProcess ? '켜짐' : '꺼짐'}</div>
@@ -457,6 +468,8 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
       </div>
     </div>
   </div>
+
+  ${lastRunCard(lastRun)}
 
   <div class="card">
     <h2>설정</h2>
@@ -488,6 +501,22 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
       <label for="context_window">Context Window</label>
       <input id="context_window" type="number" min="1" max="50" value="${escHtml(conf.window)}">
     </div>
+    <div class="row2">
+      <label>
+        <input id="gateway_caching_auto" type="checkbox" ${checkedAttr(gatewayCachingAutoEnabled(conf.extraBodyJson))}>
+        Vercel Gateway automatic caching
+      </label>
+      <label>
+        <input id="gateway_zdr" type="checkbox" ${checkedAttr(gatewayZdrEnabled(conf.extraBodyJson))}>
+        Vercel Gateway Zero Data Retention
+      </label>
+    </div>
+    <div class="example-url">체크박스는 아래 JSON 블럭의 providerOptions.gateway 값을 갱신합니다. 필요하면 직접 수정할 수 있습니다.</div>
+    <div class="field">
+      <label for="agent_extra_body_json">추가 JSON body</label>
+      <textarea id="agent_extra_body_json" spellcheck="false" placeholder='{"providerOptions":{"gateway":{"caching":"auto","zeroDataRetention":true}}}'>${escHtml(conf.extraBodyJson)}</textarea>
+    </div>
+    <div class="example-url">OpenAI-compatible/Vertex chat completions 요청에 병합합니다. Vercel AI Gateway의 caching, ZDR, provider routing 같은 providerOptions 용도입니다.</div>
     <label>
       <input id="bypass_translate" type="checkbox" ${checkedAttr(conf.bypassTranslate)}>
       RisuAI 내장 번역 요청 우회
@@ -504,7 +533,7 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
     <h2>RisuAI 저장소 설정 보관</h2>
     <div class="kv">
       <div class="k">Vault</div><div class="v">${vaultInfo.exists ? `있음 (${escHtml(formatDateTime(vaultInfo.savedAt))})` : '없음'}</div>
-      <div class="k">보관 내용</div><div class="v">URL, provider, model, API key, Vertex JSON, 우회 설정</div>
+      <div class="k">보관 내용</div><div class="v">URL, provider, model, API key, Vertex JSON, 추가 JSON, 우회 설정</div>
     </div>
     <div style="height:10px"></div>
     <div class="header-actions">
@@ -520,6 +549,8 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
       <li>Endpoint Base URL은 provider별 API base 주소입니다. OpenAI-compatible은 /v1, Anthropic은 https://api.anthropic.com/v1 형식을 사용합니다.</li>
       <li>API Key 입력칸은 저장된 값을 다시 표시하지 않습니다. 빈칸으로 저장하면 기존 값을 유지합니다.</li>
       <li>Vertex AI를 선택하면 API Key 대신 서비스 계정 JSON 파일을 불러오고, Lite판 내부에서 OAuth access token을 발급해 호출합니다.</li>
+      <li>추가 JSON body는 OpenAI-compatible/Vertex chat completions 요청에만 병합됩니다. Anthropic 직접 호출에는 적용하지 않습니다.</li>
+      <li>마지막 실행 상태는 본문 없이 성공/우회/실패, 출력 길이, 소요 시간 같은 작은 진단값만 저장합니다.</li>
       <li>LLM 인증 테스트는 생성 호출 없이 provider별 인증/모델 조회 경로만 확인합니다. 실제 분석은 토큰을 사용합니다.</li>
       <li>내장 LLM 번역과 &lt;lb-process&gt; 헬퍼 호출은 기본적으로 분석 파이프라인을 우회합니다.</li>
       <li>설정 백업은 RisuAI save/passphrase가 보호하는 pluginStorage에 저장되어, 플러그인 JS 업데이트 후에도 복구됩니다.</li>
@@ -540,6 +571,7 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
       setupProviderControls();
       setupCredentialFiles();
       setupEndpointExamples();
+      setupExtraBodyActions();
       document.getElementById('llm-test-btn')?.addEventListener('click', testLiteLlm);
       document.getElementById('all-test-btn')?.addEventListener('click', testLiteLlm);
       document.getElementById('save-btn')?.addEventListener('click', async () => {
@@ -585,6 +617,7 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
         model: getInputValue('agent_model') || 'gpt-4o-mini',
         temperature: requiredFloat('agent_temperature', 0.7),
         maxTokens: parseOptionalInt(getInputValue('agent_max_tokens')),
+        extraBodyJson: normalizeExtraBodyJson(getInputValue('agent_extra_body_json')),
         window: Math.max(1, parseInt(getInputValue('context_window')) || 10),
         bypassTranslate: getCheckboxValue('bypass_translate'),
         bypassLbProcess: getCheckboxValue('bypass_lb_process'),
@@ -598,6 +631,7 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
       await Risuai.setArgument('agent_model', conf.model);
       await Risuai.setArgument('agent_temperature', String(conf.temperature));
       await Risuai.setArgument('agent_max_tokens', conf.maxTokens === null ? '' : String(conf.maxTokens));
+      await Risuai.setArgument('agent_extra_body_json', conf.extraBodyJson || '');
       await Risuai.setArgument('context_window', String(conf.window));
       await Risuai.setArgument('bypass_translate', conf.bypassTranslate ? '1' : '0');
       await Risuai.setArgument('bypass_lb_process', conf.bypassLbProcess ? '1' : '0');
@@ -700,6 +734,66 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
       }, 4000);
     }
 
+    function lastRunCard(lastRun) {
+      if (!lastRun) {
+        return `
+          <div class="card">
+            <h2>마지막 실행 상태</h2>
+            <div class="kv">
+              <div class="k">상태</div><div class="v"><span class="badge neutral">기록 없음</span></div>
+              <div class="k">확인 방법</div><div class="v">채팅을 한 번 보내면 Lite beforeRequest 실행 결과가 여기에 표시됩니다.</div>
+            </div>
+            <div class="example-url" style="margin:10px 0 0">프롬프트와 응답 원문은 저장하지 않고 상태, 길이, 소요 시간만 저장합니다.</div>
+          </div>`;
+      }
+
+      const status = lastRun.status || 'unknown';
+      const statusClass = status === 'success' ? 'ok' : status === 'error' ? 'err' : 'neutral';
+      return `
+        <div class="card">
+          <h2>마지막 실행 상태</h2>
+          <div class="kv">
+            <div class="k">상태</div><div class="v"><span class="badge ${statusClass}">${escHtml(lastRunStatusLabel(status))}</span></div>
+            <div class="k">실행 시각</div><div class="v">${escHtml(formatDateTime(lastRun.finishedAt || lastRun.startedAt))}</div>
+            <div class="k">요청 타입</div><div class="v">${escHtml(lastRun.requestType || '-')}</div>
+            <div class="k">Provider</div><div class="v">${escHtml([lastRun.provider, lastRun.model].filter(Boolean).join(' / ') || '-')}</div>
+            <div class="k">Endpoint</div><div class="v">${escHtml(lastRun.endpoint || '-')}</div>
+            <div class="k">추가 JSON</div><div class="v">${lastRun.extraBody ? '적용됨' : '없음'}</div>
+            <div class="k">소요 시간</div><div class="v">${escHtml(formatDuration(lastRun.durationMs))}</div>
+            <div class="k">주입</div><div class="v">${lastRun.injected ? 'yes' : 'no'}</div>
+            <div class="k">세계관</div><div class="v">${agentDiagnosticSummary(lastRun.agents?.worldbuilding)}</div>
+            <div class="k">플롯</div><div class="v">${agentDiagnosticSummary(lastRun.agents?.plot)}</div>
+            <div class="k">등장인물</div><div class="v">${agentDiagnosticSummary(lastRun.agents?.character)}</div>
+            ${lastRun.reason ? `<div class="k">사유</div><div class="v">${escHtml(lastRun.reason)}</div>` : ''}
+            ${lastRun.error ? `<div class="k">오류</div><div class="v error-text">${escHtml(lastRun.error)}</div>` : ''}
+          </div>
+          <div class="example-url" style="margin:10px 0 0">이 카드는 실제 채팅 요청에서 MultiAgent가 돌았는지 확인하는 용도입니다. 전체 리퀘스트 로그를 열 필요가 없도록 작은 진단값만 남깁니다.</div>
+        </div>`;
+    }
+
+    function lastRunStatusLabel(status) {
+      const labels = {
+        success: '성공',
+        bypassed: '우회',
+        skipped: '건너뜀',
+        error: '실패',
+      };
+      return labels[status] || '알 수 없음';
+    }
+
+    function agentDiagnosticSummary(agent) {
+      if (!agent) return '-';
+      if (!agent.ok) return `<span class="badge err">실패</span>${agent.error ? ` ${escHtml(agent.error)}` : ''}`;
+      return `<span class="badge ok">성공</span> ${escHtml(formatDuration(agent.durationMs))}, ${escHtml(agent.chars || 0)} chars`;
+    }
+
+    function formatDuration(value) {
+      const parsed = Number(value);
+      if (!Number.isFinite(parsed)) return '-';
+      if (parsed < 1000) return `${Math.round(parsed)}ms`;
+      return `${(parsed / 1000).toFixed(1)}s`;
+    }
+
     async function getConfigVaultInfo() {
       const vault = await getConfigVault('lite');
       return {
@@ -743,6 +837,57 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
       }
     }
 
+    async function getLastRunDiagnostics() {
+      try {
+        const raw = await Risuai.pluginStorage.getItem(LAST_RUN_KEY);
+        const lastRun = typeof raw === 'string' ? JSON.parse(raw) : raw;
+        if (!lastRun || lastRun.version !== LAST_RUN_VERSION) return null;
+        return lastRun;
+      } catch (_) {
+        return null;
+      }
+    }
+
+    async function saveLastRunDiagnostics(diagnostics) {
+      try {
+        await Risuai.pluginStorage.setItem(LAST_RUN_KEY, sanitizeLastRunDiagnostics(diagnostics));
+      } catch (err) {
+        console.log(`MultiAgent diagnostics save failed: ${err.message}`);
+      }
+    }
+
+    function sanitizeLastRunDiagnostics(diagnostics) {
+      const cleanAgents = {};
+      for (const name of ['worldbuilding', 'plot', 'character']) {
+        if (diagnostics.agents?.[name]) {
+          const agent = diagnostics.agents[name];
+          cleanAgents[name] = {
+            ok: Boolean(agent.ok),
+            durationMs: safeNumber(agent.durationMs),
+            chars: Math.max(0, parseInt(agent.chars || 0) || 0),
+            error: truncateText(agent.error || '', 220),
+          };
+        }
+      }
+
+      return {
+        version: LAST_RUN_VERSION,
+        status: truncateText(diagnostics.status || 'unknown', 24),
+        startedAt: truncateText(diagnostics.startedAt || '', 64),
+        finishedAt: truncateText(diagnostics.finishedAt || '', 64),
+        durationMs: safeNumber(diagnostics.durationMs),
+        requestType: truncateText(diagnostics.requestType || 'chat', 64),
+        provider: truncateText(diagnostics.provider || '', 80),
+        model: truncateText(diagnostics.model || '', 120),
+        endpoint: truncateText(diagnostics.endpoint || '', 160),
+        extraBody: Boolean(diagnostics.extraBody),
+        injected: Boolean(diagnostics.injected),
+        reason: truncateText(diagnostics.reason || '', 220),
+        error: truncateText(diagnostics.error || '', 220),
+        agents: cleanAgents,
+      };
+    }
+
     function normalizeVaultConfig(config) {
       return {
         provider: String(config.provider || 'openai'),
@@ -753,6 +898,7 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
         maxTokens: config.maxTokens === null || config.maxTokens === undefined || config.maxTokens === ''
           ? null
           : parseOptionalInt(config.maxTokens),
+        extraBodyJson: normalizeExtraBodyJson(config.extraBodyJson || ''),
         window: Math.max(1, parseInt(config.window || '10') || 10),
         bypassTranslate: Boolean(config.bypassTranslate),
         bypassLbProcess: Boolean(config.bypassLbProcess),
@@ -925,6 +1071,16 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
         input?.addEventListener('input', () => updateEndpointExample(baseId));
         updateEndpointExample(baseId);
       });
+    }
+
+    function setupExtraBodyActions() {
+      const bodyId = 'agent_extra_body_json';
+      const cachingId = 'gateway_caching_auto';
+      const zdrId = 'gateway_zdr';
+      document.getElementById(cachingId)?.addEventListener('change', () => updateGatewayBodyFromCheckboxes(bodyId, cachingId, zdrId));
+      document.getElementById(zdrId)?.addEventListener('change', () => updateGatewayBodyFromCheckboxes(bodyId, cachingId, zdrId));
+      document.getElementById(bodyId)?.addEventListener('input', () => syncGatewayCheckboxesFromBody(bodyId, cachingId, zdrId));
+      syncGatewayCheckboxesFromBody(bodyId, cachingId, zdrId);
     }
 
     function updateEndpointExample(baseId) {
@@ -1142,6 +1298,129 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
       return Number.isFinite(parsed) ? parsed : null;
     }
 
+    function normalizeExtraBodyJson(value) {
+      const raw = String(value || '').trim();
+      if (!raw) return '';
+      return JSON.stringify(parseExtraBodyJson(raw), null, 2);
+    }
+
+    function parseExtraBodyJson(value) {
+      const raw = String(value || '').trim();
+      if (!raw) return null;
+
+      let parsed;
+      try {
+        parsed = JSON.parse(raw);
+      } catch (err) {
+        throw new Error(`추가 JSON body 파싱 실패: ${err.message}`);
+      }
+
+      if (!isPlainObject(parsed)) {
+        throw new Error('추가 JSON body는 JSON object여야 합니다.');
+      }
+      return parsed;
+    }
+
+    function parseExtraBodyJsonQuiet(value) {
+      try {
+        return parseExtraBodyJson(value);
+      } catch (_) {
+        return null;
+      }
+    }
+
+    function gatewayCachingAutoEnabled(extraBodyJson) {
+      const parsed = parseExtraBodyJsonQuiet(extraBodyJson);
+      return parsed?.providerOptions?.gateway?.caching === 'auto';
+    }
+
+    function gatewayZdrEnabled(extraBodyJson) {
+      const parsed = parseExtraBodyJsonQuiet(extraBodyJson);
+      return parsed?.providerOptions?.gateway?.zeroDataRetention === true;
+    }
+
+    function syncGatewayCheckboxesFromBody(bodyId, cachingId, zdrId) {
+      const parsed = parseExtraBodyJsonQuiet(getInputValue(bodyId));
+      const caching = document.getElementById(cachingId);
+      const zdr = document.getElementById(zdrId);
+      if (!parsed) {
+        if (!getInputValue(bodyId)) {
+          if (caching) caching.checked = false;
+          if (zdr) zdr.checked = false;
+        }
+        return;
+      }
+      if (caching) caching.checked = parsed?.providerOptions?.gateway?.caching === 'auto';
+      if (zdr) zdr.checked = parsed?.providerOptions?.gateway?.zeroDataRetention === true;
+    }
+
+    function updateGatewayBodyFromCheckboxes(bodyId, cachingId, zdrId) {
+      let body = {};
+      try {
+        body = parseExtraBodyJson(getInputValue(bodyId)) || {};
+      } catch (err) {
+        showMsg(`추가 JSON을 먼저 수정하세요: ${err.message}`, false);
+        syncGatewayCheckboxesFromBody(bodyId, cachingId, zdrId);
+        return;
+      }
+
+      const providerOptions = isPlainObject(body.providerOptions) ? { ...body.providerOptions } : {};
+      const gateway = isPlainObject(providerOptions.gateway) ? { ...providerOptions.gateway } : {};
+
+      if (document.getElementById(cachingId)?.checked) {
+        gateway.caching = 'auto';
+      } else {
+        delete gateway.caching;
+      }
+
+      if (document.getElementById(zdrId)?.checked) {
+        gateway.zeroDataRetention = true;
+      } else {
+        delete gateway.zeroDataRetention;
+      }
+
+      if (Object.keys(gateway).length) {
+        providerOptions.gateway = gateway;
+        body.providerOptions = providerOptions;
+      } else {
+        delete providerOptions.gateway;
+        if (Object.keys(providerOptions).length) {
+          body.providerOptions = providerOptions;
+        } else {
+          delete body.providerOptions;
+        }
+      }
+
+      setElementValue(bodyId, Object.keys(body).length ? JSON.stringify(body, null, 2) : '');
+    }
+
+    function deepMergeJson(base, extra) {
+      const result = { ...base };
+      for (const [key, value] of Object.entries(extra)) {
+        if (key === 'messages') continue;
+        if (isPlainObject(value) && isPlainObject(result[key])) {
+          result[key] = deepMergeJson(result[key], value);
+        } else {
+          result[key] = value;
+        }
+      }
+      return result;
+    }
+
+    function isPlainObject(value) {
+      return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+    }
+
+    function safeNumber(value) {
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? parsed : null;
+    }
+
+    function truncateText(value, limit) {
+      const text = String(value || '');
+      return text.length > limit ? `${text.slice(0, Math.max(0, limit - 3))}...` : text;
+    }
+
     function requiredFloat(id, fallback) {
       const parsed = parseFloat(getInputValue(id));
       return Number.isFinite(parsed) ? parsed : fallback;
@@ -1176,6 +1455,36 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
       return '';
     }
 
+    async function runAgentWithDiagnostics(run, name, action) {
+      const started = Date.now();
+      try {
+        const output = await action();
+        run.agents[name] = {
+          ok: true,
+          durationMs: Date.now() - started,
+          chars: String(output || '').length,
+        };
+        return output;
+      } catch (err) {
+        run.agents[name] = {
+          ok: false,
+          durationMs: Date.now() - started,
+          chars: 0,
+          error: err.message,
+        };
+        throw err;
+      }
+    }
+
+    function finishRunDiagnostics(run, startedAtMs, patch) {
+      return {
+        ...run,
+        ...patch,
+        finishedAt: new Date().toISOString(),
+        durationMs: Date.now() - startedAtMs,
+      };
+    }
+
     function escHtml(str) {
       return String(str)
         .replace(/&/g, '&amp;')
@@ -1187,16 +1496,39 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
     // ── beforeRequest 훅 등록 ─────────────────────────────────────────────────
 
     Risuai.addRisuReplacer('beforeRequest', async (messages, type) => {
+      const runStartedAtMs = Date.now();
+      const run = {
+        version: LAST_RUN_VERSION,
+        startedAt: new Date(runStartedAtMs).toISOString(),
+        requestType: String(type || 'chat'),
+        agents: {},
+        injected: false,
+      };
       try {
         const conf = await getConfig();
+        Object.assign(run, {
+          provider: conf.provider,
+          model: conf.model,
+          endpoint: formatEndpoint(conf.baseUrl),
+          extraBody: Boolean(conf.extraBodyJson),
+        });
+
         const bypassReason = getBypassReason(messages, type, conf);
         if (bypassReason) {
           console.log(`MultiAgent: ${bypassReason} bypassed`);
+          await saveLastRunDiagnostics(finishRunDiagnostics(run, runStartedAtMs, {
+            status: 'bypassed',
+            reason: bypassReason,
+          }));
           return messages;
         }
 
         if (!conf.apiKey) {
           console.log('MultiAgent: agent_api_key not set — pipeline skipped');
+          await saveLastRunDiagnostics(finishRunDiagnostics(run, runStartedAtMs, {
+            status: 'skipped',
+            reason: 'agent_api_key not set',
+          }));
           return messages;
         }
 
@@ -1205,33 +1537,45 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
         const userInput     = getUserInput(messages);
 
         // 1. 세계관 에이전트
-        const contextWorld = await callAgent(
-          conf,
-          buildWorldPrompt(systemContent, history, userInput)
+        const contextWorld = await runAgentWithDiagnostics(
+          run,
+          'worldbuilding',
+          () => callAgent(conf, buildWorldPrompt(systemContent, history, userInput))
         );
 
         // 2. 플롯 에이전트
-        const contextPlot = await callAgent(
-          conf,
-          buildPlotPrompt(contextWorld, history, userInput)
+        const contextPlot = await runAgentWithDiagnostics(
+          run,
+          'plot',
+          () => callAgent(conf, buildPlotPrompt(contextWorld, history, userInput))
         );
 
         // 3. 캐릭터 에이전트
-        const contextChar = await callAgent(
-          conf,
-          buildCharPrompt(systemContent, contextWorld, contextPlot, history, userInput)
+        const contextChar = await runAgentWithDiagnostics(
+          run,
+          'character',
+          () => callAgent(conf, buildCharPrompt(systemContent, contextWorld, contextPlot, history, userInput))
         );
 
-        return injectContext(messages, contextWorld, contextPlot, contextChar);
+        const nextMessages = injectContext(messages, contextWorld, contextPlot, contextChar);
+        run.injected = true;
+        await saveLastRunDiagnostics(finishRunDiagnostics(run, runStartedAtMs, {
+          status: 'success',
+        }));
+        return nextMessages;
 
       } catch (err) {
         // 에러 시 원본 메시지 그대로 통과 (파이프라인 실패가 채팅을 막지 않도록)
         console.log(`MultiAgent pipeline error: ${err.message}`);
+        await saveLastRunDiagnostics(finishRunDiagnostics(run, runStartedAtMs, {
+          status: 'error',
+          error: err.message,
+        }));
         return messages;
       }
     });
 
-    console.log('MultiAgent RP Pipeline v1.0.1 loaded');
+    console.log('MultiAgent RP Pipeline v1.0.4 loaded');
 
   } catch (err) {
     console.log(`MultiAgent init error: ${err.message}`);

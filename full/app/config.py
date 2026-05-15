@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     default_model: str = "gpt-4o-mini"
     default_temperature: float = 0.7
     default_max_tokens: int | None = None
+    default_extra_body_json: str = ""
 
     # 세계관 에이전트
     worldbuilding_provider: str = ""
@@ -75,6 +76,7 @@ class Settings(BaseSettings):
             "model": model,
             "temperature": temperature if temperature is not None else self.default_temperature,
             "max_tokens": max_tokens if max_tokens is not None else self.default_max_tokens,
+            "extra_body_json": self.default_extra_body_json,
         }
 
 

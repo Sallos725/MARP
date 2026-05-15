@@ -71,6 +71,30 @@
 
 빌드·서버 불필요. API 키는 RisuAI의 `pluginStorage`에 평문으로 저장된다.
 
+Lite판 상태 화면에는 **마지막 실행 상태** 카드가 있다. 실제 채팅 요청에서
+`beforeRequest` 파이프라인이 성공했는지, 우회되었는지, 실패했는지와 각
+에이전트 출력 길이·소요 시간을 본문 없이 저장해 보여준다. 전체 provider
+요청 로그를 열기 전에 이 카드부터 확인하면 된다.
+
+OpenAI-compatible endpoint에는 추가 JSON body를 병합할 수 있다. 설정 화면에서
+Vercel AI Gateway용 **automatic caching**과 **Zero Data Retention** 체크박스를
+켜면 아래처럼 수정 가능한 JSON 블럭이 자동으로 갱신된다.
+
+```json
+{
+  "providerOptions": {
+    "gateway": {
+      "caching": "auto",
+      "zeroDataRetention": true
+    }
+  }
+}
+```
+
+이 추가 body는 Lite판의 OpenAI-compatible/Vertex `chat/completions` 호출에만
+적용된다. Anthropic 직접 호출에는 적용하지 않는다. JSON 블럭은 직접 수정할 수
+있으므로 provider routing, fallback 같은 Vercel gateway 옵션도 함께 넣을 수 있다.
+
 ---
 
 ## Full판 설치
@@ -99,6 +123,12 @@ docker compose up -d
 3. **Sidecar URL**에 `http://localhost:8000` 입력 후 **사이드카 테스트**.
 4. 필요하면 에이전트별 공급자·모델·키를 개별 지정한다 (생략 시 DEFAULT 사용).
 5. **전체 테스트**가 통과하면 설정 완료.
+
+Full판도 기본 LLM 설정에 추가 JSON body 블럭이 있다. Vercel AI Gateway를 쓸 때는
+Lite판과 같은 방식으로 **automatic caching**과 **Zero Data Retention** 체크박스를
+켜면 `providerOptions.gateway`가 JSON 블럭에 반영되고, 사이드카의
+OpenAI-compatible/Vertex `chat/completions` 호출에 병합된다. Anthropic 직접 호출에는
+적용하지 않는다.
 
 ### 주요 환경변수 (`full/.env`)
 

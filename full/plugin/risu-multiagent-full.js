@@ -1,7 +1,7 @@
 //@name risu_multiagent_full
 //@display-name MultiAgent RP — Full판
 //@api 3.0
-//@version 2.0.4
+//@version 2.0.5
 //@arg server_url string Full판 서버 URL (e.g. http://localhost:6009 or https://example.com/multi-agent)
 //@arg bypass_translate string Skip MultiAgent analysis for RisuAI built-in LLM translation requests (default: 1)
 //@arg bypass_lb_process string Skip MultiAgent analysis for <lb-process> helper LLM requests (default: 1)
@@ -247,6 +247,12 @@
           <input id="${id}" type="${type}" value="${escHtml(fieldValue(cfg, id))}" placeholder="${escHtml(placeholder)}">
         </div>`;
 
+      const textareaField = (id, label, placeholder = '') => `
+        <div class="field">
+          <label for="${id}">${label}</label>
+          <textarea id="${id}" spellcheck="false" placeholder="${escHtml(placeholder)}">${escHtml(fieldValue(cfg, id))}</textarea>
+        </div>`;
+
       const credentialField = (id, isSet) => `
         <div class="field credential-field" data-credential="${id}">
           <div class="api-key-credential">
@@ -448,6 +454,7 @@ button.ghost{background:#15171b;color:#a8b0bd}
           <div class="k">예시 URL</div><div class="v">${escHtml(exampleChatUrl(publicCfg.default_base_url || v('default_base_url', 'https://api.openai.com/v1')))}</div>
           <div class="k">Temperature</div><div class="v">${escHtml(publicCfg.default_temperature ?? v('default_temperature', '0.7'))}</div>
           <div class="k">Max Tokens</div><div class="v">${escHtml(publicCfg.default_max_tokens ?? v('default_max_tokens', '제한 없음'))}</div>
+          <div class="k">추가 JSON</div><div class="v">${publicCfg.default_extra_body_json_set || cfg.default_extra_body_json ? '적용됨' : '없음'}</div>
           <div class="k">타임아웃</div><div class="v">${escHtml(publicCfg.request_timeout ?? v('request_timeout', '60'))}초</div>
           <div class="k">번역 우회</div><div class="v">${bypass.bypassTranslate ? '켜짐' : '꺼짐'}</div>
           <div class="k">LB 우회</div><div class="v">${bypass.bypassLbProcess ? '켜짐' : '꺼짐'}</div>
@@ -490,6 +497,19 @@ button.ghost{background:#15171b;color:#a8b0bd}
         ${field('default_temperature', 'Temperature', 'number', '0.7')}
         ${field('default_max_tokens', 'Max Tokens', 'number', '비우면 제한 없음')}
       </div>
+      <div class="row2">
+        <label>
+          <input id="gateway_caching_auto" type="checkbox" ${checkedAttr(gatewayCachingAutoEnabled(v('default_extra_body_json')))}>
+          Vercel Gateway automatic caching
+        </label>
+        <label>
+          <input id="gateway_zdr" type="checkbox" ${checkedAttr(gatewayZdrEnabled(v('default_extra_body_json')))}>
+          Vercel Gateway Zero Data Retention
+        </label>
+      </div>
+      <div class="example-url">체크박스는 아래 JSON 블럭의 providerOptions.gateway 값을 갱신합니다. 필요하면 직접 수정할 수 있습니다.</div>
+      ${textareaField('default_extra_body_json', '추가 JSON body', '{"providerOptions":{"gateway":{"caching":"auto","zeroDataRetention":true}}}')}
+      <div class="example-url">OpenAI-compatible/Vertex chat completions 요청에 병합합니다. Vercel AI Gateway의 caching, ZDR, provider routing 같은 providerOptions 용도입니다. Anthropic 직접 호출에는 적용하지 않습니다.</div>
     </div>
 
     ${agentSettings('worldbuilding', '세계관 에이전트', Boolean(findAgent(agents, 'worldbuilding')?.api_key_set || cfg.worldbuilding_api_key))}
@@ -534,6 +554,7 @@ button.ghost{background:#15171b;color:#a8b0bd}
         <li>Full판의 Sidecar URL은 분석 파이프라인을 호스팅하는 FastAPI 서버 주소입니다. 예시는 http://localhost:6009 입니다.</li>
         <li>LLM Endpoint Base URL은 분석 에이전트가 호출할 OpenAI-compatible API의 /v1 주소입니다.</li>
         <li>API Key 입력칸은 저장된 값을 다시 표시하지 않습니다. 빈칸으로 두면 기존 값이 유지됩니다.</li>
+        <li>Vercel AI Gateway를 쓸 때는 기본 LLM 설정의 caching/ZDR 체크박스로 providerOptions.gateway JSON을 만들 수 있고, 아래 JSON 블럭을 직접 수정할 수도 있습니다.</li>
         <li>LLM 인증 테스트는 생성 호출 없이 provider별 인증/모델 조회 경로만 확인합니다. 실제 분석은 토큰을 사용합니다.</li>
         <li>분석 실패 시에도 채팅은 막히지 않습니다. 원본 프롬프트가 그대로 메인 모델에 전달됩니다.</li>
         <li>디버그 모드를 켜면 최근 분석 탭에서 각 에이전트 출력을 펼쳐 볼 수 있습니다.</li>
@@ -781,6 +802,7 @@ button.ghost{background:#15171b;color:#a8b0bd}
       setupProviderControls();
       setupCredentialFiles();
       setupEndpointExamples();
+      setupExtraBodyActions();
 
       document.querySelectorAll('.tab-btn').forEach(btn => {
         btn.addEventListener('click', () => {
@@ -836,6 +858,7 @@ button.ghost{background:#15171b;color:#a8b0bd}
         default_model:          getInputValue('default_model'),
         default_temperature:    requiredFloat('default_temperature', 0.7),
         default_max_tokens:     optionalInt('default_max_tokens'),
+        default_extra_body_json: normalizeExtraBodyJson(getInputValue('default_extra_body_json')),
         worldbuilding_provider: getProviderValue('worldbuilding_provider', ''),
         worldbuilding_base_url: getInputValue('worldbuilding_base_url'),
         worldbuilding_api_key:  secret('worldbuilding_api_key'),
@@ -1023,6 +1046,16 @@ button.ghost{background:#15171b;color:#a8b0bd}
       });
     }
 
+    function setupExtraBodyActions() {
+      const bodyId = 'default_extra_body_json';
+      const cachingId = 'gateway_caching_auto';
+      const zdrId = 'gateway_zdr';
+      document.getElementById(cachingId)?.addEventListener('change', () => updateGatewayBodyFromCheckboxes(bodyId, cachingId, zdrId));
+      document.getElementById(zdrId)?.addEventListener('change', () => updateGatewayBodyFromCheckboxes(bodyId, cachingId, zdrId));
+      document.getElementById(bodyId)?.addEventListener('input', () => syncGatewayCheckboxesFromBody(bodyId, cachingId, zdrId));
+      syncGatewayCheckboxesFromBody(bodyId, cachingId, zdrId);
+    }
+
     function updateEndpointExample(baseId) {
       const example = document.querySelector(`[data-example-for="${baseId}"]`);
       const input = document.getElementById(baseId);
@@ -1103,6 +1136,106 @@ button.ghost{background:#15171b;color:#a8b0bd}
       if (!value) return null;
       const parsed = parseInt(value);
       return Number.isFinite(parsed) ? parsed : null;
+    }
+
+    function normalizeExtraBodyJson(value) {
+      const raw = String(value || '').trim();
+      if (!raw) return '';
+      return JSON.stringify(parseExtraBodyJson(raw), null, 2);
+    }
+
+    function parseExtraBodyJson(value) {
+      const raw = String(value || '').trim();
+      if (!raw) return null;
+
+      let parsed;
+      try {
+        parsed = JSON.parse(raw);
+      } catch (err) {
+        throw new Error(`추가 JSON body 파싱 실패: ${err.message}`);
+      }
+
+      if (!isPlainObject(parsed)) {
+        throw new Error('추가 JSON body는 JSON object여야 합니다.');
+      }
+      return parsed;
+    }
+
+    function parseExtraBodyJsonQuiet(value) {
+      try {
+        return parseExtraBodyJson(value);
+      } catch (_) {
+        return null;
+      }
+    }
+
+    function gatewayCachingAutoEnabled(extraBodyJson) {
+      const parsed = parseExtraBodyJsonQuiet(extraBodyJson);
+      return parsed?.providerOptions?.gateway?.caching === 'auto';
+    }
+
+    function gatewayZdrEnabled(extraBodyJson) {
+      const parsed = parseExtraBodyJsonQuiet(extraBodyJson);
+      return parsed?.providerOptions?.gateway?.zeroDataRetention === true;
+    }
+
+    function syncGatewayCheckboxesFromBody(bodyId, cachingId, zdrId) {
+      const parsed = parseExtraBodyJsonQuiet(getInputValue(bodyId));
+      const caching = document.getElementById(cachingId);
+      const zdr = document.getElementById(zdrId);
+      if (!parsed) {
+        if (!getInputValue(bodyId)) {
+          if (caching) caching.checked = false;
+          if (zdr) zdr.checked = false;
+        }
+        return;
+      }
+      if (caching) caching.checked = parsed?.providerOptions?.gateway?.caching === 'auto';
+      if (zdr) zdr.checked = parsed?.providerOptions?.gateway?.zeroDataRetention === true;
+    }
+
+    function updateGatewayBodyFromCheckboxes(bodyId, cachingId, zdrId) {
+      let body = {};
+      try {
+        body = parseExtraBodyJson(getInputValue(bodyId)) || {};
+      } catch (err) {
+        showMsg(`추가 JSON을 먼저 수정하세요: ${err.message}`, false);
+        syncGatewayCheckboxesFromBody(bodyId, cachingId, zdrId);
+        return;
+      }
+
+      const providerOptions = isPlainObject(body.providerOptions) ? { ...body.providerOptions } : {};
+      const gateway = isPlainObject(providerOptions.gateway) ? { ...providerOptions.gateway } : {};
+
+      if (document.getElementById(cachingId)?.checked) {
+        gateway.caching = 'auto';
+      } else {
+        delete gateway.caching;
+      }
+
+      if (document.getElementById(zdrId)?.checked) {
+        gateway.zeroDataRetention = true;
+      } else {
+        delete gateway.zeroDataRetention;
+      }
+
+      if (Object.keys(gateway).length) {
+        providerOptions.gateway = gateway;
+        body.providerOptions = providerOptions;
+      } else {
+        delete providerOptions.gateway;
+        if (Object.keys(providerOptions).length) {
+          body.providerOptions = providerOptions;
+        } else {
+          delete body.providerOptions;
+        }
+      }
+
+      setElementValue(bodyId, Object.keys(body).length ? JSON.stringify(body, null, 2) : '');
+    }
+
+    function isPlainObject(value) {
+      return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
     }
 
     function requiredFloat(id, fallback) {
@@ -1297,7 +1430,7 @@ button.ghost{background:#15171b;color:#a8b0bd}
       return `${(ms / 1000).toFixed(1)}초`;
     }
 
-    console.log('MultiAgent RP Full판 플러그인 v2.0.1 (beforeRequest 훅) 로드됨');
+    console.log('MultiAgent RP Full판 플러그인 v2.0.5 (beforeRequest 훅) 로드됨');
 
   } catch (err) {
     console.log(`MultiAgent Full판 init error: ${err.message}`);

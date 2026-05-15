@@ -24,7 +24,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="risu-multiagent",
     description="RisuAI용 멀티 에이전트 RP 분석 파이프라인 (beforeRequest 훅 기반)",
-    version="0.2.0",
+    version="0.2.1",
     lifespan=lifespan,
 )
 
@@ -55,6 +55,7 @@ async def status():
             "default_api_key_set": public["default_api_key_set"],
             "default_temperature": public["default_temperature"],
             "default_max_tokens": public["default_max_tokens"],
+            "default_extra_body_json_set": public["default_extra_body_json_set"],
             "context_window": public["context_window"],
             "debug_mode": public["debug_mode"],
             "request_timeout": public["request_timeout"],

@@ -196,7 +196,33 @@ def _openai_payload(agent_cfg: dict, messages: list[dict]) -> dict:
     }
     if agent_cfg["max_tokens"] is not None:
         payload["max_tokens"] = agent_cfg["max_tokens"]
-    return payload
+    extra_body = _parse_extra_body_json(agent_cfg.get("extra_body_json", ""))
+    return _deep_merge_json(payload, extra_body) if extra_body else payload
+
+
+def _parse_extra_body_json(value: str) -> dict:
+    raw = str(value or "").strip()
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise LlmConfigError(f"추가 JSON body 파싱 실패: {exc}") from exc
+    if not isinstance(parsed, dict):
+        raise LlmConfigError("추가 JSON body는 JSON object여야 합니다.")
+    return parsed
+
+
+def _deep_merge_json(base: dict, extra: dict) -> dict:
+    merged = dict(base)
+    for key, value in extra.items():
+        if key == "messages":
+            continue
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = _deep_merge_json(merged[key], value)
+        else:
+            merged[key] = value
+    return merged
 
 
 def _anthropic_messages(messages: list[dict]) -> tuple[str, list[dict]]:

@@ -18,6 +18,7 @@ DEFAULTS: dict = {
     "default_model":          "gpt-4o-mini",
     "default_temperature":    0.7,
     "default_max_tokens":     None,
+    "default_extra_body_json": "",
     "worldbuilding_provider": "",
     "worldbuilding_base_url": "",
     "worldbuilding_api_key":  "",
@@ -83,6 +84,7 @@ def initialize_from_env() -> None:
             "default_model":          s.default_model,
             "default_temperature":    s.default_temperature,
             "default_max_tokens":     s.default_max_tokens,
+            "default_extra_body_json": s.default_extra_body_json,
             "worldbuilding_provider": s.worldbuilding_provider,
             "worldbuilding_base_url": s.worldbuilding_base_url,
             "worldbuilding_api_key":  s.worldbuilding_api_key,
@@ -121,6 +123,7 @@ def get_agent_config(agent_name: str) -> dict:
         "model":    cfg.get(f"{prefix}_model")     or cfg["default_model"],
         "temperature": temperature if temperature is not None else cfg["default_temperature"],
         "max_tokens": max_tokens if max_tokens is not None else cfg["default_max_tokens"],
+        "extra_body_json": cfg["default_extra_body_json"],
     }
 
 
@@ -159,6 +162,7 @@ def public_status() -> dict:
         "default_api_key_set": bool(cfg["default_api_key"]),
         "default_temperature": float(cfg["default_temperature"]),
         "default_max_tokens": cfg["default_max_tokens"],
+        "default_extra_body_json_set": bool(cfg["default_extra_body_json"]),
         "context_window": int(cfg["context_window"]),
         "debug_mode": bool(cfg["debug_mode"]),
         "request_timeout": float(cfg["request_timeout"]),

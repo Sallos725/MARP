@@ -27,6 +27,7 @@ class PublicConfigStatus(BaseModel):
     default_api_key_set: bool
     default_temperature: float
     default_max_tokens: int | None
+    default_extra_body_json_set: bool
     context_window: int
     debug_mode: bool
     request_timeout: float
@@ -83,6 +84,7 @@ class ConfigModel(BaseModel):
     default_model: str = "gpt-4o-mini"
     default_temperature: float = 0.7
     default_max_tokens: int | None = None
+    default_extra_body_json: str = ""
 
     worldbuilding_provider: str = ""
     worldbuilding_base_url: str = ""
