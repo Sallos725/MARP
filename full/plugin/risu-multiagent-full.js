@@ -1,7 +1,7 @@
 //@name risu_multiagent_full
 //@display-name MultiAgent RP — Full판
 //@api 3.0
-//@version 2.0.6
+//@version 2.0.7
 //@arg server_url string Full판 서버 URL (e.g. http://localhost:6009 or https://example.com/multi-agent)
 //@arg bypass_translate string Skip MultiAgent analysis for RisuAI built-in LLM translation requests (default: 1)
 //@arg bypass_lb_process string Skip MultiAgent analysis for <lb-process> helper LLM requests (default: 1)
@@ -62,7 +62,7 @@
 
       // OpenAI messages → /analyze 요청 형식 변환
       const safeMessages = normalizeMessageArray(messages);
-      const systemMsg   = safeMessages.find(m => m.role === 'system');
+      const systemContext = formatSystemContext(safeMessages);
       const nonSystem   = safeMessages.filter(m => m.role !== 'system');
       const lastUserIdx = findLastIndex(nonSystem, m => m.role === 'user');
       const userInput   = lastUserIdx >= 0 ? messageContent(nonSystem[lastUserIdx]) : '';
@@ -73,7 +73,7 @@
         server_url: serverUrl,
         started_at: new Date(startedAt).toISOString(),
         input_chars: stringLength(userInput),
-        system_chars: stringLength(messageContent(systemMsg)),
+        system_chars: stringLength(systemContext),
         history_messages: chatHistory.length,
         mode: type || '',
       };
@@ -83,10 +83,9 @@
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            user_input:    userInput,
-            chat_history:  chatHistory,
-            world_summary: messageContent(systemMsg),
-            char_summary:  '',
+            user_input:     userInput,
+            chat_history:   chatHistory,
+            system_context: systemContext,
           }),
         });
 
@@ -161,6 +160,23 @@
           .join('\n');
       }
       return String(content);
+    }
+
+    function formatSystemContext(messages) {
+      const systemMessages = normalizeMessageArray(messages)
+        .filter(m => m.role === 'system')
+        .map(m => messageContent(m).trim())
+        .filter(Boolean);
+
+      if (systemMessages.length <= 1) {
+        return systemMessages[0] || '';
+      }
+
+      return systemMessages.map((content, idx) => [
+        `<system-message index="${idx + 1}">`,
+        content,
+        '</system-message>',
+      ].join('\n')).join('\n\n');
     }
 
     function injectContext(messages, contextWorld, contextPlot, contextChar) {

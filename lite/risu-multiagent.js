@@ -1,7 +1,7 @@
 //@name risu_multiagent
 //@display-name MultiAgent RP Pipeline
 //@api 3.0
-//@version 1.0.6
+//@version 1.0.7
 //@arg agent_provider string Analysis agent provider label. e.g. openai
 //@arg agent_base_url string Analysis agent API base URL. e.g. https://api.openai.com/v1, https://api.anthropic.com/v1, or Vertex AI OpenAI-compatible endpoint
 //@arg agent_api_key string Analysis agent API key
@@ -241,9 +241,21 @@
       return String(content);
     }
 
-    function getSystemContent(messages) {
-      const sys = normalizeMessageArray(messages).find(m => m.role === 'system');
-      return messageContent(sys);
+    function formatSystemContext(messages) {
+      const systemMessages = normalizeMessageArray(messages)
+        .filter(m => m.role === 'system')
+        .map(m => messageContent(m).trim())
+        .filter(Boolean);
+
+      if (systemMessages.length <= 1) {
+        return systemMessages[0] || '';
+      }
+
+      return systemMessages.map((content, idx) => [
+        `<system-message index="${idx + 1}">`,
+        content,
+        '</system-message>',
+      ].join('\n')).join('\n\n');
     }
 
     function getUserInput(messages) {
@@ -1610,7 +1622,7 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
           return messages;
         }
 
-        const systemContent = getSystemContent(messages);
+        const systemContent = formatSystemContext(messages);
         const history       = formatHistory(messages, conf.window);
         const userInput     = getUserInput(messages);
 

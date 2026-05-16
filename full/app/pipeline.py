@@ -15,12 +15,13 @@ async def run_analysis(request: AnalyzeRequest) -> AnalyzeResponse:
     """
     cfg = config_store.load()
     context_window = request.context_window or cfg.get("context_window", 10)
+    fallback_context = request.system_context or request.world_summary or request.char_summary
 
     pipeline_context = {
         "user_input":     request.user_input,
         "chat_history":   [msg.model_dump() for msg in request.chat_history],
-        "world_summary":  request.world_summary,
-        "char_summary":   request.char_summary,
+        "world_summary":  request.world_summary or fallback_context,
+        "char_summary":   request.char_summary or fallback_context,
         "context_window": context_window,
         "context_world":  "",
         "context_plot":   "",

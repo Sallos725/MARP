@@ -178,11 +178,18 @@ API key 입력 대신 서비스 계정 JSON 파일을 GUI에서 업로드한다.
     {"role": "user", "content": "..."},
     {"role": "assistant", "content": "..."}
   ],
-  "world_summary": "세계관 핵심 설정",
-  "char_summary":  "등장인물 설정",
+  "system_context": "RisuAI가 조립한 전체 system 컨텍스트",
+  "world_summary": "선택: 세계관 전용 설정",
+  "char_summary":  "선택: 등장인물 전용 설정",
   "context_window": 10
 }
 ```
+
+Full판 플러그인은 RisuAI의 모든 system 메시지를 모아 `system_context`로 보낸다.
+`world_summary`와 `char_summary`는 양자택일이 아니라 각각 독립적인 전용 입력이다.
+둘 중 어느 필드든 비어 있으면 해당 에이전트만 `system_context`를 fallback으로
+사용한다. 따라서 별도 분리 요약이 없어도 세계관/캐릭터 에이전트 모두 캐릭터 카드,
+시나리오, 로어북, author note 등 RisuAI가 최종 system prompt에 합친 자료를 참고할 수 있다.
 
 응답:
 
@@ -199,7 +206,8 @@ API key 입력 대신 서비스 계정 JSON 파일을 GUI에서 업로드한다.
 ## 컨텍스트 전략
 
 - **슬라이딩 윈도우**: 기본 최근 10개 메시지. 전체 히스토리는 보내지 않는다.
-- **요약본**: 세계관·인물 요약은 RisuAI 로어북에서 추출해 같이 보낸다.
+- **System 컨텍스트**: Lite/Full 모두 RisuAI가 조립한 모든 system 메시지를 모아
+  세계관·인물 에이전트의 설정 자료로 보낸다.
 - **누적**: 세계관 출력 → 플롯 입력에, 세계관+플롯 출력 → 등장인물 입력에 누적.
 - **주입 위치**: 메인 모델 호출의 system 프롬프트 **끝**.
 

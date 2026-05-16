@@ -9,6 +9,7 @@ class ChatMessage(BaseModel):
 class AnalyzeRequest(BaseModel):
     user_input: str
     chat_history: list[ChatMessage] = Field(default_factory=list)
+    system_context: str = ""
     world_summary: str = ""
     char_summary: str = ""
     context_window: int | None = None
