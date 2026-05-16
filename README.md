@@ -76,6 +76,12 @@ Lite판 상태 화면에는 **마지막 실행 상태** 카드가 있다. 실제
 에이전트 출력 길이·소요 시간을 본문 없이 저장해 보여준다. 전체 provider
 요청 로그를 열기 전에 이 카드부터 확인하면 된다.
 
+Lite/Full 모두 기본적으로 **메인 모델 요청에서만** MultiAgent 분석을 실행한다.
+RisuAI의 `beforeRequest` request mode가 `model`이 아닌 `submodel`, `memory`,
+`emotion`, `otherAx`, `translate` 호출은 보조 에이전트를 돌리지 않고 원본 요청을
+그대로 통과시킨다. 설정 화면의 "메인 모델 요청에서만 MultiAgent 실행" 체크박스로
+테스트 중 일시적으로 끌 수 있다.
+
 OpenAI-compatible endpoint에는 추가 JSON body를 병합할 수 있다. 설정 화면에서
 Vercel AI Gateway용 **automatic caching**과 **Zero Data Retention** 체크박스를
 켜면 아래처럼 수정 가능한 JSON 블럭이 자동으로 갱신된다.

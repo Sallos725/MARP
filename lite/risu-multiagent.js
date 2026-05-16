@@ -1,7 +1,7 @@
 //@name risu_multiagent
 //@display-name MultiAgent RP Pipeline
 //@api 3.0
-//@version 1.0.7
+//@version 1.0.8
 //@arg agent_provider string Analysis agent provider label. e.g. openai
 //@arg agent_base_url string Analysis agent API base URL. e.g. https://api.openai.com/v1, https://api.anthropic.com/v1, or Vertex AI OpenAI-compatible endpoint
 //@arg agent_api_key string Analysis agent API key
@@ -10,6 +10,7 @@
 //@arg agent_max_tokens string Analysis agent max tokens (blank = provider default)
 //@arg agent_extra_body_json string Extra JSON body merged into OpenAI-compatible chat/completions requests
 //@arg context_window int Recent messages per agent (default: 10)
+//@arg main_model_only string Run MultiAgent only for RisuAI main model requests; bypass auxiliary/submodel/memory/emotion/translation requests (default: 1)
 //@arg bypass_translate string Skip MultiAgent analysis for RisuAI built-in LLM translation requests (default: 1)
 //@arg bypass_lb_process string Skip MultiAgent analysis for <lb-process> helper LLM requests (default: 1)
 
@@ -45,6 +46,7 @@
       const maxTokensArg = await Risuai.getArgument('agent_max_tokens');
       const extraBodyArg = await Risuai.getArgument('agent_extra_body_json');
       const windowArg = await Risuai.getArgument('context_window');
+      const mainModelOnlyArg = await Risuai.getArgument('main_model_only');
       const bypassTranslateArg = await Risuai.getArgument('bypass_translate');
       const bypassLbProcessArg = await Risuai.getArgument('bypass_lb_process');
       const provider = providerArg || stored.provider || 'openai';
@@ -55,6 +57,7 @@
       const maxTokens = parseOptionalInt(maxTokensArg ?? stored.maxTokens);
       const extraBodyJson = String(extraBodyArg || stored.extraBodyJson || '').trim();
       const window  = Math.max(1, parseInt(windowArg || stored.window || '10') || 10);
+      const mainModelOnly = parseEnabled(mainModelOnlyArg, stored.mainModelOnly ?? true);
       const bypassTranslate = parseEnabled(bypassTranslateArg, stored.bypassTranslate ?? true);
       const bypassLbProcess = parseEnabled(bypassLbProcessArg, stored.bypassLbProcess ?? true);
       return {
@@ -66,6 +69,7 @@
         maxTokens,
         extraBodyJson,
         window,
+        mainModelOnly,
         bypassTranslate,
         bypassLbProcess,
       };
@@ -535,6 +539,7 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
         <div class="k">Max Tokens</div><div class="v">${escHtml(conf.maxTokens ?? '제한 없음')}</div>
         <div class="k">추가 JSON</div><div class="v">${conf.extraBodyJson ? '적용됨' : '없음'}</div>
         <div class="k">Context</div><div class="v">${escHtml(conf.window)}개 메시지</div>
+        <div class="k">메인 전용</div><div class="v">${conf.mainModelOnly ? '켜짐' : '꺼짐'}</div>
         <div class="k">번역 우회</div><div class="v">${conf.bypassTranslate ? '켜짐' : '꺼짐'}</div>
         <div class="k">LB 우회</div><div class="v">${conf.bypassLbProcess ? '켜짐' : '꺼짐'}</div>
       </div>
@@ -599,6 +604,11 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
       <textarea id="agent_extra_body_json" spellcheck="false" placeholder='{"providerOptions":{"gateway":{"caching":"auto","zeroDataRetention":true}}}'>${escHtml(conf.extraBodyJson)}</textarea>
     </div>
     <div class="example-url">OpenAI-compatible/Vertex chat completions 요청에 병합합니다. Vercel AI Gateway의 caching, ZDR, provider routing 같은 providerOptions 용도입니다.</div>
+    <label>
+      <input id="main_model_only" type="checkbox" ${checkedAttr(conf.mainModelOnly)}>
+      메인 모델 요청에서만 MultiAgent 실행
+    </label>
+    <div class="example-url">request mode가 model이 아닌 submodel, memory, emotion, otherAx, translate 호출은 원본 요청 그대로 통과시킵니다.</div>
     <label>
       <input id="bypass_translate" type="checkbox" ${checkedAttr(conf.bypassTranslate)}>
       RisuAI 내장 번역 요청 우회
@@ -701,6 +711,7 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
         maxTokens: parseOptionalInt(getInputValue('agent_max_tokens')),
         extraBodyJson: normalizeExtraBodyJson(getInputValue('agent_extra_body_json')),
         window: Math.max(1, parseInt(getInputValue('context_window')) || 10),
+        mainModelOnly: getCheckboxValue('main_model_only'),
         bypassTranslate: getCheckboxValue('bypass_translate'),
         bypassLbProcess: getCheckboxValue('bypass_lb_process'),
       };
@@ -715,6 +726,7 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
       await Risuai.setArgument('agent_max_tokens', conf.maxTokens === null ? '' : String(conf.maxTokens));
       await Risuai.setArgument('agent_extra_body_json', conf.extraBodyJson || '');
       await Risuai.setArgument('context_window', String(conf.window));
+      await Risuai.setArgument('main_model_only', conf.mainModelOnly ? '1' : '0');
       await Risuai.setArgument('bypass_translate', conf.bypassTranslate ? '1' : '0');
       await Risuai.setArgument('bypass_lb_process', conf.bypassLbProcess ? '1' : '0');
     }
@@ -982,6 +994,7 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
           : parseOptionalInt(config.maxTokens),
         extraBodyJson: normalizeExtraBodyJson(config.extraBodyJson || ''),
         window: Math.max(1, parseInt(config.window || '10') || 10),
+        mainModelOnly: config.mainModelOnly ?? true,
         bypassTranslate: Boolean(config.bypassTranslate),
         bypassLbProcess: Boolean(config.bypassLbProcess),
       };
@@ -1528,6 +1541,9 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
 
     function getBypassReason(messages, type, conf) {
       const requestType = String(type || '').trim().toLowerCase();
+      if (conf.mainModelOnly && requestType && requestType !== 'model') {
+        return `non-main model request (${requestType})`;
+      }
       if (conf.bypassTranslate && requestType === 'translate') {
         return 'RisuAI translation request';
       }

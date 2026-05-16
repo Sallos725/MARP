@@ -1,8 +1,9 @@
 //@name risu_multiagent_full
 //@display-name MultiAgent RP — Full판
 //@api 3.0
-//@version 2.0.7
+//@version 2.0.8
 //@arg server_url string Full판 서버 URL (e.g. http://localhost:6009 or https://example.com/multi-agent)
+//@arg main_model_only string Run MultiAgent only for RisuAI main model requests; bypass auxiliary/submodel/memory/emotion/translation requests (default: 1)
 //@arg bypass_translate string Skip MultiAgent analysis for RisuAI built-in LLM translation requests (default: 1)
 //@arg bypass_lb_process string Skip MultiAgent analysis for <lb-process> helper LLM requests (default: 1)
 
@@ -35,6 +36,7 @@
     async function getBypassSettings() {
       const settings = await loadPluginSettings();
       return {
+        mainModelOnly: parseEnabled(await Risuai.getArgument('main_model_only'), settings.mainModelOnly ?? true),
         bypassTranslate: parseEnabled(await Risuai.getArgument('bypass_translate'), settings.bypassTranslate ?? true),
         bypassLbProcess: parseEnabled(await Risuai.getArgument('bypass_lb_process'), settings.bypassLbProcess ?? true),
       };
@@ -502,6 +504,7 @@ button.ghost{background:#15171b;color:#a8b0bd}
           <div class="k">Max Tokens</div><div class="v">${escHtml(publicCfg.default_max_tokens ?? v('default_max_tokens', '제한 없음'))}</div>
           <div class="k">추가 JSON</div><div class="v">${publicCfg.default_extra_body_json_set || cfg.default_extra_body_json ? '적용됨' : '없음'}</div>
           <div class="k">타임아웃</div><div class="v">${escHtml(publicCfg.request_timeout ?? v('request_timeout', '60'))}초</div>
+          <div class="k">메인 전용</div><div class="v">${bypass.mainModelOnly ? '켜짐' : '꺼짐'}</div>
           <div class="k">번역 우회</div><div class="v">${bypass.bypassTranslate ? '켜짐' : '꺼짐'}</div>
           <div class="k">LB 우회</div><div class="v">${bypass.bypassLbProcess ? '켜짐' : '꺼짐'}</div>
           <div class="k">설정 백업</div><div class="v">${configBackup.exists ? `있음 (${escHtml(formatDateTime(configBackup.savedAt))})` : '없음'}</div>
@@ -579,6 +582,11 @@ button.ghost{background:#15171b;color:#a8b0bd}
         디버그 모드
       </label>
       <label>
+        <input id="main_model_only" type="checkbox" ${checkedAttr(bypass.mainModelOnly)}>
+        메인 모델 요청에서만 MultiAgent 실행
+      </label>
+      <div class="example-url">request mode가 model이 아닌 submodel, memory, emotion, otherAx, translate 호출은 사이드카 분석 없이 원본 요청 그대로 통과합니다.</div>
+      <label>
         <input id="bypass_translate" type="checkbox" ${checkedAttr(bypass.bypassTranslate)}>
         RisuAI 내장 번역 요청 우회
       </label>
@@ -604,7 +612,8 @@ button.ghost{background:#15171b;color:#a8b0bd}
         <li>LLM 인증 테스트는 생성 호출 없이 provider별 인증/모델 조회 경로만 확인합니다. 실제 분석은 토큰을 사용합니다.</li>
         <li>분석 실패 시에도 채팅은 막히지 않습니다. 원본 프롬프트가 그대로 메인 모델에 전달됩니다.</li>
         <li>디버그 모드를 켜면 최근 분석 탭에서 각 에이전트 출력을 펼쳐 볼 수 있습니다.</li>
-        <li>내장 LLM 번역과 &lt;lb-process&gt; 헬퍼 호출은 기본적으로 분석 파이프라인을 우회합니다.</li>
+        <li>메인 모델 전용 모드가 기본으로 켜져 있어 submodel, memory, emotion, otherAx, translate 호출은 분석 파이프라인을 우회합니다.</li>
+        <li>&lt;lb-process&gt; 헬퍼 호출도 기본적으로 분석 파이프라인을 우회합니다.</li>
       </ul>
     </div>
   </section>
@@ -953,12 +962,14 @@ button.ghost{background:#15171b;color:#a8b0bd}
 
     function collectBypassSettings() {
       return {
+        mainModelOnly: getCheckboxValue('main_model_only'),
         bypassTranslate: getCheckboxValue('bypass_translate'),
         bypassLbProcess: getCheckboxValue('bypass_lb_process'),
       };
     }
 
     async function saveBypassSettings(settings) {
+      await Risuai.setArgument('main_model_only', settings.mainModelOnly ? '1' : '0');
       await Risuai.setArgument('bypass_translate', settings.bypassTranslate ? '1' : '0');
       await Risuai.setArgument('bypass_lb_process', settings.bypassLbProcess ? '1' : '0');
     }
@@ -978,6 +989,7 @@ button.ghost{background:#15171b;color:#a8b0bd}
       await Risuai.pluginStorage.setItem(PLUGIN_SETTINGS_KEY, {
         version: STORAGE_VERSION,
         serverUrl: normalizeUrl(serverUrl || 'http://localhost:6009'),
+        mainModelOnly: Boolean(bypass.mainModelOnly),
         bypassTranslate: Boolean(bypass.bypassTranslate),
         bypassLbProcess: Boolean(bypass.bypassLbProcess),
         savedAt: new Date().toISOString(),
@@ -1309,6 +1321,9 @@ button.ghost{background:#15171b;color:#a8b0bd}
 
     function getBypassReason(messages, type, settings) {
       const requestType = String(type || '').trim().toLowerCase();
+      if (settings.mainModelOnly && requestType && requestType !== 'model') {
+        return `non-main model request (${requestType})`;
+      }
       if (settings.bypassTranslate && requestType === 'translate') {
         return 'RisuAI translation request';
       }
@@ -1476,7 +1491,7 @@ button.ghost{background:#15171b;color:#a8b0bd}
       return `${(ms / 1000).toFixed(1)}초`;
     }
 
-    console.log('MultiAgent RP Full판 플러그인 v2.0.6 (beforeRequest 훅) 로드됨');
+    console.log('MultiAgent RP Full판 플러그인 v2.0.8 (beforeRequest 훅) 로드됨');
 
   } catch (err) {
     console.log(`MultiAgent Full판 init error: ${err.message}`);
