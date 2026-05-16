@@ -25,8 +25,8 @@ class WorldbuildingAgent(BaseAgent):
         user_input = pipeline_context.get("user_input", "")
 
         return (
-            f"[World Setting]\n{world_summary}\n\n"
-            f"[Recent Conversation]\n{history}\n\n"
-            f"[Current User Input]\n{user_input}\n\n"
+            f"{self._source_block('World Setting', world_summary)}\n\n"
+            f"{self._source_block('Recent Conversation', history)}\n\n"
+            f"{self._source_block('Current User Input', user_input)}\n\n"
             "Using the information above, write the worldbuilding consistency notes."
         )

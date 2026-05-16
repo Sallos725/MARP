@@ -25,8 +25,8 @@ class PlotAgent(BaseAgent):
         user_input = pipeline_context.get("user_input", "")
 
         return (
-            f"[Worldbuilding Agent Notes]\n{context_world}\n\n"
-            f"[Recent Conversation]\n{history}\n\n"
-            f"[Current User Input]\n{user_input}\n\n"
+            f"{self._source_block('Worldbuilding Agent Notes', context_world)}\n\n"
+            f"{self._source_block('Recent Conversation', history)}\n\n"
+            f"{self._source_block('Current User Input', user_input)}\n\n"
             "Using the information above, write the plot direction notes."
         )
