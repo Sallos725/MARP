@@ -1,7 +1,7 @@
 //@name risu_multiagent_full
 //@display-name MultiAgent RP — Full판
 //@api 3.0
-//@version 2.0.5
+//@version 2.0.6
 //@arg server_url string Full판 서버 URL (e.g. http://localhost:6009 or https://example.com/multi-agent)
 //@arg bypass_translate string Skip MultiAgent analysis for RisuAI built-in LLM translation requests (default: 1)
 //@arg bypass_lb_process string Skip MultiAgent analysis for <lb-process> helper LLM requests (default: 1)
@@ -46,6 +46,11 @@
 
     Risuai.addRisuReplacer('beforeRequest', async (messages, type) => {
       const bypass = await getBypassSettings();
+      if (!Array.isArray(messages)) {
+        console.log('MultiAgent Full판: invalid message array bypassed');
+        return messages;
+      }
+
       const bypassReason = getBypassReason(messages, type, bypass);
       if (bypassReason) {
         console.log(`MultiAgent Full판: ${bypassReason} bypassed`);
@@ -56,18 +61,19 @@
       const serverUrl = await getServerUrl();
 
       // OpenAI messages → /analyze 요청 형식 변환
-      const systemMsg   = messages.find(m => m.role === 'system');
-      const nonSystem   = messages.filter(m => m.role !== 'system');
+      const safeMessages = normalizeMessageArray(messages);
+      const systemMsg   = safeMessages.find(m => m.role === 'system');
+      const nonSystem   = safeMessages.filter(m => m.role !== 'system');
       const lastUserIdx = findLastIndex(nonSystem, m => m.role === 'user');
-      const userInput   = lastUserIdx >= 0 ? nonSystem[lastUserIdx].content : '';
+      const userInput   = lastUserIdx >= 0 ? messageContent(nonSystem[lastUserIdx]) : '';
       const chatHistory = (lastUserIdx >= 0 ? nonSystem.slice(0, lastUserIdx) : nonSystem)
-        .map(m => ({ role: m.role, content: m.content }));
+        .map(m => ({ role: m.role, content: messageContent(m) }));
 
       const runBase = {
         server_url: serverUrl,
         started_at: new Date(startedAt).toISOString(),
         input_chars: stringLength(userInput),
-        system_chars: stringLength(systemMsg ? systemMsg.content : ''),
+        system_chars: stringLength(messageContent(systemMsg)),
         history_messages: chatHistory.length,
         mode: type || '',
       };
@@ -79,7 +85,7 @@
           body: JSON.stringify({
             user_input:    userInput,
             chat_history:  chatHistory,
-            world_summary: systemMsg ? systemMsg.content : '',
+            world_summary: messageContent(systemMsg),
             char_summary:  '',
           }),
         });
@@ -134,7 +140,31 @@
       return -1;
     }
 
+    function normalizeMessageArray(messages) {
+      if (!Array.isArray(messages)) return [];
+      return messages.filter(m => m && typeof m === 'object' && typeof m.role === 'string');
+    }
+
+    function messageContent(message) {
+      const content = message?.content;
+      if (typeof content === 'string') return content;
+      if (content === undefined || content === null) return '';
+      if (Array.isArray(content)) {
+        return content
+          .map(part => {
+            if (typeof part === 'string') return part;
+            if (part?.type === 'text' && typeof part.text === 'string') return part.text;
+            if (typeof part?.text === 'string') return part.text;
+            return '';
+          })
+          .filter(Boolean)
+          .join('\n');
+      }
+      return String(content);
+    }
+
     function injectContext(messages, contextWorld, contextPlot, contextChar) {
+      if (!Array.isArray(messages)) return messages;
       const injection = [
         '',
         '---',
@@ -154,10 +184,10 @@
         '---',
       ].join('\n');
 
-      const lastSystemIdx = findLastIndex(messages, m => m.role === 'system');
+      const lastSystemIdx = findLastIndex(messages, m => m?.role === 'system');
       if (lastSystemIdx >= 0) {
         return messages.map((m, idx) =>
-          idx === lastSystemIdx ? { ...m, content: m.content + injection } : m
+          idx === lastSystemIdx ? { ...m, content: messageContent(m) + injection } : m
         );
       }
       return [{ role: 'system', content: injection.replace(/^\n/, '') }, ...messages];
@@ -1430,7 +1460,7 @@ button.ghost{background:#15171b;color:#a8b0bd}
       return `${(ms / 1000).toFixed(1)}초`;
     }
 
-    console.log('MultiAgent RP Full판 플러그인 v2.0.5 (beforeRequest 훅) 로드됨');
+    console.log('MultiAgent RP Full판 플러그인 v2.0.6 (beforeRequest 훅) 로드됨');
 
   } catch (err) {
     console.log(`MultiAgent Full판 init error: ${err.message}`);

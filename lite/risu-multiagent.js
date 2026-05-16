@@ -1,7 +1,7 @@
 //@name risu_multiagent
 //@display-name MultiAgent RP Pipeline
 //@api 3.0
-//@version 1.0.5
+//@version 1.0.6
 //@arg agent_provider string Analysis agent provider label. e.g. openai
 //@arg agent_base_url string Analysis agent API base URL. e.g. https://api.openai.com/v1, https://api.anthropic.com/v1, or Vertex AI OpenAI-compatible endpoint
 //@arg agent_api_key string Analysis agent API key
@@ -101,7 +101,7 @@
       }
 
       const data = await res.json();
-      return data.choices[0].message.content;
+      return extractOpenAICompatibleText(data, 'Agent API');
     }
 
     async function callAnthropicAgent(conf, messages) {
@@ -152,7 +152,7 @@
       }
 
       const data = await res.json();
-      return data.choices[0].message.content;
+      return extractOpenAICompatibleText(data, 'Vertex AI API');
     }
 
     function buildChatCompletionPayload(conf, messages) {
@@ -171,11 +171,12 @@
     function toAnthropicMessages(messages) {
       const systemParts = [];
       const anthropicMessages = [];
-      for (const msg of messages) {
+      for (const msg of normalizeMessageArray(messages)) {
         if (msg.role === 'system') {
-          if (msg.content) systemParts.push(String(msg.content));
+          const content = messageContent(msg);
+          if (content) systemParts.push(content);
         } else if (msg.role === 'user' || msg.role === 'assistant') {
-          anthropicMessages.push({ role: msg.role, content: String(msg.content || '') });
+          anthropicMessages.push({ role: msg.role, content: messageContent(msg) });
         }
       }
       if (!anthropicMessages.length) throw new Error('Anthropic 호출에는 user 또는 assistant 메시지가 필요합니다.');
@@ -185,8 +186,29 @@
       };
     }
 
+    function extractOpenAICompatibleText(data, providerName) {
+      const choice = data?.choices?.[0];
+      const content = choice?.message?.content ?? choice?.text ?? data?.output_text;
+      if (typeof content === 'string') return content;
+      if (Array.isArray(content)) {
+        const text = content
+          .map(part => {
+            if (typeof part === 'string') return part;
+            if (part?.type === 'text' && typeof part.text === 'string') return part.text;
+            if (typeof part?.text === 'string') return part.text;
+            return '';
+          })
+          .filter(Boolean)
+          .join('\n')
+          .trim();
+        if (text) return text;
+      }
+      const finishReason = choice?.finish_reason ? ` finish_reason=${choice.finish_reason}` : '';
+      throw new Error(`${providerName} 응답에서 message.content를 찾을 수 없습니다.${finishReason}`);
+    }
+
     function extractAnthropicText(data) {
-      const parts = (data.content || [])
+      const parts = (data?.content || [])
         .filter(block => block && block.type === 'text')
         .map(block => block.text || '')
         .filter(Boolean);
@@ -196,24 +218,47 @@
 
     // ── 메시지 유틸 ───────────────────────────────────────────────────────────
 
+    function normalizeMessageArray(messages) {
+      if (!Array.isArray(messages)) return [];
+      return messages.filter(m => m && typeof m === 'object' && typeof m.role === 'string');
+    }
+
+    function messageContent(message) {
+      const content = message?.content;
+      if (typeof content === 'string') return content;
+      if (content === undefined || content === null) return '';
+      if (Array.isArray(content)) {
+        return content
+          .map(part => {
+            if (typeof part === 'string') return part;
+            if (part?.type === 'text' && typeof part.text === 'string') return part.text;
+            if (typeof part?.text === 'string') return part.text;
+            return '';
+          })
+          .filter(Boolean)
+          .join('\n');
+      }
+      return String(content);
+    }
+
     function getSystemContent(messages) {
-      const sys = messages.find(m => m.role === 'system');
-      return sys ? sys.content : '';
+      const sys = normalizeMessageArray(messages).find(m => m.role === 'system');
+      return messageContent(sys);
     }
 
     function getUserInput(messages) {
-      const userMsgs = messages.filter(m => m.role === 'user');
-      return userMsgs.length ? userMsgs[userMsgs.length - 1].content : '';
+      const userMsgs = normalizeMessageArray(messages).filter(m => m.role === 'user');
+      return userMsgs.length ? messageContent(userMsgs[userMsgs.length - 1]) : '';
     }
 
     function formatHistory(messages, windowSize) {
       // 마지막 유저 메시지를 제외한 최근 N개
-      const chatMsgs = messages.filter(m => m.role === 'user' || m.role === 'assistant');
+      const chatMsgs = normalizeMessageArray(messages).filter(m => m.role === 'user' || m.role === 'assistant');
       const recent = chatMsgs.slice(-(windowSize + 1), -1);
       if (!recent.length) return '(No chat history)';
       return recent.map((m, idx) => [
         `<message index="${idx + 1}" role="${m.role === 'user' ? 'user' : 'assistant'}">`,
-        String(m.content || ''),
+        messageContent(m),
         '</message>',
       ].join('\n')).join('\n');
     }
@@ -236,7 +281,7 @@
     ].join('\n');
 
     function sourceBlock(label, content) {
-      const safeContent = String(content || '').trim() || '(empty)';
+      const safeContent = String(content ?? '').trim() || '(empty)';
       return [
         `<source label="${label}">`,
         safeContent,
@@ -330,6 +375,7 @@
     // ── 컨텍스트 주입 ─────────────────────────────────────────────────────────
 
     function injectContext(messages, contextWorld, contextPlot, contextChar) {
+      if (!Array.isArray(messages)) return messages;
       const injection = [
         '',
         '---',
@@ -349,10 +395,10 @@
         '---',
       ].join('\n');
 
-      const lastSystemIdx = findLastIndex(messages, m => m.role === 'system');
+      const lastSystemIdx = findLastIndex(messages, m => m?.role === 'system');
       if (lastSystemIdx >= 0) {
         return messages.map((m, idx) =>
-          idx === lastSystemIdx ? { ...m, content: m.content + injection } : m
+          idx === lastSystemIdx ? { ...m, content: messageContent(m) + injection } : m
         );
       }
       return [{ role: 'system', content: injection.replace(/^\n/, '') }, ...messages];
@@ -1529,6 +1575,14 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
         injected: false,
       };
       try {
+        if (!Array.isArray(messages)) {
+          await saveLastRunDiagnostics(finishRunDiagnostics(run, runStartedAtMs, {
+            status: 'skipped',
+            reason: 'invalid message array',
+          }));
+          return messages;
+        }
+
         const conf = await getConfig();
         Object.assign(run, {
           provider: conf.provider,
@@ -1599,7 +1653,7 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
       }
     });
 
-    console.log('MultiAgent RP Pipeline v1.0.5 loaded');
+    console.log('MultiAgent RP Pipeline v1.0.6 loaded');
 
   } catch (err) {
     console.log(`MultiAgent init error: ${err.message}`);
