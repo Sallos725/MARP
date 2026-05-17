@@ -1,0 +1,216 @@
+name: Release packages
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build release archives
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          python3 - <<'PY'
+          import os
+          import shutil
+          import sys
+          import zipfile
+          from pathlib import Path
+
+          tag = os.environ.get("GITHUB_REF_NAME", "").strip()
+          if not tag:
+              sys.exit("GITHUB_REF_NAME is required")
+          if "/" in tag or tag in {".", ".."}:
+              sys.exit(f"Refusing unsafe tag name: {tag!r}")
+
+          root = Path.cwd()
+          dist = root / "dist"
+          shutil.rmtree(dist, ignore_errors=True)
+          dist.mkdir(parents=True, exist_ok=True)
+
+          full_root = dist / "full"
+          lite_root = dist / "lite"
+          full_plugin_dir = full_root / "plugin"
+          full_plugin_dir.mkdir(parents=True, exist_ok=True)
+          lite_root.mkdir(parents=True, exist_ok=True)
+
+          shutil.copytree(
+              root / "full" / "app",
+              full_root / "app",
+              ignore=shutil.ignore_patterns("__pycache__", "*.pyc", ".pytest_cache"),
+          )
+          shutil.copy2(
+              root / "full" / "plugin" / "risu-multiagent-full.js",
+              full_plugin_dir / f"multiagent-full-{tag}.json",
+          )
+          shutil.copy2(
+              root / "lite" / "risu-multiagent.js",
+              lite_root / f"multiagent-lite-{tag}.json",
+          )
+
+          def write_zip(output_path: Path, source_dir: Path) -> None:
+              with zipfile.ZipFile(output_path, "w", zipfile.ZIP_DEFLATED) as archive:
+                  for path in sorted(source_dir.rglob("*")):
+                      if path.is_file():
+                          archive.write(path, path.relative_to(source_dir).as_posix())
+
+          write_zip(dist / f"multiagent-full-{tag}.zip", full_root)
+          write_zip(dist / f"multiagent-lite-{tag}.zip", lite_root)
+
+          for package in sorted(dist.glob("*.zip")):
+              print(package.name)
+              with zipfile.ZipFile(package) as archive:
+                  for name in archive.namelist():
+                      print(f"  {name}")
+          PY
+
+      - name: Publish release assets
+        shell: bash
+        env:
+          GITEA_TOKEN: ${{ secrets.GITEA_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          python3 - <<'PY'
+          import json
+          import os
+          import secrets
+          import sys
+          import urllib.error
+          import urllib.parse
+          import urllib.request
+          from pathlib import Path
+
+          token = os.environ.get("GITEA_TOKEN") or os.environ.get("GITHUB_TOKEN")
+          if not token:
+              sys.exit("GITEA_TOKEN or GITHUB_TOKEN is required to publish release assets")
+
+          api_url = (os.environ.get("GITHUB_API_URL") or "").rstrip("/")
+          server_url = (os.environ.get("GITHUB_SERVER_URL") or "").rstrip("/")
+          if not api_url and server_url:
+              api_url = f"{server_url}/api/v1"
+          if not api_url:
+              sys.exit("GITHUB_API_URL or GITHUB_SERVER_URL is required")
+
+          repository = os.environ.get("GITHUB_REPOSITORY", "")
+          if "/" not in repository:
+              sys.exit("GITHUB_REPOSITORY must be in owner/repo form")
+          owner, repo = repository.split("/", 1)
+          repo_path = "/repos/{}/{}".format(
+              urllib.parse.quote(owner, safe=""),
+              urllib.parse.quote(repo, safe=""),
+          )
+
+          tag = os.environ.get("GITHUB_REF_NAME", "").strip()
+          if not tag:
+              sys.exit("GITHUB_REF_NAME is required")
+
+          packages = sorted(Path("dist").glob("multiagent-*.zip"))
+          if not packages:
+              sys.exit("No release packages found in dist/")
+
+          def api_request(method, path, payload=None, content_type="application/json"):
+              data = None
+              headers = {
+                  "Accept": "application/json",
+                  "Authorization": f"token {token}",
+              }
+              if payload is not None:
+                  if isinstance(payload, bytes):
+                      data = payload
+                  else:
+                      data = json.dumps(payload).encode("utf-8")
+                  headers["Content-Type"] = content_type
+
+              request = urllib.request.Request(
+                  f"{api_url}{path}",
+                  data=data,
+                  headers=headers,
+                  method=method,
+              )
+              try:
+                  with urllib.request.urlopen(request) as response:
+                      body = response.read().decode("utf-8")
+                      return response.status, json.loads(body) if body else None
+              except urllib.error.HTTPError as exc:
+                  body = exc.read().decode("utf-8", errors="replace")
+                  try:
+                      parsed = json.loads(body) if body else None
+                  except json.JSONDecodeError:
+                      parsed = {"message": body}
+                  return exc.code, parsed
+
+          release_status, release = api_request(
+              "GET",
+              f"{repo_path}/releases/tags/{urllib.parse.quote(tag, safe='')}",
+          )
+          if release_status == 404:
+              release_status, release = api_request(
+                  "POST",
+                  f"{repo_path}/releases",
+                  {
+                      "tag_name": tag,
+                      "target_commitish": os.environ.get("GITHUB_SHA", ""),
+                      "name": tag,
+                      "body": f"Automated release packages for {tag}.",
+                      "draft": False,
+                      "prerelease": False,
+                  },
+              )
+
+          if release_status not in {200, 201} or not isinstance(release, dict):
+              sys.exit(f"Failed to get or create release for {tag}: HTTP {release_status} {release}")
+
+          release_id = release.get("id")
+          if release_id is None:
+              sys.exit(f"Release response did not include an id: {release}")
+
+          package_names = {package.name for package in packages}
+          for asset in release.get("assets") or []:
+              if asset.get("name") in package_names and asset.get("id") is not None:
+                  delete_status, delete_body = api_request(
+                      "DELETE",
+                      f"{repo_path}/releases/{release_id}/assets/{asset['id']}",
+                  )
+                  if delete_status not in {200, 204}:
+                      sys.exit(f"Failed to replace asset {asset['name']}: HTTP {delete_status} {delete_body}")
+
+          def multipart_body(field_name, file_path):
+              boundary = f"----risu-multiagent-{secrets.token_hex(16)}"
+              file_bytes = file_path.read_bytes()
+              header = (
+                  f"--{boundary}\r\n"
+                  f'Content-Disposition: form-data; name="{field_name}"; filename="{file_path.name}"\r\n'
+                  "Content-Type: application/zip\r\n\r\n"
+              ).encode("utf-8")
+              footer = f"\r\n--{boundary}--\r\n".encode("utf-8")
+              return boundary, header + file_bytes + footer
+
+          for package in packages:
+              boundary, body = multipart_body("attachment", package)
+              upload_path = (
+                  f"{repo_path}/releases/{release_id}/assets"
+                  f"?name={urllib.parse.quote(package.name, safe='')}"
+              )
+              upload_status, upload_body = api_request(
+                  "POST",
+                  upload_path,
+                  body,
+                  f"multipart/form-data; boundary={boundary}",
+              )
+              if upload_status not in {200, 201}:
+                  sys.exit(f"Failed to upload {package.name}: HTTP {upload_status} {upload_body}")
+              print(f"Uploaded {package.name}")
+          PY
