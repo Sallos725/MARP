@@ -89,7 +89,7 @@ def example_url(agent_cfg: dict) -> str:
     if is_anthropic_provider(agent_cfg.get("provider", "")):
         return f"{base_url}/models/{agent_cfg.get('model') or ''}"
     if is_vertex_provider(agent_cfg.get("provider", "")):
-        return "https://oauth2.googleapis.com/token"
+        return f"{base_url}/chat/completions"
     return f"{base_url}/models"
 
 

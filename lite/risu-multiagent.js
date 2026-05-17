@@ -1,7 +1,7 @@
 //@name risu_multiagent
 //@display-name MultiAgent RP Pipeline
 //@api 3.0
-//@version 1.0.8
+//@version 1.0.9
 //@arg agent_provider string Analysis agent provider label. e.g. openai
 //@arg agent_base_url string Analysis agent API base URL. e.g. https://api.openai.com/v1, https://api.anthropic.com/v1, or Vertex AI OpenAI-compatible endpoint
 //@arg agent_api_key string Analysis agent API key
@@ -11,6 +11,7 @@
 //@arg agent_extra_body_json string Extra JSON body merged into OpenAI-compatible chat/completions requests
 //@arg context_window int Recent messages per agent (default: 10)
 //@arg main_model_only string Run MultiAgent only for RisuAI main model requests; bypass auxiliary/submodel/memory/emotion/translation requests (default: 1)
+//@arg bypass_hypamemory string Skip MultiAgent analysis for RisuAI HypaMemory/memory requests (default: 1)
 //@arg bypass_translate string Skip MultiAgent analysis for RisuAI built-in LLM translation requests (default: 1)
 //@arg bypass_lb_process string Skip MultiAgent analysis for <lb-process> helper LLM requests (default: 1)
 
@@ -47,6 +48,7 @@
       const extraBodyArg = await Risuai.getArgument('agent_extra_body_json');
       const windowArg = await Risuai.getArgument('context_window');
       const mainModelOnlyArg = await Risuai.getArgument('main_model_only');
+      const bypassHypaMemoryArg = await Risuai.getArgument('bypass_hypamemory');
       const bypassTranslateArg = await Risuai.getArgument('bypass_translate');
       const bypassLbProcessArg = await Risuai.getArgument('bypass_lb_process');
       const provider = providerArg || stored.provider || 'openai';
@@ -58,6 +60,7 @@
       const extraBodyJson = String(extraBodyArg || stored.extraBodyJson || '').trim();
       const window  = Math.max(1, parseInt(windowArg || stored.window || '10') || 10);
       const mainModelOnly = parseEnabled(mainModelOnlyArg, stored.mainModelOnly ?? true);
+      const bypassHypaMemory = parseEnabled(bypassHypaMemoryArg, stored.bypassHypaMemory ?? true);
       const bypassTranslate = parseEnabled(bypassTranslateArg, stored.bypassTranslate ?? true);
       const bypassLbProcess = parseEnabled(bypassLbProcessArg, stored.bypassLbProcess ?? true);
       return {
@@ -70,6 +73,7 @@
         extraBodyJson,
         window,
         mainModelOnly,
+        bypassHypaMemory,
         bypassTranslate,
         bypassLbProcess,
       };
@@ -540,6 +544,7 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
         <div class="k">추가 JSON</div><div class="v">${conf.extraBodyJson ? '적용됨' : '없음'}</div>
         <div class="k">Context</div><div class="v">${escHtml(conf.window)}개 메시지</div>
         <div class="k">메인 전용</div><div class="v">${conf.mainModelOnly ? '켜짐' : '꺼짐'}</div>
+        <div class="k">HypaMemory 우회</div><div class="v">${conf.bypassHypaMemory ? '켜짐' : '꺼짐'}</div>
         <div class="k">번역 우회</div><div class="v">${conf.bypassTranslate ? '켜짐' : '꺼짐'}</div>
         <div class="k">LB 우회</div><div class="v">${conf.bypassLbProcess ? '켜짐' : '꺼짐'}</div>
       </div>
@@ -610,6 +615,11 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
     </label>
     <div class="example-url">request mode가 model이 아닌 submodel, memory, emotion, otherAx, translate 호출은 원본 요청 그대로 통과시킵니다.</div>
     <label>
+      <input id="bypass_hypamemory" type="checkbox" ${checkedAttr(conf.bypassHypaMemory)}>
+      HypaMemory 메모리 요약 요청 우회
+    </label>
+    <div class="example-url">request mode가 memory인 HypaMemory/HypaV3 요약 호출에서는 보조 에이전트를 실행하지 않습니다.</div>
+    <label>
       <input id="bypass_translate" type="checkbox" ${checkedAttr(conf.bypassTranslate)}>
       RisuAI 내장 번역 요청 우회
     </label>
@@ -641,10 +651,11 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
       <li>Endpoint Base URL은 provider별 API base 주소입니다. OpenAI-compatible은 /v1, Anthropic은 https://api.anthropic.com/v1 형식을 사용합니다.</li>
       <li>API Key 입력칸은 저장된 값을 다시 표시하지 않습니다. 빈칸으로 저장하면 기존 값을 유지합니다.</li>
       <li>Vertex AI를 선택하면 API Key 대신 서비스 계정 JSON 파일을 불러오고, Lite판 내부에서 OAuth access token을 발급해 호출합니다.</li>
+      <li>Vertex AI 서비스 계정 JSON을 불러오면 Project ID가 Endpoint Base URL에 반영되고 모델은 google/ prefix가 포함된 기본값으로 맞춰집니다.</li>
       <li>추가 JSON body는 OpenAI-compatible/Vertex chat completions 요청에만 병합됩니다. Anthropic 직접 호출에는 적용하지 않습니다.</li>
       <li>마지막 실행 상태는 본문 없이 성공/우회/실패, 출력 길이, 소요 시간 같은 작은 진단값만 저장합니다.</li>
       <li>LLM 인증 테스트는 생성 호출 없이 provider별 인증/모델 조회 경로만 확인합니다. 실제 분석은 토큰을 사용합니다.</li>
-      <li>내장 LLM 번역과 &lt;lb-process&gt; 헬퍼 호출은 기본적으로 분석 파이프라인을 우회합니다.</li>
+      <li>HypaMemory/HypaV3 memory request mode, 내장 LLM 번역, &lt;lb-process&gt; 헬퍼 호출은 기본적으로 분석 파이프라인을 우회합니다.</li>
       <li>설정 백업은 RisuAI save/passphrase가 보호하는 pluginStorage에 저장되어, 플러그인 JS 업데이트 후에도 복구됩니다.</li>
     </ul>
   </div>
@@ -712,6 +723,7 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
         extraBodyJson: normalizeExtraBodyJson(getInputValue('agent_extra_body_json')),
         window: Math.max(1, parseInt(getInputValue('context_window')) || 10),
         mainModelOnly: getCheckboxValue('main_model_only'),
+        bypassHypaMemory: getCheckboxValue('bypass_hypamemory'),
         bypassTranslate: getCheckboxValue('bypass_translate'),
         bypassLbProcess: getCheckboxValue('bypass_lb_process'),
       };
@@ -727,6 +739,7 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
       await Risuai.setArgument('agent_extra_body_json', conf.extraBodyJson || '');
       await Risuai.setArgument('context_window', String(conf.window));
       await Risuai.setArgument('main_model_only', conf.mainModelOnly ? '1' : '0');
+      await Risuai.setArgument('bypass_hypamemory', conf.bypassHypaMemory ? '1' : '0');
       await Risuai.setArgument('bypass_translate', conf.bypassTranslate ? '1' : '0');
       await Risuai.setArgument('bypass_lb_process', conf.bypassLbProcess ? '1' : '0');
     }
@@ -805,7 +818,8 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
             <div class="k">결과</div><div class="v"><span class="badge ${success ? 'ok' : 'err'}">${success ? '성공' : '실패'}</span></div>
             <div class="k">Provider</div><div class="v">${escHtml(conf.provider)}</div>
             <div class="k">Model</div><div class="v">${escHtml(conf.model)}</div>
-            <div class="k">URL</div><div class="v">${escHtml(urlOverride || testEndpointUrl(conf))}</div>
+            <div class="k">테스트 URL</div><div class="v">${escHtml(urlOverride || testEndpointUrl(conf))}</div>
+            ${isVertexProvider(conf.provider) ? `<div class="k">예시 URL</div><div class="v">${escHtml(exampleApiUrl(conf))}</div>` : ''}
             <div class="k">HTTP</div><div class="v">${escHtml(status ?? '-')}</div>
             <div class="k">Latency</div><div class="v">${escHtml(latency ?? '-')}ms</div>
           </div>
@@ -995,8 +1009,9 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
         extraBodyJson: normalizeExtraBodyJson(config.extraBodyJson || ''),
         window: Math.max(1, parseInt(config.window || '10') || 10),
         mainModelOnly: config.mainModelOnly ?? true,
-        bypassTranslate: Boolean(config.bypassTranslate),
-        bypassLbProcess: Boolean(config.bypassLbProcess),
+        bypassHypaMemory: config.bypassHypaMemory ?? true,
+        bypassTranslate: config.bypassTranslate ?? true,
+        bypassLbProcess: config.bypassLbProcess ?? true,
       };
     }
 
@@ -1068,7 +1083,7 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
               <textarea id="${id}_private_key" autocomplete="off" placeholder="-----BEGIN PRIVATE KEY-----"></textarea>
             </div>
             <textarea id="${id}_json" class="credential-json" aria-label="Vertex AI service account JSON"></textarea>
-            <div class="example-url">JSON 파일을 선택하면 필드가 자동으로 채워집니다. Project ID는 endpoint의 PROJECT_ID 자리에도 반영됩니다.</div>
+            <div class="example-url">JSON 파일을 선택하면 필드, Endpoint Base URL, Vertex 기본 모델이 자동으로 채워집니다.</div>
           </div>
         </div>`;
     }
@@ -1095,8 +1110,8 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
           model: 'claude-3-5-sonnet-latest',
         },
         'vertex-ai': {
-          baseUrl: 'https://aiplatform.googleapis.com/v1/projects/PROJECT_ID/locations/global/endpoints/openapi',
-          model: 'google/gemini-2.5-flash',
+          baseUrl: vertexBaseUrlForProject('PROJECT_ID'),
+          model: 'google/gemini-3-flash-preview',
         },
         google: {
           baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
@@ -1156,7 +1171,14 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
     function shouldReplaceModel(value) {
       const normalized = String(value || '').trim();
       if (!normalized) return true;
-      return ['gpt-4o-mini', 'claude-3-5-sonnet-latest', 'google/gemini-1.5-pro', 'gemini-1.5-pro'].includes(normalized);
+      return [
+        'gpt-4o-mini',
+        'claude-3-5-sonnet-latest',
+        'google/gemini-1.5-pro',
+        'google/gemini-2.5-flash',
+        'google/gemini-3-flash-preview',
+        'gemini-1.5-pro',
+      ].includes(normalized);
     }
 
     function setupEndpointExamples() {
@@ -1207,7 +1229,7 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
       const clientEmail = getInputValue(`${id}_client_email`);
       const privateKey = document.getElementById(`${id}_private_key`)?.value?.trim() || '';
       if (projectId || clientEmail || privateKey) {
-        applyVertexProjectToEndpoint(projectId);
+        applyVertexCredentialDefaults(projectId);
         return JSON.stringify({
           type: 'service_account',
           project_id: projectId,
@@ -1225,7 +1247,7 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
       setElementValue(`${id}_client_email`, parsed.client_email || '');
       setElementValue(`${id}_private_key`, parsed.private_key || '');
       setElementValue(`${id}_json`, text);
-      applyVertexProjectToEndpoint(parsed.project_id || '');
+      applyVertexCredentialDefaults(parsed.project_id || '');
     }
 
     function setElementValue(id, value) {
@@ -1242,9 +1264,16 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
       if (!clean) return;
       const input = document.getElementById('agent_base_url');
       if (!input) return;
-      if (input.value.includes('PROJECT_ID')) {
-        input.value = input.value.replace(/PROJECT_ID/g, clean);
-        updateEndpointExample('agent_base_url');
+      input.value = vertexBaseUrlForProject(clean, input.value);
+      updateEndpointExample('agent_base_url');
+    }
+
+    function applyVertexCredentialDefaults(projectId) {
+      applyVertexProjectToEndpoint(projectId);
+      const modelInput = document.getElementById('agent_model');
+      if (!modelInput) return;
+      if (shouldReplaceModel(modelInput.value) || isUnprefixedGeminiModel(modelInput.value)) {
+        modelInput.value = providerDefaults('vertex-ai').model;
       }
     }
 
@@ -1375,6 +1404,19 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
     function exampleApiUrl(conf) {
       if (isAnthropicProvider(conf.provider)) return `${normalizeUrl(conf.baseUrl)}/messages`;
       return `${normalizeUrl(conf.baseUrl)}/chat/completions`;
+    }
+
+    function vertexBaseUrlForProject(projectId, currentUrl = '') {
+      const cleanProject = String(projectId || 'PROJECT_ID').trim() || 'PROJECT_ID';
+      const current = String(currentUrl || '');
+      const version = current.match(/\/(v1beta1|v1)\//i)?.[1] || 'v1';
+      const host = current.match(/^https:\/\/([^/]*aiplatform\.googleapis\.com)\//i)?.[1] || 'aiplatform.googleapis.com';
+      const location = current.match(/\/locations\/([^/]+)\//i)?.[1] || 'global';
+      return `https://${host}/${version}/projects/${cleanProject}/locations/${location}/endpoints/openapi`;
+    }
+
+    function isUnprefixedGeminiModel(value) {
+      return /^gemini-/i.test(String(value || '').trim());
     }
 
     function formatEndpoint(baseUrl) {
@@ -1541,6 +1583,9 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
 
     function getBypassReason(messages, type, conf) {
       const requestType = String(type || '').trim().toLowerCase();
+      if (conf.bypassHypaMemory && requestType === 'memory') {
+        return 'RisuAI HypaMemory request';
+      }
       if (conf.mainModelOnly && requestType && requestType !== 'model') {
         return `non-main model request (${requestType})`;
       }

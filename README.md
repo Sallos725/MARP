@@ -82,6 +82,11 @@ RisuAI의 `beforeRequest` request mode가 `model`이 아닌 `submodel`, `memory`
 그대로 통과시킨다. 설정 화면의 "메인 모델 요청에서만 MultiAgent 실행" 체크박스로
 테스트 중 일시적으로 끌 수 있다.
 
+HypaMemory/HypaV3 요약 호출은 RisuAI에서 request mode `memory`로 들어오므로,
+`bypass_hypamemory`가 기본값 `1`인 동안은 `main_model_only`를 꺼도 MultiAgent 분석을
+돌리지 않는다. 즉 HypaMemory가 요약/정리용 LLM 호출을 할 때는 보조 에이전트 3회가
+붙지 않는다.
+
 OpenAI-compatible endpoint에는 추가 JSON body를 병합할 수 있다. 설정 화면에서
 Vercel AI Gateway용 **automatic caching**과 **Zero Data Retention** 체크박스를
 켜면 아래처럼 수정 가능한 JSON 블럭이 자동으로 갱신된다.
@@ -160,6 +165,21 @@ DEBUG_MODE=false
 
 API key 입력 대신 서비스 계정 JSON 파일을 GUI에서 업로드한다.
 `type`, `project_id`, `client_email`, `private_key` 필드가 있는 정상 JSON이어야 한다.
+JSON 파일을 넣으면 `project_id`를 사용해 Vertex AI OpenAI-compatible endpoint가
+자동으로 채워지고, 모델은 `google/` prefix가 필요한 것을 알아보기 쉽도록
+`google/gemini-3-flash-preview`로 맞춰진다.
+
+Vertex AI 기본 endpoint 예시:
+
+```text
+https://aiplatform.googleapis.com/v1/projects/PROJECT_ID/locations/global/endpoints/openapi
+```
+
+실제 Chat Completions 호출 예시:
+
+```text
+https://aiplatform.googleapis.com/v1/projects/PROJECT_ID/locations/global/endpoints/openapi/chat/completions
+```
 
 ---
 
