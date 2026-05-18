@@ -297,7 +297,6 @@
       const ready = Boolean(status?.ready);
       const agents = status?.agents || fallbackAgents(cfg);
       const activeAgents = agents.filter(agent => agent.active !== false);
-      const pipelineMode = publicCfg.pipeline_mode || v('pipeline_mode', 'classic');
       const lastRun = data.lastRun || null;
       const bypass = data.bypass || { mainModelOnly: true, bypassHypaMemory: true, bypassTranslate: true, bypassLbProcess: true };
       const configBackup = data.configBackup || { exists: false, savedAt: '' };
@@ -306,6 +305,7 @@
         const val = cfg[key];
         return (val !== undefined && val !== null) ? String(val) : fallback;
       };
+      const pipelineMode = publicCfg.pipeline_mode || v('pipeline_mode', 'classic');
 
       const field = (id, label, type = 'text', placeholder = '') => `
         <div class="field">
