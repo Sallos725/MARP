@@ -1,7 +1,7 @@
 //@name risu_multiagent_full
 //@display-name MultiAgent RP — Full판
 //@api 3.0
-//@version 2.2.4
+//@version 2.2.5
 //@arg server_url string Full판 서버 URL (e.g. http://localhost:6009 or https://example.com/multi-agent)
 //@arg main_model_only string Run MultiAgent only for RisuAI main model requests; bypass auxiliary/submodel/memory/emotion/translation requests (default: 1)
 //@arg bypass_hypamemory string Skip MultiAgent analysis for RisuAI HypaMemory/memory requests (default: 1)
@@ -28,6 +28,16 @@
     const STORAGE_VERSION = 1;
     const DEFAULT_ANALYZE_TIMEOUT_SECONDS = 3000;
     const ANALYZE_TIMEOUT_GRACE_MS = 30_000;
+    const DEEP_INJECTION_CHAR_BUDGET = 6000;
+    const CLASSIC_SECTION_CHAR_BUDGET = 1800;
+    const DEEP_INJECTION_SECTIONS = [
+      ['final_director', 'Final Synthesis', 2400],
+      ['constraint_director', 'Hard Constraints', 1300],
+      ['beat_director', 'Next Beat', 1200],
+      ['scene_scout', 'Scene State', 500],
+      ['voice_scout', 'Character Voice', 500],
+      ['lore_scout', 'Lore Rules', 500],
+    ];
 
     // ── 서버 URL 헬퍼 ─────────────────────────────────────────────────────────
 
@@ -248,7 +258,7 @@
 
     function injectContext(messages, contextWorld, contextPlot, contextChar, contextDirector, contextDeep) {
       if (!Array.isArray(messages)) return messages;
-      const deepContext = formatDeepContext(contextDeep);
+      const deepContext = formatDeepInjectionContext(contextDeep);
       const parts = deepContext
         ? [
             '',
@@ -264,19 +274,19 @@
             '[MultiAgent RP Analysis Context]',
             '',
             '[Worldbuilding Agent]',
-            contextWorld || '(none)',
+            clipForPrompt(contextWorld || '(none)', CLASSIC_SECTION_CHAR_BUDGET),
             '',
             '[Plot Agent]',
-            contextPlot || '(none)',
+            clipForPrompt(contextPlot || '(none)', CLASSIC_SECTION_CHAR_BUDGET),
             '',
             '[Character Agent]',
-            contextChar || '(none)',
+            clipForPrompt(contextChar || '(none)', CLASSIC_SECTION_CHAR_BUDGET),
           ];
       if (!deepContext && contextDirector) {
         parts.push(
           '',
           '[Director Agent]',
-          contextDirector,
+          clipForPrompt(contextDirector, CLASSIC_SECTION_CHAR_BUDGET),
         );
       }
       const injection = [
@@ -294,6 +304,46 @@
         );
       }
       return [{ role: 'system', content: injection.replace(/^\n/, '') }, ...messages];
+    }
+
+    function formatDeepInjectionContext(contextDeep) {
+      if (!contextDeep || typeof contextDeep !== 'object') return '';
+      const used = [];
+      let remaining = DEEP_INJECTION_CHAR_BUDGET;
+
+      for (const [name, label, preferredBudget] of DEEP_INJECTION_SECTIONS) {
+        if (remaining <= 0) break;
+        const raw = String(contextDeep[name] || '').trim();
+        if (!raw) continue;
+        const header = `[${label}]`;
+        const budget = Math.max(0, Math.min(preferredBudget, remaining - header.length - 2));
+        if (budget <= 0) continue;
+        const clipped = clipForPrompt(raw, budget);
+        used.push(`${header}\n${clipped}`);
+        remaining -= header.length + clipped.length + 2;
+      }
+
+      if (!used.length) {
+        return clipForPrompt(formatDeepContext(contextDeep), DEEP_INJECTION_CHAR_BUDGET);
+      }
+
+      return used.join('\n\n');
+    }
+
+    function clipForPrompt(value, maxChars) {
+      const text = String(value || '').trim();
+      if (!Number.isFinite(maxChars) || maxChars <= 0 || text.length <= maxChars) return text;
+      const hardLimit = Math.max(0, Math.floor(maxChars));
+      const slice = text.slice(0, hardLimit);
+      const softBreak = Math.max(
+        slice.lastIndexOf('\n'),
+        slice.lastIndexOf('. '),
+        slice.lastIndexOf('; '),
+        slice.lastIndexOf(', '),
+        slice.lastIndexOf(' ')
+      );
+      const clipped = softBreak > hardLimit * 0.6 ? slice.slice(0, softBreak).trimEnd() : slice.trimEnd();
+      return `${clipped}\n[trimmed for token budget]`;
     }
 
     // ── 설정 GUI ──────────────────────────────────────────────────────────────
@@ -557,7 +607,7 @@ button.ghost{background:#15171b;color:#a8b0bd}
 <div class="wrap">
   <div class="top">
     <div>
-      <h1>MultiAgent RP Full판 <span class="summary-note">v2.2.1</span></h1>
+      <h1>MultiAgent RP Full판 <span class="summary-note">v2.2.5</span></h1>
       <p class="subtitle">RisuAI 메인 모델 호출 직전에 Full 사이드카 분석을 끼워 넣어 system 프롬프트에 주입합니다.</p>
     </div>
     <div class="header-actions">
@@ -1933,7 +1983,7 @@ button.ghost{background:#15171b;color:#a8b0bd}
       return `${(ms / 1000).toFixed(1)}초`;
     }
 
-    console.log('MultiAgent RP Full판 플러그인 v2.2.1 (beforeRequest 훅) 로드됨');
+    console.log('MultiAgent RP Full판 플러그인 v2.2.5 (beforeRequest 훅) 로드됨');
 
   } catch (err) {
     console.log(`MultiAgent Full판 init error: ${err.message}`);
