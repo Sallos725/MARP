@@ -7,6 +7,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     # 기본 LLM 설정 (에이전트별 미지정 시 사용)
+    pipeline_mode: str = "classic"
     default_provider: str = "openai"
     default_base_url: str = "https://api.openai.com/v1"
     default_api_key: str = ""
@@ -22,6 +23,8 @@ class Settings(BaseSettings):
     worldbuilding_model: str = ""
     worldbuilding_temperature: float | None = None
     worldbuilding_max_tokens: int | None = None
+    worldbuilding_system_prompt: str = ""
+    worldbuilding_user_prompt_template: str = ""
 
     # 플롯 에이전트
     plot_provider: str = ""
@@ -30,6 +33,8 @@ class Settings(BaseSettings):
     plot_model: str = ""
     plot_temperature: float | None = None
     plot_max_tokens: int | None = None
+    plot_system_prompt: str = ""
+    plot_user_prompt_template: str = ""
 
     # 등장인물 에이전트
     character_provider: str = ""
@@ -38,6 +43,18 @@ class Settings(BaseSettings):
     character_model: str = ""
     character_temperature: float | None = None
     character_max_tokens: int | None = None
+    character_system_prompt: str = ""
+    character_user_prompt_template: str = ""
+
+    # 디렉터 에이전트 (ensemble-director 모드에서 사용)
+    director_provider: str = ""
+    director_base_url: str = ""
+    director_api_key: str = ""
+    director_model: str = ""
+    director_temperature: float | None = None
+    director_max_tokens: int | None = None
+    director_system_prompt: str = ""
+    director_user_prompt_template: str = ""
 
     # 파이프라인 설정
     context_window: int = 10
@@ -52,6 +69,8 @@ class Settings(BaseSettings):
         "plot_max_tokens",
         "character_temperature",
         "character_max_tokens",
+        "director_temperature",
+        "director_max_tokens",
         mode="before",
     )
     @classmethod

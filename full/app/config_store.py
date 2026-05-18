@@ -12,6 +12,7 @@ CONFIG_PATH = Path(os.getenv("CONFIG_PATH", "data/config.json"))
 _lock = Lock()
 
 DEFAULTS: dict = {
+    "pipeline_mode":          "classic",
     "default_provider":       "openai",
     "default_base_url":       "https://api.openai.com/v1",
     "default_api_key":        "",
@@ -25,18 +26,32 @@ DEFAULTS: dict = {
     "worldbuilding_model":    "",
     "worldbuilding_temperature": None,
     "worldbuilding_max_tokens":  None,
+    "worldbuilding_system_prompt": "",
+    "worldbuilding_user_prompt_template": "",
     "plot_provider":          "",
     "plot_base_url":          "",
     "plot_api_key":           "",
     "plot_model":             "",
     "plot_temperature":       None,
     "plot_max_tokens":        None,
+    "plot_system_prompt":     "",
+    "plot_user_prompt_template": "",
     "character_provider":     "",
     "character_base_url":     "",
     "character_api_key":      "",
     "character_model":        "",
     "character_temperature":  None,
     "character_max_tokens":   None,
+    "character_system_prompt": "",
+    "character_user_prompt_template": "",
+    "director_provider":      "",
+    "director_base_url":      "",
+    "director_api_key":       "",
+    "director_model":         "",
+    "director_temperature":   None,
+    "director_max_tokens":    None,
+    "director_system_prompt": "",
+    "director_user_prompt_template": "",
     "context_window":         10,
     "debug_mode":             False,
     "request_timeout":        60.0,
@@ -47,6 +62,26 @@ AGENTS: tuple[tuple[str, str], ...] = (
     ("plot", "플롯 에이전트"),
     ("character", "등장인물 에이전트"),
 )
+
+OPTIONAL_AGENTS: tuple[tuple[str, str], ...] = (
+    ("director", "디렉터 에이전트"),
+)
+
+ALL_AGENTS: tuple[tuple[str, str], ...] = AGENTS + OPTIONAL_AGENTS
+
+PIPELINE_MODES = {"classic", "ensemble-director"}
+
+
+def normalize_pipeline_mode(value: str | None) -> str:
+    mode = str(value or "").strip().lower().replace("_", "-").replace(" ", "-")
+    return mode if mode in PIPELINE_MODES else "classic"
+
+
+def active_agents(cfg: dict | None = None) -> tuple[tuple[str, str], ...]:
+    current = cfg or load()
+    if normalize_pipeline_mode(current.get("pipeline_mode")) == "ensemble-director":
+        return ALL_AGENTS
+    return AGENTS
 
 
 def load() -> dict:
@@ -78,6 +113,7 @@ def initialize_from_env() -> None:
         from app.config import get_settings
         s = get_settings()
         save({
+            "pipeline_mode":          normalize_pipeline_mode(getattr(s, "pipeline_mode", "classic")),
             "default_provider":       s.default_provider,
             "default_base_url":       s.default_base_url,
             "default_api_key":        s.default_api_key,
@@ -91,18 +127,32 @@ def initialize_from_env() -> None:
             "worldbuilding_model":    s.worldbuilding_model,
             "worldbuilding_temperature": s.worldbuilding_temperature,
             "worldbuilding_max_tokens":  s.worldbuilding_max_tokens,
+            "worldbuilding_system_prompt": s.worldbuilding_system_prompt,
+            "worldbuilding_user_prompt_template": s.worldbuilding_user_prompt_template,
             "plot_provider":          s.plot_provider,
             "plot_base_url":          s.plot_base_url,
             "plot_api_key":           s.plot_api_key,
             "plot_model":             s.plot_model,
             "plot_temperature":       s.plot_temperature,
             "plot_max_tokens":        s.plot_max_tokens,
+            "plot_system_prompt":     s.plot_system_prompt,
+            "plot_user_prompt_template": s.plot_user_prompt_template,
             "character_provider":     s.character_provider,
             "character_base_url":     s.character_base_url,
             "character_api_key":      s.character_api_key,
             "character_model":        s.character_model,
             "character_temperature":  s.character_temperature,
             "character_max_tokens":   s.character_max_tokens,
+            "character_system_prompt": s.character_system_prompt,
+            "character_user_prompt_template": s.character_user_prompt_template,
+            "director_provider":      s.director_provider,
+            "director_base_url":      s.director_base_url,
+            "director_api_key":       s.director_api_key,
+            "director_model":         s.director_model,
+            "director_temperature":   s.director_temperature,
+            "director_max_tokens":    s.director_max_tokens,
+            "director_system_prompt": s.director_system_prompt,
+            "director_user_prompt_template": s.director_user_prompt_template,
             "context_window":         s.context_window,
             "debug_mode":             s.debug_mode,
             "request_timeout":        s.request_timeout,
@@ -124,6 +174,8 @@ def get_agent_config(agent_name: str) -> dict:
         "temperature": temperature if temperature is not None else cfg["default_temperature"],
         "max_tokens": max_tokens if max_tokens is not None else cfg["default_max_tokens"],
         "extra_body_json": cfg["default_extra_body_json"],
+        "system_prompt": cfg.get(f"{prefix}_system_prompt") or "",
+        "user_prompt_template": cfg.get(f"{prefix}_user_prompt_template") or "",
     }
 
 
@@ -131,7 +183,8 @@ def public_status() -> dict:
     cfg = load()
     agents = []
 
-    for name, label in AGENTS:
+    active_names = {name for name, _ in active_agents(cfg)}
+    for name, label in ALL_AGENTS:
         agent_cfg = get_agent_config(name)
         api_key = agent_cfg["api_key"]
         temperature = cfg.get(f"{name}_temperature")
@@ -152,10 +205,12 @@ def public_status() -> dict:
             "max_tokens_source": "override" if max_tokens is not None else "default",
             "api_key_set": bool(api_key),
             "ready": bool(agent_cfg["base_url"] and api_key and agent_cfg["model"]),
+            "active": name in active_names,
         }
         agents.append(agent_status)
 
     return {
+        "pipeline_mode": normalize_pipeline_mode(cfg.get("pipeline_mode")),
         "default_provider": cfg["default_provider"],
         "default_base_url": cfg["default_base_url"],
         "default_model": cfg["default_model"],
@@ -167,5 +222,5 @@ def public_status() -> dict:
         "debug_mode": bool(cfg["debug_mode"]),
         "request_timeout": float(cfg["request_timeout"]),
         "agents": agents,
-        "ready": all(agent["ready"] for agent in agents),
+        "ready": all(agent["ready"] for agent in agents if agent["active"]),
     }

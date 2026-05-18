@@ -19,9 +19,13 @@ class AnalyzeResponse(BaseModel):
     context_world: str
     context_plot: str
     context_char: str
+    context_director: str = ""
+    pipeline_mode: str = "classic"
+    agent_timings_ms: dict[str, int] = Field(default_factory=dict)
 
 
 class PublicConfigStatus(BaseModel):
+    pipeline_mode: str
     default_provider: str
     default_base_url: str
     default_model: str
@@ -50,6 +54,7 @@ class AgentStatus(BaseModel):
     max_tokens_source: str
     api_key_set: bool
     ready: bool
+    active: bool = True
 
 
 class StatusResponse(BaseModel):
@@ -79,6 +84,7 @@ class LlmTestResponse(BaseModel):
 
 
 class ConfigModel(BaseModel):
+    pipeline_mode: str = "classic"
     default_provider: str = "openai-compatible"
     default_base_url: str = "https://api.openai.com/v1"
     default_api_key: str = ""
@@ -93,6 +99,8 @@ class ConfigModel(BaseModel):
     worldbuilding_model: str = ""
     worldbuilding_temperature: float | None = None
     worldbuilding_max_tokens: int | None = None
+    worldbuilding_system_prompt: str = ""
+    worldbuilding_user_prompt_template: str = ""
 
     plot_provider: str = ""
     plot_base_url: str = ""
@@ -100,6 +108,8 @@ class ConfigModel(BaseModel):
     plot_model: str = ""
     plot_temperature: float | None = None
     plot_max_tokens: int | None = None
+    plot_system_prompt: str = ""
+    plot_user_prompt_template: str = ""
 
     character_provider: str = ""
     character_base_url: str = ""
@@ -107,6 +117,17 @@ class ConfigModel(BaseModel):
     character_model: str = ""
     character_temperature: float | None = None
     character_max_tokens: int | None = None
+    character_system_prompt: str = ""
+    character_user_prompt_template: str = ""
+
+    director_provider: str = ""
+    director_base_url: str = ""
+    director_api_key: str = ""
+    director_model: str = ""
+    director_temperature: float | None = None
+    director_max_tokens: int | None = None
+    director_system_prompt: str = ""
+    director_user_prompt_template: str = ""
 
     context_window: int = 10
     debug_mode: bool = False

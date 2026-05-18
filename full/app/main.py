@@ -66,13 +66,13 @@ async def status():
 
 @app.get("/test/llm", response_model=LlmTestResponse)
 async def test_llm(agent: str | None = None):
-    targets = config_store.AGENTS
+    cfg = config_store.load()
+    targets = config_store.active_agents(cfg)
     if agent:
-        targets = tuple(item for item in targets if item[0] == agent)
+        targets = tuple(item for item in config_store.ALL_AGENTS if item[0] == agent)
         if not targets:
             raise HTTPException(status_code=404, detail=f"알 수 없는 에이전트: {agent}")
 
-    cfg = config_store.load()
     timeout = min(float(cfg.get("request_timeout", 60.0)), 30.0)
     results = []
 

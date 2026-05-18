@@ -1,7 +1,7 @@
 //@name risu_multiagent_full
 //@display-name MultiAgent RP — Full판
 //@api 3.0
-//@version 2.0.9
+//@version 2.1.0
 //@arg server_url string Full판 서버 URL (e.g. http://localhost:6009 or https://example.com/multi-agent)
 //@arg main_model_only string Run MultiAgent only for RisuAI main model requests; bypass auxiliary/submodel/memory/emotion/translation requests (default: 1)
 //@arg bypass_hypamemory string Skip MultiAgent analysis for RisuAI HypaMemory/memory requests (default: 1)
@@ -13,7 +13,7 @@
  *
  * 역할 1: beforeRequest 훅
  *   → RisuAI가 메인 모델로 요청 보내기 직전에 끼어들어
- *   → Full판 서버(/analyze)로 분석 3개(세계관/플롯/캐릭터) 호출
+ *   → Full판 서버(/analyze)로 분석 3개(세계관/플롯/캐릭터) 또는 실험적 앙상블 분석 호출
  *   → system 프롬프트에 분석 컨텍스트 주입
  *   → RisuAI 메인 모델이 그대로 최종 응답 생성 (검수 역할 겸함)
  *
@@ -112,17 +112,21 @@
           success: true,
           status_code: res.status,
           duration_ms: Date.now() - startedAt,
+          pipeline_mode: data.pipeline_mode || 'classic',
+          agent_timings_ms: data.agent_timings_ms || {},
           world_chars: stringLength(data.context_world),
           plot_chars: stringLength(data.context_plot),
           char_chars: stringLength(data.context_char),
+          director_chars: stringLength(data.context_director),
           debug: {
             context_world: data.context_world,
             context_plot: data.context_plot,
             context_char: data.context_char,
+            context_director: data.context_director,
           },
         });
 
-        return injectContext(messages, data.context_world, data.context_plot, data.context_char);
+        return injectContext(messages, data.context_world, data.context_plot, data.context_char, data.context_director);
 
       } catch (err) {
         await recordLastRun({
@@ -183,9 +187,9 @@
       ].join('\n')).join('\n\n');
     }
 
-    function injectContext(messages, contextWorld, contextPlot, contextChar) {
+    function injectContext(messages, contextWorld, contextPlot, contextChar, contextDirector) {
       if (!Array.isArray(messages)) return messages;
-      const injection = [
+      const parts = [
         '',
         '---',
         '[MultiAgent RP Analysis Context]',
@@ -198,6 +202,16 @@
         '',
         '[Character Agent]',
         contextChar || '(none)',
+      ];
+      if (contextDirector) {
+        parts.push(
+          '',
+          '[Director Agent]',
+          contextDirector,
+        );
+      }
+      const injection = [
+        ...parts,
         '',
         '[Review Instructions]',
         'Use these notes quietly as background context. Preserve established world details, narrative continuity, character voice, and motivations while allowing natural development.',
@@ -282,6 +296,8 @@
       const connected = data.connected;
       const ready = Boolean(status?.ready);
       const agents = status?.agents || fallbackAgents(cfg);
+      const activeAgents = agents.filter(agent => agent.active !== false);
+      const pipelineMode = publicCfg.pipeline_mode || v('pipeline_mode', 'classic');
       const lastRun = data.lastRun || null;
       const bypass = data.bypass || { mainModelOnly: true, bypassHypaMemory: true, bypassTranslate: true, bypassLbProcess: true };
       const configBackup = data.configBackup || { exists: false, savedAt: '' };
@@ -297,10 +313,15 @@
           <input id="${id}" type="${type}" value="${escHtml(fieldValue(cfg, id))}" placeholder="${escHtml(placeholder)}">
         </div>`;
 
-      const textareaField = (id, label, placeholder = '') => `
+      const textareaField = (id, label, placeholder = '', className = '') => `
         <div class="field">
           <label for="${id}">${label}</label>
-          <textarea id="${id}" spellcheck="false" placeholder="${escHtml(placeholder)}">${escHtml(fieldValue(cfg, id))}</textarea>
+          <textarea id="${id}" class="${escHtml(className)}" spellcheck="false" placeholder="${escHtml(placeholder)}">${escHtml(fieldValue(cfg, id))}</textarea>
+        </div>`;
+
+      const promptHelp = `
+        <div class="example-url">
+          템플릿 토큰: {{user_input}}, {{chat_history}}, {{system_context}}, {{world_summary}}, {{char_summary}}, {{context_world}}, {{context_plot}}, {{context_char}}, {{context_director}}
         </div>`;
 
       const credentialField = (id, isSet) => `
@@ -347,6 +368,9 @@
               ${field(`${name}_temperature`, 'Temperature', 'number', '기본값 사용')}
               ${field(`${name}_max_tokens`, 'Max Tokens', 'number', '기본값 사용')}
             </div>
+            ${textareaField(`${name}_system_prompt`, 'System Prompt Override', '비워두면 내장 system prompt 사용', 'prompt-template')}
+            ${textareaField(`${name}_user_prompt_template`, 'User Prompt Template Override', '비워두면 내장 user prompt template 사용', 'prompt-template')}
+            ${promptHelp}
           </div>
         </details>`;
 
@@ -405,6 +429,7 @@ details[open]>summary::before{content:'v'}
 label{display:block;font-size:.75rem;color:#9aa4b2;margin-bottom:4px}
 input,select,textarea{width:100%;padding:9px 10px;border-radius:6px;border:1px solid #343944;background:#0f1115;color:#eef2f7;font-size:.86rem}
 textarea{min-height:92px;resize:vertical}
+textarea.prompt-template{min-height:180px}
 input:focus,select:focus,textarea:focus{outline:none;border-color:#5585d9}
 input[type=checkbox]{width:auto;margin-right:7px}
 .custom-provider,.vertex-credential{display:none;margin-top:8px}
@@ -438,7 +463,7 @@ button.ghost{background:#15171b;color:#a8b0bd}
   <div class="top">
     <div>
       <h1>MultiAgent RP Full판</h1>
-      <p class="subtitle">RisuAI 메인 모델 호출 직전에 분석 3개(세계관/플롯/캐릭터)를 끼워 넣어 system 프롬프트에 주입합니다.</p>
+      <p class="subtitle">RisuAI 메인 모델 호출 직전에 Full 사이드카 분석을 끼워 넣어 system 프롬프트에 주입합니다.</p>
     </div>
     <div class="header-actions">
       <button id="refresh-btn" class="ghost">새로고침</button>
@@ -457,7 +482,7 @@ button.ghost{background:#15171b;color:#a8b0bd}
     <div class="metric">
       <div class="metric-label">분석 준비</div>
       <div class="metric-value">${ready ? '실행 가능' : '설정 필요'}</div>
-      <div class="metric-sub">${ready ? '3개 분석 에이전트 준비 완료' : 'API Key 또는 모델 설정 확인 필요'}</div>
+      <div class="metric-sub">${ready ? `${activeAgents.length}개 활성 에이전트 준비 완료` : 'API Key 또는 모델 설정 확인 필요'}</div>
     </div>
     <div class="metric">
       <div class="metric-label">분석 모델</div>
@@ -466,8 +491,8 @@ button.ghost{background:#15171b;color:#a8b0bd}
     </div>
     <div class="metric">
       <div class="metric-label">최종 응답</div>
-      <div class="metric-value">RisuAI 메인 모델</div>
-      <div class="metric-sub">현재 선택된 채팅 모델이 그대로 사용됩니다</div>
+      <div class="metric-value">${escHtml(pipelineMode)}</div>
+      <div class="metric-sub">최종 RP 응답은 RisuAI 메인 모델이 생성합니다</div>
     </div>
   </div>
 
@@ -489,7 +514,7 @@ button.ghost{background:#15171b;color:#a8b0bd}
         <div class="check-list">
           ${checkItem('Full 서버 연결', connected, data.statusError || '서버 상태 API 응답 확인')}
           ${checkItem('기본 API Key', Boolean(publicCfg.default_api_key_set || cfg.default_api_key), '기본값 또는 에이전트별 키 사용')}
-          ${checkItem('분석 에이전트 준비', ready, ready ? '3개 분석 에이전트 실행 가능' : '분석 에이전트 탭에서 누락 항목 확인')}
+          ${checkItem('분석 에이전트 준비', ready, ready ? `${activeAgents.length}개 활성 에이전트 실행 가능` : '분석 에이전트 탭에서 누락 항목 확인')}
           ${checkItem('LLM Endpoint 예시', Boolean(publicCfg.default_base_url || cfg.default_base_url), exampleChatUrl(publicCfg.default_base_url || cfg.default_base_url || 'https://api.openai.com/v1'))}
         </div>
       </div>
@@ -498,6 +523,7 @@ button.ghost{background:#15171b;color:#a8b0bd}
         <div class="kv">
           <div class="k">서버 버전</div><div class="v">${escHtml(status?.version || '-')}</div>
           <div class="k">사이드카</div><div class="v">${escHtml(serverUrl)}</div>
+          <div class="k">파이프라인</div><div class="v">${escHtml(pipelineMode)}</div>
           <div class="k">Provider</div><div class="v">${escHtml(publicCfg.default_provider || v('default_provider', 'openai'))}</div>
           <div class="k">기본 모델</div><div class="v">${escHtml(publicCfg.default_model || v('default_model', 'gpt-4o-mini'))}</div>
           <div class="k">기본 URL</div><div class="v">${escHtml(publicCfg.default_base_url || v('default_base_url', 'https://api.openai.com/v1'))}</div>
@@ -566,9 +592,18 @@ button.ghost{background:#15171b;color:#a8b0bd}
     ${agentSettings('worldbuilding', '세계관 에이전트', Boolean(findAgent(agents, 'worldbuilding')?.api_key_set || cfg.worldbuilding_api_key))}
     ${agentSettings('plot', '플롯 에이전트', Boolean(findAgent(agents, 'plot')?.api_key_set || cfg.plot_api_key))}
     ${agentSettings('character', '등장인물 에이전트', Boolean(findAgent(agents, 'character')?.api_key_set || cfg.character_api_key))}
+    ${agentSettings('director', '디렉터 에이전트', Boolean(findAgent(agents, 'director')?.api_key_set || cfg.director_api_key))}
 
     <div class="card">
       <h2>파이프라인 설정</h2>
+      <div class="field">
+        <label for="pipeline_mode">파이프라인 모드</label>
+        <select id="pipeline_mode">
+          <option value="classic" ${pipelineMode === 'classic' ? 'selected' : ''}>classic — 기존 순차 3-agent</option>
+          <option value="ensemble-director" ${pipelineMode === 'ensemble-director' ? 'selected' : ''}>ensemble-director — 3-agent 병렬 + 디렉터 검증</option>
+        </select>
+      </div>
+      <div class="example-url">ensemble-director는 세계관/플롯/캐릭터 에이전트를 동시에 실행한 뒤 디렉터 에이전트가 검증/압축합니다. 피크 동시 LLM 호출은 3개입니다.</div>
       <div class="row2">
         <div class="field">
           <label for="context_window">컨텍스트 윈도우</label>
@@ -610,11 +645,13 @@ button.ghost{background:#15171b;color:#a8b0bd}
     <div class="card">
       <h2>운영 메모</h2>
       <ul class="help-list">
-        <li>이 플러그인은 RisuAI 메인 모델 호출 직전에 beforeRequest 훅으로 끼어들어, Full 서버에 분석 3개를 요청한 뒤 결과를 system 프롬프트에 주입합니다.</li>
-        <li>최종 RP 응답은 RisuAI가 현재 선택한 메인 모델이 그대로 생성합니다. 별도의 검수 에이전트는 없습니다.</li>
+        <li>이 플러그인은 RisuAI 메인 모델 호출 직전에 beforeRequest 훅으로 끼어들어, Full 서버 분석 결과를 system 프롬프트에 주입합니다.</li>
+        <li>ensemble-director 모드는 세계관/플롯/캐릭터 에이전트를 병렬 실행한 뒤 디렉터 에이전트가 검증/압축합니다.</li>
+        <li>최종 RP 응답은 RisuAI가 현재 선택한 메인 모델이 그대로 생성합니다.</li>
         <li>Full판의 Sidecar URL은 분석 파이프라인을 호스팅하는 FastAPI 서버 주소입니다. 예시는 http://localhost:6009 입니다.</li>
         <li>LLM Endpoint Base URL은 분석 에이전트가 호출할 OpenAI-compatible API의 /v1 주소입니다.</li>
         <li>API Key 입력칸은 저장된 값을 다시 표시하지 않습니다. 빈칸으로 두면 기존 값이 유지됩니다.</li>
+        <li>각 에이전트의 system prompt와 user prompt template은 비워두면 내장 기본 프롬프트를 사용합니다.</li>
         <li>Vercel AI Gateway를 쓸 때는 기본 LLM 설정의 caching/ZDR 체크박스로 providerOptions.gateway JSON을 만들 수 있고, 아래 JSON 블럭을 직접 수정할 수도 있습니다.</li>
         <li>LLM 인증 테스트는 생성 호출 없이 provider별 인증/모델 조회 경로만 확인합니다. 실제 분석은 토큰을 사용합니다.</li>
         <li>분석 실패 시에도 채팅은 막히지 않습니다. 원본 프롬프트가 그대로 메인 모델에 전달됩니다.</li>
@@ -674,6 +711,7 @@ button.ghost{background:#15171b;color:#a8b0bd}
         { value: 'claude', label: 'Claude' },
         { value: 'vertex-ai', label: 'Vertex AI' },
         { value: 'google', label: 'Google' },
+        { value: 'ollama', label: 'Ollama' },
         { value: 'custom', label: 'Custom' },
       ];
     }
@@ -697,6 +735,10 @@ button.ghost{background:#15171b;color:#a8b0bd}
           baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
           model: 'gemini-1.5-pro',
         },
+        ollama: {
+          baseUrl: 'https://ollama.com',
+          model: 'gpt-oss:120b',
+        },
       };
       return defaults[normalized] || null;
     }
@@ -708,6 +750,7 @@ button.ghost{background:#15171b;color:#a8b0bd}
           claude: providerDefaults('claude'),
           vertex: providerDefaults('vertex-ai'),
           google: providerDefaults('google'),
+          ollama: providerDefaults('ollama'),
         }).map(item => item.baseUrl),
         'https://LOCATION-aiplatform.googleapis.com/v1/projects/PROJECT_ID/locations/LOCATION/endpoints/openapi',
       ];
@@ -730,11 +773,12 @@ button.ghost{background:#15171b;color:#a8b0bd}
 
     function agentCard(agent) {
       const readyClass = agent.ready ? 'ok' : 'err';
+      const active = agent.active !== false;
       return `
         <div class="card">
           <div class="agent-head">
             <div class="agent-name">${escHtml(agent.label)}</div>
-            <span class="badge ${readyClass}">${agent.ready ? '준비됨' : '미완료'}</span>
+            <span class="badge ${active ? readyClass : 'neutral'}">${active ? (agent.ready ? '준비됨' : '미완료') : '비활성'}</span>
           </div>
           <div class="kv">
             <div class="k">Provider</div><div class="v">${escHtml(agent.provider || '-')}</div>
@@ -750,10 +794,12 @@ button.ghost{background:#15171b;color:#a8b0bd}
     }
 
     function fallbackAgents(cfg) {
+      const pipelineMode = String(cfg.pipeline_mode || 'classic');
       const labels = {
         worldbuilding: '세계관 에이전트',
         plot: '플롯 에이전트',
         character: '등장인물 에이전트',
+        director: '디렉터 에이전트',
       };
       return Object.entries(labels).map(([name, label]) => {
         const baseUrl = cfg[`${name}_base_url`] || cfg.default_base_url || '';
@@ -777,6 +823,7 @@ button.ghost{background:#15171b;color:#a8b0bd}
           max_tokens_source: cfg[`${name}_max_tokens`] !== undefined && cfg[`${name}_max_tokens`] !== null ? 'override' : 'default',
           api_key_set: Boolean(apiKey),
           ready: Boolean(baseUrl && apiKey && model),
+          active: name !== 'director' || pipelineMode === 'ensemble-director',
         };
       });
     }
@@ -824,6 +871,7 @@ button.ghost{background:#15171b;color:#a8b0bd}
               <div class="k">완료 시각</div><div class="v">${escHtml(formatDateTime(lastRun.completed_at))}</div>
               <div class="k">소요 시간</div><div class="v">${escHtml(formatDuration(lastRun.duration_ms))}</div>
               <div class="k">서버</div><div class="v">${escHtml(lastRun.server_url || '-')}</div>
+              <div class="k">파이프라인</div><div class="v">${escHtml(lastRun.pipeline_mode || 'classic')}</div>
               <div class="k">HTTP</div><div class="v">${escHtml(lastRun.status_code || '-')}</div>
               <div class="k">모드</div><div class="v">${escHtml(lastRun.mode || '-')}</div>
             </div>
@@ -838,6 +886,7 @@ button.ghost{background:#15171b;color:#a8b0bd}
               <div class="k">세계관</div><div class="v">${escHtml(lastRun.world_chars ?? '-')}자</div>
               <div class="k">플롯</div><div class="v">${escHtml(lastRun.plot_chars ?? '-')}자</div>
               <div class="k">캐릭터</div><div class="v">${escHtml(lastRun.char_chars ?? '-')}자</div>
+              <div class="k">디렉터</div><div class="v">${escHtml(lastRun.director_chars ?? '-')}자</div>
             </div>
           </div>
         </div>
@@ -847,6 +896,7 @@ button.ghost{background:#15171b;color:#a8b0bd}
             ${debugBlock('세계관', debug.context_world)}
             ${debugBlock('플롯', debug.context_plot)}
             ${debugBlock('등장인물', debug.context_char)}
+            ${debugBlock('디렉터', debug.context_director)}
           </div>` : ''}
       `;
     }
@@ -916,6 +966,8 @@ button.ghost{background:#15171b;color:#a8b0bd}
     function collectConfig(initialConfig) {
       const secret = key => getCredentialValue(key) || initialConfig[key] || '';
       return {
+        ...initialConfig,
+        pipeline_mode:          getInputValue('pipeline_mode') || 'classic',
         default_provider:       getProviderValue('default_provider', 'openai'),
         default_base_url:       getInputValue('default_base_url'),
         default_api_key:        secret('default_api_key'),
@@ -929,18 +981,32 @@ button.ghost{background:#15171b;color:#a8b0bd}
         worldbuilding_model:    getInputValue('worldbuilding_model'),
         worldbuilding_temperature: optionalFloat('worldbuilding_temperature'),
         worldbuilding_max_tokens:  optionalInt('worldbuilding_max_tokens'),
+        worldbuilding_system_prompt: getInputValue('worldbuilding_system_prompt'),
+        worldbuilding_user_prompt_template: getInputValue('worldbuilding_user_prompt_template'),
         plot_provider:          getProviderValue('plot_provider', ''),
         plot_base_url:          getInputValue('plot_base_url'),
         plot_api_key:           secret('plot_api_key'),
         plot_model:             getInputValue('plot_model'),
         plot_temperature:       optionalFloat('plot_temperature'),
         plot_max_tokens:        optionalInt('plot_max_tokens'),
+        plot_system_prompt:     getInputValue('plot_system_prompt'),
+        plot_user_prompt_template: getInputValue('plot_user_prompt_template'),
         character_provider:     getProviderValue('character_provider', ''),
         character_base_url:     getInputValue('character_base_url'),
         character_api_key:      secret('character_api_key'),
         character_model:        getInputValue('character_model'),
         character_temperature:  optionalFloat('character_temperature'),
         character_max_tokens:   optionalInt('character_max_tokens'),
+        character_system_prompt: getInputValue('character_system_prompt'),
+        character_user_prompt_template: getInputValue('character_user_prompt_template'),
+        director_provider:      getProviderValue('director_provider', ''),
+        director_base_url:      getInputValue('director_base_url'),
+        director_api_key:       secret('director_api_key'),
+        director_model:         getInputValue('director_model'),
+        director_temperature:   optionalFloat('director_temperature'),
+        director_max_tokens:    optionalInt('director_max_tokens'),
+        director_system_prompt: getInputValue('director_system_prompt'),
+        director_user_prompt_template: getInputValue('director_user_prompt_template'),
         context_window:         parseInt(getInputValue('context_window')) || 10,
         request_timeout:        parseFloat(getInputValue('request_timeout')) || 60,
         debug_mode:             document.getElementById('debug_mode')?.checked || false,
@@ -1055,7 +1121,8 @@ button.ghost{background:#15171b;color:#a8b0bd}
         config?.default_api_key ||
         config?.worldbuilding_api_key ||
         config?.plot_api_key ||
-        config?.character_api_key
+        config?.character_api_key ||
+        config?.director_api_key
       );
     }
 
@@ -1369,6 +1436,9 @@ button.ghost{background:#15171b;color:#a8b0bd}
 
     function exampleChatUrl(baseUrl) {
       const normalized = String(baseUrl || 'https://api.openai.com/v1').replace(/\/$/, '');
+      if (/^https:\/\/ollama\.com(?:\/api)?$/i.test(normalized) || /^http:\/\/[^/]+:11434(?:\/api)?$/i.test(normalized)) {
+        return `${normalized.endsWith('/api') ? normalized : `${normalized}/api`}/chat`;
+      }
       return `${normalized}/chat/completions`;
     }
 
@@ -1534,7 +1604,7 @@ button.ghost{background:#15171b;color:#a8b0bd}
       return `${(ms / 1000).toFixed(1)}초`;
     }
 
-    console.log('MultiAgent RP Full판 플러그인 v2.0.8 (beforeRequest 훅) 로드됨');
+    console.log('MultiAgent RP Full판 플러그인 v2.1.0 (beforeRequest 훅) 로드됨');
 
   } catch (err) {
     console.log(`MultiAgent Full판 init error: ${err.message}`);

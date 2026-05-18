@@ -29,11 +29,17 @@ def is_vertex_provider(provider: str) -> bool:
     return normalize_provider(provider) in {"vertex-ai", "vertex"}
 
 
+def is_ollama_provider(provider: str) -> bool:
+    return normalize_provider(provider) in {"ollama", "ollama-api"}
+
+
 def provider_label(provider: str) -> str:
     if is_anthropic_provider(provider):
         return "anthropic"
     if is_vertex_provider(provider):
         return "vertex-ai"
+    if is_ollama_provider(provider):
+        return "ollama"
     return normalize_provider(provider) or "openai-compatible"
 
 
@@ -43,6 +49,8 @@ async def call_llm(agent_cfg: dict, messages: list[dict], timeout: float) -> str
         return await _call_anthropic(agent_cfg, messages, timeout)
     if provider == "vertex-ai":
         return await _call_vertex_openai(agent_cfg, messages, timeout)
+    if provider == "ollama":
+        return await _call_ollama(agent_cfg, messages, timeout)
     return await _call_openai_compatible(agent_cfg, messages, timeout)
 
 
@@ -59,7 +67,7 @@ async def test_llm(agent_cfg: dict, timeout: float) -> dict:
         "error": "",
     }
 
-    if not agent_cfg["api_key"]:
+    if _requires_api_key(agent_cfg) and not agent_cfg["api_key"]:
         result["error"] = "Credential이 설정되지 않았습니다."
         return result
     if not str(agent_cfg["base_url"]).strip():
@@ -90,6 +98,8 @@ def example_url(agent_cfg: dict) -> str:
         return f"{base_url}/models/{agent_cfg.get('model') or ''}"
     if is_vertex_provider(agent_cfg.get("provider", "")):
         return f"{base_url}/chat/completions"
+    if is_ollama_provider(agent_cfg.get("provider", "")):
+        return f"{_ollama_api_base(base_url)}/tags"
     return f"{base_url}/models"
 
 
@@ -99,7 +109,26 @@ async def _test_provider_endpoint(agent_cfg: dict, timeout: float) -> int:
     if is_vertex_provider(agent_cfg.get("provider", "")):
         _vertex_access_token(agent_cfg["api_key"])
         return 200
+    if is_ollama_provider(agent_cfg.get("provider", "")):
+        return await _test_ollama_tags_endpoint(agent_cfg, timeout)
     return await _test_openai_models_endpoint(agent_cfg, timeout)
+
+
+def _requires_api_key(agent_cfg: dict) -> bool:
+    if not is_ollama_provider(agent_cfg.get("provider", "")):
+        return True
+    base_url = str(agent_cfg.get("base_url") or "").strip().lower()
+    return base_url.startswith("https://ollama.com")
+
+
+def _ollama_api_base(base_url: str) -> str:
+    normalized = str(base_url or "https://ollama.com").rstrip("/")
+    return normalized if normalized.endswith("/api") else f"{normalized}/api"
+
+
+def _auth_headers(agent_cfg: dict) -> dict:
+    api_key = str(agent_cfg.get("api_key") or "").strip()
+    return {"Authorization": f"Bearer {api_key}"} if api_key else {}
 
 
 async def _test_openai_models_endpoint(agent_cfg: dict, timeout: float) -> int:
@@ -125,6 +154,16 @@ async def _test_anthropic_models_endpoint(agent_cfg: dict, timeout: float) -> in
         return response.status_code
 
 
+async def _test_ollama_tags_endpoint(agent_cfg: dict, timeout: float) -> int:
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        response = await client.get(
+            f"{_ollama_api_base(agent_cfg['base_url'])}/tags",
+            headers=_auth_headers(agent_cfg),
+        )
+        response.raise_for_status()
+        return response.status_code
+
+
 async def _call_openai_compatible(agent_cfg: dict, messages: list[dict], timeout: float) -> str:
     payload = _openai_payload(agent_cfg, messages)
     headers = {
@@ -142,6 +181,37 @@ async def _call_vertex_openai(agent_cfg: dict, messages: list[dict], timeout: fl
         "Content-Type": "application/json",
     }
     return await _post_chat_completions(agent_cfg["base_url"], headers, payload, timeout)
+
+
+async def _call_ollama(agent_cfg: dict, messages: list[dict], timeout: float) -> str:
+    payload: dict = {
+        "model": agent_cfg["model"],
+        "messages": messages,
+        "stream": False,
+    }
+    options = {}
+    if agent_cfg.get("temperature") is not None:
+        options["temperature"] = agent_cfg["temperature"]
+    if agent_cfg.get("max_tokens") is not None:
+        options["num_predict"] = agent_cfg["max_tokens"]
+    if options:
+        payload["options"] = options
+
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        response = await client.post(
+            f"{_ollama_api_base(agent_cfg['base_url'])}/chat",
+            headers={
+                "Content-Type": "application/json",
+                **_auth_headers(agent_cfg),
+            },
+            json=payload,
+        )
+        response.raise_for_status()
+        data = response.json()
+        content = data.get("message", {}).get("content")
+        if not isinstance(content, str):
+            raise LlmConfigError("Ollama 응답에서 message.content를 찾을 수 없습니다.")
+        return content
 
 
 async def _post_chat_completions(
