@@ -53,7 +53,6 @@
 - Anthropic Claude
 - Vertex AI (서비스 계정 JSON)
 - Google AI Studio (Gemini)
-- Ollama / Ollama Cloud API
 - Custom (OpenAI 호환 endpoint 직접 입력)
 
 에이전트마다 다른 공급자·모델·키를 쓸 수 있다.
@@ -142,11 +141,6 @@ Lite판과 같은 방식으로 **automatic caching**과 **Zero Data Retention** 
 OpenAI-compatible/Vertex `chat/completions` 호출에 병합된다. Anthropic 직접 호출에는
 적용하지 않는다.
 
-Ollama Pro/Cloud를 직접 쓸 때는 provider를 `ollama`, Endpoint를 `https://ollama.com`,
-API key를 Ollama API key, 모델을 예컨대 `gpt-oss:120b`처럼 설정한다. 이 경로는
-Ollama native `/api/chat`을 사용하므로 로컬 Ollama 컨테이너나 host gateway 설정이
-필요 없다.
-
 ### 주요 환경변수 (`full/.env`)
 
 ```env
@@ -171,8 +165,8 @@ DEBUG_MODE=false
 
 Full판은 실험적으로 `PIPELINE_MODE=ensemble-director`를 지원한다. 이 모드는
 세계관·플롯·등장인물 에이전트를 동시에 실행한 뒤, 디렉터 에이전트가 세 분석을
-서로 대조하고 최종 지침으로 압축한다. 피크 동시 LLM 호출은 3개라서 Ollama Pro처럼
-클라우드 모델 3개 병렬 실행이 가능한 환경에 맞춰져 있다.
+서로 대조하고 최종 지침으로 압축한다. 피크 동시 LLM 호출은 3개라서 클라우드 모델
+3개 병렬 실행이 가능한 환경에 맞춰져 있다.
 
 더 공격적인 `PIPELINE_MODE=deep-ensemble`도 지원한다. 이 모드는 3개 병렬 호출을
 3라운드 직렬로 실행해 총 9개 에이전트 관점을 만든다.

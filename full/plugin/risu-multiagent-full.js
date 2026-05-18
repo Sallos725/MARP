@@ -555,7 +555,7 @@ button.ghost{background:#15171b;color:#a8b0bd}
 
   <section id="tab-pipeline" class="panel">
     <div class="agent-grid">
-      ${agents.map(agentCard).join('')}
+      ${agents.map(agent => agentCard(agent, pipelineMode)).join('')}
     </div>
   </section>
 
@@ -729,7 +729,6 @@ button.ghost{background:#15171b;color:#a8b0bd}
         { value: 'claude', label: 'Claude' },
         { value: 'vertex-ai', label: 'Vertex AI' },
         { value: 'google', label: 'Google' },
-        { value: 'ollama', label: 'Ollama' },
         { value: 'custom', label: 'Custom' },
       ];
     }
@@ -753,10 +752,6 @@ button.ghost{background:#15171b;color:#a8b0bd}
           baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
           model: 'gemini-1.5-pro',
         },
-        ollama: {
-          baseUrl: 'https://ollama.com',
-          model: 'gpt-oss:120b',
-        },
       };
       return defaults[normalized] || null;
     }
@@ -768,7 +763,6 @@ button.ghost{background:#15171b;color:#a8b0bd}
           claude: providerDefaults('claude'),
           vertex: providerDefaults('vertex-ai'),
           google: providerDefaults('google'),
-          ollama: providerDefaults('ollama'),
         }).map(item => item.baseUrl),
         'https://LOCATION-aiplatform.googleapis.com/v1/projects/PROJECT_ID/locations/LOCATION/endpoints/openapi',
       ];
@@ -789,15 +783,17 @@ button.ghost{background:#15171b;color:#a8b0bd}
         </div>`;
     }
 
-    function agentCard(agent) {
+    function agentCard(agent, pipelineMode = '') {
       const readyClass = agent.ready ? 'ok' : 'err';
       const active = agent.active !== false;
+      const inactiveNote = active ? '' : inactiveAgentReason(agent.name, pipelineMode);
       return `
         <div class="card">
           <div class="agent-head">
             <div class="agent-name">${escHtml(agent.label)}</div>
             <span class="badge ${active ? readyClass : 'neutral'}">${active ? (agent.ready ? '준비됨' : '미완료') : '비활성'}</span>
           </div>
+          ${inactiveNote ? `<div class="example-url">${escHtml(inactiveNote)}</div>` : ''}
           <div class="kv">
             <div class="k">Provider</div><div class="v">${escHtml(agent.provider || '-')}</div>
             <div class="k">Endpoint</div><div class="v">${escHtml(agent.base_url || '-')}</div>
@@ -871,6 +867,19 @@ button.ghost{background:#15171b;color:#a8b0bd}
       if (deepAgentNames().includes(name)) return pipelineMode === 'deep-ensemble';
       if (name === 'director') return pipelineMode === 'ensemble-director';
       return pipelineMode !== 'deep-ensemble';
+    }
+
+    function inactiveAgentReason(name, pipelineMode) {
+      if (pipelineMode === 'deep-ensemble' && ['worldbuilding', 'plot', 'character', 'director'].includes(name)) {
+        return 'deep-ensemble 모드는 기존 4개 에이전트 대신 아래 9개 Deep Ensemble 에이전트를 사용합니다.';
+      }
+      if (deepAgentNames().includes(name)) {
+        return '이 에이전트는 deep-ensemble 모드에서만 실행됩니다.';
+      }
+      if (name === 'director') {
+        return '디렉터 에이전트는 ensemble-director 모드에서만 실행됩니다.';
+      }
+      return '';
     }
 
     function findAgent(agents, name) {
@@ -1508,9 +1517,6 @@ button.ghost{background:#15171b;color:#a8b0bd}
 
     function exampleChatUrl(baseUrl) {
       const normalized = String(baseUrl || 'https://api.openai.com/v1').replace(/\/$/, '');
-      if (/^https:\/\/ollama\.com(?:\/api)?$/i.test(normalized) || /^http:\/\/[^/]+:11434(?:\/api)?$/i.test(normalized)) {
-        return `${normalized.endsWith('/api') ? normalized : `${normalized}/api`}/chat`;
-      }
       return `${normalized}/chat/completions`;
     }
 
