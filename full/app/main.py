@@ -24,7 +24,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="risu-multiagent",
     description="RisuAI용 멀티 에이전트 RP 분석 파이프라인 (beforeRequest 훅 기반)",
-    version="0.2.2",
+    version="0.6.1",
     lifespan=lifespan,
 )
 
@@ -49,6 +49,7 @@ async def status():
         version=app.version,
         ready=public["ready"],
         config={
+            "pipeline_mode": public["pipeline_mode"],
             "default_provider": public["default_provider"],
             "default_base_url": public["default_base_url"],
             "default_model": public["default_model"],

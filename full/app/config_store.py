@@ -12,6 +12,7 @@ CONFIG_PATH = Path(os.getenv("CONFIG_PATH", "data/config.json"))
 _lock = Lock()
 
 DEFAULTS: dict = {
+    "pipeline_mode":          "classic",
     "default_provider":       "openai",
     "default_base_url":       "https://api.openai.com/v1",
     "default_api_key":        "",
@@ -48,6 +49,13 @@ AGENTS: tuple[tuple[str, str], ...] = (
     ("character", "등장인물 에이전트"),
 )
 
+PIPELINE_MODES = {"classic", "ensemble-director", "deep-ensemble"}
+
+
+def normalize_pipeline_mode(value: str | None) -> str:
+    mode = str(value or "").strip().lower().replace("_", "-").replace(" ", "-")
+    return mode if mode in PIPELINE_MODES else "classic"
+
 
 def load() -> dict:
     if CONFIG_PATH.exists():
@@ -62,6 +70,7 @@ def load() -> dict:
 
 def save(data: dict) -> None:
     merged = {**DEFAULTS, **{key: value for key, value in data.items() if key in DEFAULTS}}
+    merged["pipeline_mode"] = normalize_pipeline_mode(merged.get("pipeline_mode"))
     CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
     with _lock:
         CONFIG_PATH.write_text(
@@ -78,6 +87,7 @@ def initialize_from_env() -> None:
         from app.config import get_settings
         s = get_settings()
         save({
+            "pipeline_mode":          normalize_pipeline_mode(getattr(s, "pipeline_mode", "classic")),
             "default_provider":       s.default_provider,
             "default_base_url":       s.default_base_url,
             "default_api_key":        s.default_api_key,
@@ -156,6 +166,7 @@ def public_status() -> dict:
         agents.append(agent_status)
 
     return {
+        "pipeline_mode": normalize_pipeline_mode(cfg.get("pipeline_mode")),
         "default_provider": cfg["default_provider"],
         "default_base_url": cfg["default_base_url"],
         "default_model": cfg["default_model"],

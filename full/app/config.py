@@ -6,6 +6,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
+    pipeline_mode: str = "classic"
+
     # 기본 LLM 설정 (에이전트별 미지정 시 사용)
     default_provider: str = "openai"
     default_base_url: str = "https://api.openai.com/v1"

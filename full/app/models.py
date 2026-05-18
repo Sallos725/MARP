@@ -22,6 +22,7 @@ class AnalyzeResponse(BaseModel):
 
 
 class PublicConfigStatus(BaseModel):
+    pipeline_mode: str = "classic"
     default_provider: str
     default_base_url: str
     default_model: str
@@ -79,6 +80,7 @@ class LlmTestResponse(BaseModel):
 
 
 class ConfigModel(BaseModel):
+    pipeline_mode: str = "classic"
     default_provider: str = "openai-compatible"
     default_base_url: str = "https://api.openai.com/v1"
     default_api_key: str = ""
