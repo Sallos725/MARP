@@ -1,7 +1,7 @@
 //@name risu_multiagent_full
 //@display-name MultiAgent RP — Full판
 //@api 3.0
-//@version 2.2.0
+//@version 2.2.1
 //@arg server_url string Full판 서버 URL (e.g. http://localhost:6009 or https://example.com/multi-agent)
 //@arg main_model_only string Run MultiAgent only for RisuAI main model requests; bypass auxiliary/submodel/memory/emotion/translation requests (default: 1)
 //@arg bypass_hypamemory string Skip MultiAgent analysis for RisuAI HypaMemory/memory requests (default: 1)
@@ -480,7 +480,7 @@ button.ghost{background:#15171b;color:#a8b0bd}
 <div class="wrap">
   <div class="top">
     <div>
-      <h1>MultiAgent RP Full판</h1>
+      <h1>MultiAgent RP Full판 <span class="summary-note">v2.2.1</span></h1>
       <p class="subtitle">RisuAI 메인 모델 호출 직전에 Full 사이드카 분석을 끼워 넣어 system 프롬프트에 주입합니다.</p>
     </div>
     <div class="header-actions">
@@ -1181,7 +1181,7 @@ button.ghost{background:#15171b;color:#a8b0bd}
           if (res.ok) {
             const savedConfig = await res.json().catch(() => nextConfig);
             await saveSidecarConfigBackup(currentServerUrl, savedConfig || nextConfig);
-            showMsg('저장 완료', true);
+            showMsg(`저장 완료: pipeline=${savedConfig?.pipeline_mode || nextConfig.pipeline_mode || 'classic'}`, true);
           } else {
             showMsg(`저장 실패: HTTP ${res.status}`, false);
           }
@@ -1849,7 +1849,7 @@ button.ghost{background:#15171b;color:#a8b0bd}
       return `${(ms / 1000).toFixed(1)}초`;
     }
 
-    console.log('MultiAgent RP Full판 플러그인 v2.2.0 (beforeRequest 훅) 로드됨');
+    console.log('MultiAgent RP Full판 플러그인 v2.2.1 (beforeRequest 훅) 로드됨');
 
   } catch (err) {
     console.log(`MultiAgent Full판 init error: ${err.message}`);
