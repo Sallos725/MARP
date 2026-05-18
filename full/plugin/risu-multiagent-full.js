@@ -1,7 +1,7 @@
 //@name risu_multiagent_full
 //@display-name MultiAgent RP — Full판
 //@api 3.0
-//@version 2.2.1
+//@version 2.2.2
 //@arg server_url string Full판 서버 URL (e.g. http://localhost:6009 or https://example.com/multi-agent)
 //@arg main_model_only string Run MultiAgent only for RisuAI main model requests; bypass auxiliary/submodel/memory/emotion/translation requests (default: 1)
 //@arg bypass_hypamemory string Skip MultiAgent analysis for RisuAI HypaMemory/memory requests (default: 1)
@@ -45,6 +45,7 @@
     }
 
     let lastRunState = null;
+    let analyzeTimeoutCache = null;
 
     // ── beforeRequest 훅 등록 ─────────────────────────────────────────────────
 
@@ -63,6 +64,7 @@
 
       const startedAt = Date.now();
       const serverUrl = await getServerUrl();
+      const analyzeTimeoutMs = await getAnalyzeRequestTimeoutMs(serverUrl);
 
       // OpenAI messages → /analyze 요청 형식 변환
       const safeMessages = normalizeMessageArray(messages);
@@ -80,6 +82,7 @@
         system_chars: stringLength(systemContext),
         history_messages: chatHistory.length,
         mode: type || '',
+        request_timeout_ms: analyzeTimeoutMs,
       };
       const analyzeRequest = {
         user_input:     userInput,
@@ -92,6 +95,7 @@
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(analyzeRequest),
+          requestTimeoutMs: analyzeTimeoutMs,
         });
 
         if (!res.ok) {
@@ -303,6 +307,45 @@
       }
 
       return data;
+    }
+
+    async function getAnalyzeRequestTimeoutMs(serverUrl) {
+      const normalizedServerUrl = normalizeUrl(serverUrl);
+      const now = Date.now();
+      if (analyzeTimeoutCache
+          && analyzeTimeoutCache.serverUrl === normalizedServerUrl
+          && now - analyzeTimeoutCache.loadedAt < 60_000) {
+        return analyzeTimeoutCache.timeoutMs;
+      }
+
+      const cachedConfig = await loadSidecarConfigBackup(normalizedServerUrl);
+      let seconds = normalizePositiveNumber(cachedConfig?.request_timeout);
+
+      try {
+        const statusRes = await Risuai.nativeFetch(`${normalizedServerUrl}/status`, {
+          method: 'GET',
+          requestTimeoutMs: 15_000,
+        });
+        if (statusRes.ok) {
+          const status = await statusRes.json();
+          seconds = normalizePositiveNumber(status?.config?.request_timeout) || seconds;
+        }
+      } catch (_) {
+        // Best effort only. The real analyze request will record any connection failure.
+      }
+
+      const timeoutMs = Math.ceil((seconds || 60) * 1000 + 30_000);
+      analyzeTimeoutCache = {
+        serverUrl: normalizedServerUrl,
+        loadedAt: now,
+        timeoutMs,
+      };
+      return timeoutMs;
+    }
+
+    function normalizePositiveNumber(value) {
+      const number = Number(value);
+      return Number.isFinite(number) && number > 0 ? number : null;
     }
 
     // ── UI 빌더 ───────────────────────────────────────────────────────────────
@@ -635,7 +678,7 @@ button.ghost{background:#15171b;color:#a8b0bd}
         </div>
         <div class="field">
           <label for="request_timeout">타임아웃 초</label>
-          <input id="request_timeout" type="number" min="10" max="300" value="${escHtml(v('request_timeout', '60'))}">
+          <input id="request_timeout" type="number" min="10" max="3000" value="${escHtml(v('request_timeout', '60'))}">
         </div>
       </div>
       <label>
