@@ -1,7 +1,7 @@
 //@name risu_multiagent_full
 //@display-name MultiAgent RP — Full판
 //@api 3.0
-//@version 2.2.2
+//@version 2.2.3
 //@arg server_url string Full판 서버 URL (e.g. http://localhost:6009 or https://example.com/multi-agent)
 //@arg main_model_only string Run MultiAgent only for RisuAI main model requests; bypass auxiliary/submodel/memory/emotion/translation requests (default: 1)
 //@arg bypass_hypamemory string Skip MultiAgent analysis for RisuAI HypaMemory/memory requests (default: 1)
@@ -26,6 +26,8 @@
     const PLUGIN_SETTINGS_KEY = 'risu_multiagent_full_plugin_settings_v1';
     const SIDECAR_CONFIG_BACKUP_KEY = 'risu_multiagent_full_sidecar_config_backup_v1';
     const STORAGE_VERSION = 1;
+    const DEFAULT_ANALYZE_TIMEOUT_SECONDS = 3000;
+    const ANALYZE_TIMEOUT_GRACE_MS = 30_000;
 
     // ── 서버 URL 헬퍼 ─────────────────────────────────────────────────────────
 
@@ -65,6 +67,7 @@
       const startedAt = Date.now();
       const serverUrl = await getServerUrl();
       const analyzeTimeoutMs = await getAnalyzeRequestTimeoutMs(serverUrl);
+      console.log(`MultiAgent Full판: analyze start timeout=${analyzeTimeoutMs}ms`);
 
       // OpenAI messages → /analyze 요청 형식 변환
       const safeMessages = normalizeMessageArray(messages);
@@ -89,6 +92,12 @@
         chat_history:   chatHistory,
         system_context: systemContext,
       };
+      await recordLastRun({
+        ...runBase,
+        status: 'running',
+        success: null,
+        duration_ms: 0,
+      });
 
       try {
         const res = await Risuai.nativeFetch(`${serverUrl}/analyze`, {
@@ -102,6 +111,7 @@
           const errText = await res.text().catch(() => '');
           await recordLastRun({
             ...runBase,
+            status: 'failed',
             success: false,
             status_code: res.status,
             duration_ms: Date.now() - startedAt,
@@ -114,6 +124,7 @@
         const data = await res.json();
         await recordLastRun({
           ...runBase,
+          status: 'success',
           success: true,
           status_code: res.status,
           duration_ms: Date.now() - startedAt,
@@ -143,6 +154,7 @@
       } catch (err) {
         await recordLastRun({
           ...runBase,
+          status: 'failed',
           success: false,
           duration_ms: Date.now() - startedAt,
           error: `연결 실패: ${err.message}`,
@@ -321,20 +333,7 @@
       const cachedConfig = await loadSidecarConfigBackup(normalizedServerUrl);
       let seconds = normalizePositiveNumber(cachedConfig?.request_timeout);
 
-      try {
-        const statusRes = await Risuai.nativeFetch(`${normalizedServerUrl}/status`, {
-          method: 'GET',
-          requestTimeoutMs: 15_000,
-        });
-        if (statusRes.ok) {
-          const status = await statusRes.json();
-          seconds = normalizePositiveNumber(status?.config?.request_timeout) || seconds;
-        }
-      } catch (_) {
-        // Best effort only. The real analyze request will record any connection failure.
-      }
-
-      const timeoutMs = Math.ceil((seconds || 60) * 1000 + 30_000);
+      const timeoutMs = Math.ceil((seconds || DEFAULT_ANALYZE_TIMEOUT_SECONDS) * 1000 + ANALYZE_TIMEOUT_GRACE_MS);
       analyzeTimeoutCache = {
         serverUrl: normalizedServerUrl,
         loadedAt: now,
@@ -931,6 +930,13 @@ button.ghost{background:#15171b;color:#a8b0bd}
       return '';
     }
 
+    function runStatusBadge(lastRun) {
+      if (lastRun?.status === 'running') {
+        return '<span class="badge">실행 중</span>';
+      }
+      return `<span class="badge ${lastRun?.success ? 'ok' : 'err'}">${lastRun?.success ? '성공' : '실패'}</span>`;
+    }
+
     function findAgent(agents, name) {
       return agents.find(agent => agent.name === name);
     }
@@ -983,7 +989,7 @@ button.ghost{background:#15171b;color:#a8b0bd}
           <div class="card">
             <h2>마지막 분석</h2>
             <div class="kv">
-              <div class="k">결과</div><div class="v"><span class="badge ${lastRun.success ? 'ok' : 'err'}">${lastRun.success ? '성공' : '실패'}</span></div>
+              <div class="k">결과</div><div class="v">${runStatusBadge(lastRun)}</div>
               <div class="k">완료 시각</div><div class="v">${escHtml(formatDateTime(lastRun.completed_at))}</div>
               <div class="k">소요 시간</div><div class="v">${escHtml(formatDuration(lastRun.duration_ms))}</div>
               <div class="k">서버</div><div class="v">${escHtml(lastRun.server_url || '-')}</div>
