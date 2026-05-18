@@ -1,9 +1,16 @@
 import asyncio
 from time import perf_counter
 
-from app.agents import WorldbuildingAgent, PlotAgent, CharacterAgent, DirectorAgent
+from app.agents import WorldbuildingAgent, PlotAgent, CharacterAgent, DirectorAgent, DeepAgent
 from app.models import AnalyzeRequest, AnalyzeResponse
 from app import config_store
+
+
+DEEP_ROUNDS: tuple[tuple[str, ...], ...] = (
+    ("lore_scout", "scene_scout", "voice_scout"),
+    ("continuity_critic", "intent_critic", "style_critic"),
+    ("beat_director", "constraint_director", "final_director"),
+)
 
 
 async def run_analysis(request: AnalyzeRequest) -> AnalyzeResponse:
@@ -32,10 +39,16 @@ async def run_analysis(request: AnalyzeRequest) -> AnalyzeResponse:
         "context_plot":   "",
         "context_char":   "",
         "context_director": "",
+        "context_deep": "",
+        "round1_context": "",
+        "round2_context": "",
+        "deep_contexts": {},
     }
 
     if mode == "ensemble-director":
         return await _run_ensemble_director_analysis(pipeline_context)
+    if mode == "deep-ensemble":
+        return await _run_deep_ensemble_analysis(pipeline_context)
 
     timings: dict[str, int] = {}
 
@@ -87,9 +100,62 @@ async def _run_ensemble_director_analysis(pipeline_context: dict) -> AnalyzeResp
     )
 
 
+async def _run_deep_ensemble_analysis(pipeline_context: dict) -> AnalyzeResponse:
+    """
+    Extreme RP mode:
+    3 serial rounds, 3 independent agents per round, 9 total model calls.
+    Each round has distinct responsibilities; this is intentionally heavier than
+    ensemble-director and keeps peak cloud concurrency at three calls.
+    """
+    timings: dict[str, int] = {}
+    deep_contexts: dict[str, str] = {}
+
+    for round_index, agent_names in enumerate(DEEP_ROUNDS, start=1):
+        round_outputs = await asyncio.gather(*[
+            _timed_run(timings, name, DeepAgent(name), dict(pipeline_context))
+            for name in agent_names
+        ])
+        for name, output in zip(agent_names, round_outputs, strict=True):
+            deep_contexts[name] = output
+            pipeline_context["deep_contexts"][name] = output
+            pipeline_context[f"context_{name}"] = output
+
+        formatted_round = _format_deep_outputs(deep_contexts, agent_names)
+        if round_index == 1:
+            pipeline_context["round1_context"] = formatted_round
+        elif round_index == 2:
+            pipeline_context["round2_context"] = formatted_round
+
+        pipeline_context["context_deep"] = _format_deep_outputs(deep_contexts, deep_contexts.keys())
+
+    return AnalyzeResponse(
+        context_world=deep_contexts.get("lore_scout", ""),
+        context_plot=deep_contexts.get("beat_director", ""),
+        context_char=deep_contexts.get("voice_scout", ""),
+        context_director=deep_contexts.get("final_director", ""),
+        context_deep=deep_contexts,
+        pipeline_mode="deep-ensemble",
+        agent_timings_ms=timings,
+    )
+
+
 async def _timed_run(timings: dict[str, int], name: str, agent, pipeline_context: dict) -> str:
     started = perf_counter()
     try:
         return await agent.run(pipeline_context)
     finally:
         timings[name] = int((perf_counter() - started) * 1000)
+
+
+def _format_deep_outputs(outputs: dict[str, str], names) -> str:
+    label_map = dict(config_store.DEEP_AGENTS)
+    blocks = []
+    for name in names:
+        text = str(outputs.get(name, "")).strip()
+        if not text:
+            continue
+        blocks.append("\n".join([
+            f"[{label_map.get(name, name)}]",
+            text,
+        ]))
+    return "\n\n".join(blocks)

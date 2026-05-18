@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ChatMessage(BaseModel):
@@ -20,6 +20,7 @@ class AnalyzeResponse(BaseModel):
     context_plot: str
     context_char: str
     context_director: str = ""
+    context_deep: dict[str, str] = Field(default_factory=dict)
     pipeline_mode: str = "classic"
     agent_timings_ms: dict[str, int] = Field(default_factory=dict)
 
@@ -84,6 +85,8 @@ class LlmTestResponse(BaseModel):
 
 
 class ConfigModel(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
     pipeline_mode: str = "classic"
     default_provider: str = "openai-compatible"
     default_base_url: str = "https://api.openai.com/v1"

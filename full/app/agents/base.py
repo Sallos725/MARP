@@ -110,7 +110,14 @@ class BaseAgent(ABC):
             "context_plot": pipeline_context.get("context_plot", ""),
             "context_char": pipeline_context.get("context_char", ""),
             "context_director": pipeline_context.get("context_director", ""),
+            "context_deep": pipeline_context.get("context_deep", ""),
+            "round1_context": pipeline_context.get("round1_context", ""),
+            "round2_context": pipeline_context.get("round2_context", ""),
         }
+        deep_contexts = pipeline_context.get("deep_contexts", {})
+        if isinstance(deep_contexts, dict):
+            for key, value in deep_contexts.items():
+                values[f"context_{key}"] = value
         rendered = str(template)
         for key, value in values.items():
             rendered = rendered.replace(f"{{{{{key}}}}}", str(value or ""))

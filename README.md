@@ -167,17 +167,29 @@ DEBUG_MODE=false
 
 전체 항목은 `full/.env.example` 참조.
 
-### Full판 실험 모드: ensemble-director
+### Full판 실험 모드: ensemble-director / deep-ensemble
 
 Full판은 실험적으로 `PIPELINE_MODE=ensemble-director`를 지원한다. 이 모드는
 세계관·플롯·등장인물 에이전트를 동시에 실행한 뒤, 디렉터 에이전트가 세 분석을
 서로 대조하고 최종 지침으로 압축한다. 피크 동시 LLM 호출은 3개라서 Ollama Pro처럼
 클라우드 모델 3개 병렬 실행이 가능한 환경에 맞춰져 있다.
 
+더 공격적인 `PIPELINE_MODE=deep-ensemble`도 지원한다. 이 모드는 3개 병렬 호출을
+3라운드 직렬로 실행해 총 9개 에이전트 관점을 만든다.
+
+```text
+Round 1: lore_scout / scene_scout / voice_scout
+Round 2: continuity_critic / intent_critic / style_critic
+Round 3: beat_director / constraint_director / final_director
+```
+
+각 라운드는 서로 다른 역할과 입력 컨텍스트를 사용한다. 같은 컨텍스트를 단순히
+3번 반복 호출하지 않고, 앞 라운드의 결과를 다음 라운드가 반박하거나 압축한다.
+
 GUI의 **파이프라인 모드**에서 `ensemble-director`로 바꿀 수 있고, 디렉터 에이전트는
-기본 LLM 설정을 상속하거나 별도 provider/model/key를 지정할 수 있다. 각 에이전트의
-system prompt와 user prompt template도 GUI에서 편집할 수 있다. 비워두면 내장 기본
-프롬프트를 사용한다.
+기본 LLM 설정을 상속하거나 별도 provider/model/key를 지정할 수 있다. `deep-ensemble`
+에이전트 9개도 GUI에서 개별 설정할 수 있다. 각 에이전트의 system prompt와 user prompt
+template도 GUI에서 편집할 수 있다. 비워두면 내장 기본 프롬프트를 사용한다.
 
 user prompt template에서 쓸 수 있는 토큰:
 
@@ -191,6 +203,10 @@ user prompt template에서 쓸 수 있는 토큰:
 {{context_plot}}
 {{context_char}}
 {{context_director}}
+{{context_deep}}
+{{round1_context}}
+{{round2_context}}
+{{context_lore_scout}}
 ```
 
 ### Vertex AI 사용 시

@@ -67,9 +67,33 @@ OPTIONAL_AGENTS: tuple[tuple[str, str], ...] = (
     ("director", "디렉터 에이전트"),
 )
 
-ALL_AGENTS: tuple[tuple[str, str], ...] = AGENTS + OPTIONAL_AGENTS
+DEEP_AGENTS: tuple[tuple[str, str], ...] = (
+    ("lore_scout", "1A 로어/규칙 스카우트"),
+    ("scene_scout", "1B 장면 상태 스카우트"),
+    ("voice_scout", "1C 캐릭터 음성 스카우트"),
+    ("continuity_critic", "2A 연속성 크리틱"),
+    ("intent_critic", "2B 유저 의도 크리틱"),
+    ("style_critic", "2C 문체/몰입 크리틱"),
+    ("beat_director", "3A 다음 비트 디렉터"),
+    ("constraint_director", "3B 응답 제약 디렉터"),
+    ("final_director", "3C 최종 합성 디렉터"),
+)
 
-PIPELINE_MODES = {"classic", "ensemble-director"}
+ALL_AGENTS: tuple[tuple[str, str], ...] = AGENTS + OPTIONAL_AGENTS + DEEP_AGENTS
+
+for _agent_name, _agent_label in DEEP_AGENTS:
+    DEFAULTS.update({
+        f"{_agent_name}_provider": "",
+        f"{_agent_name}_base_url": "",
+        f"{_agent_name}_api_key": "",
+        f"{_agent_name}_model": "",
+        f"{_agent_name}_temperature": None,
+        f"{_agent_name}_max_tokens": None,
+        f"{_agent_name}_system_prompt": "",
+        f"{_agent_name}_user_prompt_template": "",
+    })
+
+PIPELINE_MODES = {"classic", "ensemble-director", "deep-ensemble"}
 
 
 def normalize_pipeline_mode(value: str | None) -> str:
@@ -79,8 +103,11 @@ def normalize_pipeline_mode(value: str | None) -> str:
 
 def active_agents(cfg: dict | None = None) -> tuple[tuple[str, str], ...]:
     current = cfg or load()
-    if normalize_pipeline_mode(current.get("pipeline_mode")) == "ensemble-director":
-        return ALL_AGENTS
+    mode = normalize_pipeline_mode(current.get("pipeline_mode"))
+    if mode == "ensemble-director":
+        return AGENTS + OPTIONAL_AGENTS
+    if mode == "deep-ensemble":
+        return DEEP_AGENTS
     return AGENTS
 
 

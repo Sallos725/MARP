@@ -1,7 +1,7 @@
 //@name risu_multiagent_full
 //@display-name MultiAgent RP — Full판
 //@api 3.0
-//@version 2.1.0
+//@version 2.2.0
 //@arg server_url string Full판 서버 URL (e.g. http://localhost:6009 or https://example.com/multi-agent)
 //@arg main_model_only string Run MultiAgent only for RisuAI main model requests; bypass auxiliary/submodel/memory/emotion/translation requests (default: 1)
 //@arg bypass_hypamemory string Skip MultiAgent analysis for RisuAI HypaMemory/memory requests (default: 1)
@@ -118,15 +118,17 @@
           plot_chars: stringLength(data.context_plot),
           char_chars: stringLength(data.context_char),
           director_chars: stringLength(data.context_director),
+          deep_chars: stringLength(formatDeepContext(data.context_deep)),
           debug: {
             context_world: data.context_world,
             context_plot: data.context_plot,
             context_char: data.context_char,
             context_director: data.context_director,
+            context_deep: data.context_deep || {},
           },
         });
 
-        return injectContext(messages, data.context_world, data.context_plot, data.context_char, data.context_director);
+        return injectContext(messages, data.context_world, data.context_plot, data.context_char, data.context_director, data.context_deep);
 
       } catch (err) {
         await recordLastRun({
@@ -187,23 +189,33 @@
       ].join('\n')).join('\n\n');
     }
 
-    function injectContext(messages, contextWorld, contextPlot, contextChar, contextDirector) {
+    function injectContext(messages, contextWorld, contextPlot, contextChar, contextDirector, contextDeep) {
       if (!Array.isArray(messages)) return messages;
-      const parts = [
-        '',
-        '---',
-        '[MultiAgent RP Analysis Context]',
-        '',
-        '[Worldbuilding Agent]',
-        contextWorld || '(none)',
-        '',
-        '[Plot Agent]',
-        contextPlot || '(none)',
-        '',
-        '[Character Agent]',
-        contextChar || '(none)',
-      ];
-      if (contextDirector) {
+      const deepContext = formatDeepContext(contextDeep);
+      const parts = deepContext
+        ? [
+            '',
+            '---',
+            '[MultiAgent RP Deep Ensemble Context]',
+            '',
+            '[Deep Ensemble]',
+            deepContext,
+          ]
+        : [
+            '',
+            '---',
+            '[MultiAgent RP Analysis Context]',
+            '',
+            '[Worldbuilding Agent]',
+            contextWorld || '(none)',
+            '',
+            '[Plot Agent]',
+            contextPlot || '(none)',
+            '',
+            '[Character Agent]',
+            contextChar || '(none)',
+          ];
+      if (!deepContext && contextDirector) {
         parts.push(
           '',
           '[Director Agent]',
@@ -321,7 +333,7 @@
 
       const promptHelp = `
         <div class="example-url">
-          템플릿 토큰: {{user_input}}, {{chat_history}}, {{system_context}}, {{world_summary}}, {{char_summary}}, {{context_world}}, {{context_plot}}, {{context_char}}, {{context_director}}
+          템플릿 토큰: {{user_input}}, {{chat_history}}, {{system_context}}, {{world_summary}}, {{char_summary}}, {{context_world}}, {{context_plot}}, {{context_char}}, {{context_director}}, {{context_deep}}, {{round1_context}}, {{round2_context}}, {{context_lore_scout}} 등 deep agent별 context
         </div>`;
 
       const credentialField = (id, isSet) => `
@@ -593,6 +605,11 @@ button.ghost{background:#15171b;color:#a8b0bd}
     ${agentSettings('plot', '플롯 에이전트', Boolean(findAgent(agents, 'plot')?.api_key_set || cfg.plot_api_key))}
     ${agentSettings('character', '등장인물 에이전트', Boolean(findAgent(agents, 'character')?.api_key_set || cfg.character_api_key))}
     ${agentSettings('director', '디렉터 에이전트', Boolean(findAgent(agents, 'director')?.api_key_set || cfg.director_api_key))}
+    <div class="card">
+      <h2>Deep Ensemble 에이전트</h2>
+      <p>deep-ensemble 모드에서만 활성화됩니다. 3개씩 병렬 실행되는 3라운드, 총 9회 호출입니다.</p>
+    </div>
+    ${deepAgentDefinitions().map(agent => agentSettings(agent.name, agent.label, Boolean(findAgent(agents, agent.name)?.api_key_set || cfg[`${agent.name}_api_key`]))).join('')}
 
     <div class="card">
       <h2>파이프라인 설정</h2>
@@ -601,9 +618,10 @@ button.ghost{background:#15171b;color:#a8b0bd}
         <select id="pipeline_mode">
           <option value="classic" ${pipelineMode === 'classic' ? 'selected' : ''}>classic — 기존 순차 3-agent</option>
           <option value="ensemble-director" ${pipelineMode === 'ensemble-director' ? 'selected' : ''}>ensemble-director — 3-agent 병렬 + 디렉터 검증</option>
+          <option value="deep-ensemble" ${pipelineMode === 'deep-ensemble' ? 'selected' : ''}>deep-ensemble — 3라운드 x 3병렬 = 9-agent</option>
         </select>
       </div>
-      <div class="example-url">ensemble-director는 세계관/플롯/캐릭터 에이전트를 동시에 실행한 뒤 디렉터 에이전트가 검증/압축합니다. 피크 동시 LLM 호출은 3개입니다.</div>
+      <div class="example-url">ensemble-director는 3개 분석 뒤 디렉터가 검증합니다. deep-ensemble은 3개 병렬 호출을 3라운드 직렬로 실행해 총 9개 관점을 합칩니다. 두 실험 모드 모두 피크 동시 LLM 호출은 3개입니다.</div>
       <div class="row2">
         <div class="field">
           <label for="context_window">컨텍스트 윈도우</label>
@@ -801,6 +819,9 @@ button.ghost{background:#15171b;color:#a8b0bd}
         character: '등장인물 에이전트',
         director: '디렉터 에이전트',
       };
+      for (const agent of deepAgentDefinitions()) {
+        labels[agent.name] = agent.label;
+      }
       return Object.entries(labels).map(([name, label]) => {
         const baseUrl = cfg[`${name}_base_url`] || cfg.default_base_url || '';
         const apiKey = cfg[`${name}_api_key`] || cfg.default_api_key || '';
@@ -823,9 +844,33 @@ button.ghost{background:#15171b;color:#a8b0bd}
           max_tokens_source: cfg[`${name}_max_tokens`] !== undefined && cfg[`${name}_max_tokens`] !== null ? 'override' : 'default',
           api_key_set: Boolean(apiKey),
           ready: Boolean(baseUrl && apiKey && model),
-          active: name !== 'director' || pipelineMode === 'ensemble-director',
+          active: isAgentActive(name, pipelineMode),
         };
       });
+    }
+
+    function deepAgentDefinitions() {
+      return [
+        { name: 'lore_scout', label: '1A 로어/규칙 스카우트' },
+        { name: 'scene_scout', label: '1B 장면 상태 스카우트' },
+        { name: 'voice_scout', label: '1C 캐릭터 음성 스카우트' },
+        { name: 'continuity_critic', label: '2A 연속성 크리틱' },
+        { name: 'intent_critic', label: '2B 유저 의도 크리틱' },
+        { name: 'style_critic', label: '2C 문체/몰입 크리틱' },
+        { name: 'beat_director', label: '3A 다음 비트 디렉터' },
+        { name: 'constraint_director', label: '3B 응답 제약 디렉터' },
+        { name: 'final_director', label: '3C 최종 합성 디렉터' },
+      ];
+    }
+
+    function deepAgentNames() {
+      return deepAgentDefinitions().map(agent => agent.name);
+    }
+
+    function isAgentActive(name, pipelineMode) {
+      if (deepAgentNames().includes(name)) return pipelineMode === 'deep-ensemble';
+      if (name === 'director') return pipelineMode === 'ensemble-director';
+      return pipelineMode !== 'deep-ensemble';
     }
 
     function findAgent(agents, name) {
@@ -850,6 +895,15 @@ button.ghost{background:#15171b;color:#a8b0bd}
       if (agent.temperature_source === 'override') parts.push('온도 개별');
       if (agent.max_tokens_source === 'override') parts.push('토큰 개별');
       return parts.length ? parts.join(', ') : '전체 기본값';
+    }
+
+    function formatDeepContext(contextDeep) {
+      if (!contextDeep || typeof contextDeep !== 'object') return '';
+      const labels = Object.fromEntries(deepAgentDefinitions().map(agent => [agent.name, agent.label]));
+      return deepAgentNames()
+        .filter(name => contextDeep[name])
+        .map(name => `[${labels[name] || name}]\n${String(contextDeep[name] || '').trim()}`)
+        .join('\n\n');
     }
 
     function lastRunPanel(lastRun) {
@@ -887,6 +941,7 @@ button.ghost{background:#15171b;color:#a8b0bd}
               <div class="k">플롯</div><div class="v">${escHtml(lastRun.plot_chars ?? '-')}자</div>
               <div class="k">캐릭터</div><div class="v">${escHtml(lastRun.char_chars ?? '-')}자</div>
               <div class="k">디렉터</div><div class="v">${escHtml(lastRun.director_chars ?? '-')}자</div>
+              <div class="k">Deep</div><div class="v">${escHtml(lastRun.deep_chars ?? '-')}자</div>
             </div>
           </div>
         </div>
@@ -897,6 +952,7 @@ button.ghost{background:#15171b;color:#a8b0bd}
             ${debugBlock('플롯', debug.context_plot)}
             ${debugBlock('등장인물', debug.context_char)}
             ${debugBlock('디렉터', debug.context_director)}
+            ${debugBlock('Deep Ensemble', formatDeepContext(debug.context_deep))}
           </div>` : ''}
       `;
     }
@@ -965,7 +1021,7 @@ button.ghost{background:#15171b;color:#a8b0bd}
 
     function collectConfig(initialConfig) {
       const secret = key => getCredentialValue(key) || initialConfig[key] || '';
-      return {
+      const next = {
         ...initialConfig,
         pipeline_mode:          getInputValue('pipeline_mode') || 'classic',
         default_provider:       getProviderValue('default_provider', 'openai'),
@@ -1011,6 +1067,21 @@ button.ghost{background:#15171b;color:#a8b0bd}
         request_timeout:        parseFloat(getInputValue('request_timeout')) || 60,
         debug_mode:             document.getElementById('debug_mode')?.checked || false,
       };
+      for (const name of deepAgentNames()) {
+        collectAgentConfig(next, name, secret);
+      }
+      return next;
+    }
+
+    function collectAgentConfig(target, name, secret) {
+      target[`${name}_provider`] = getProviderValue(`${name}_provider`, '');
+      target[`${name}_base_url`] = getInputValue(`${name}_base_url`);
+      target[`${name}_api_key`] = secret(`${name}_api_key`);
+      target[`${name}_model`] = getInputValue(`${name}_model`);
+      target[`${name}_temperature`] = optionalFloat(`${name}_temperature`);
+      target[`${name}_max_tokens`] = optionalInt(`${name}_max_tokens`);
+      target[`${name}_system_prompt`] = getInputValue(`${name}_system_prompt`);
+      target[`${name}_user_prompt_template`] = getInputValue(`${name}_user_prompt_template`);
     }
 
     function getInputValue(id) {
@@ -1122,7 +1193,8 @@ button.ghost{background:#15171b;color:#a8b0bd}
         config?.worldbuilding_api_key ||
         config?.plot_api_key ||
         config?.character_api_key ||
-        config?.director_api_key
+        config?.director_api_key ||
+        deepAgentNames().some(name => config?.[`${name}_api_key`])
       );
     }
 
@@ -1604,7 +1676,7 @@ button.ghost{background:#15171b;color:#a8b0bd}
       return `${(ms / 1000).toFixed(1)}초`;
     }
 
-    console.log('MultiAgent RP Full판 플러그인 v2.1.0 (beforeRequest 훅) 로드됨');
+    console.log('MultiAgent RP Full판 플러그인 v2.2.0 (beforeRequest 훅) 로드됨');
 
   } catch (err) {
     console.log(`MultiAgent Full판 init error: ${err.message}`);
