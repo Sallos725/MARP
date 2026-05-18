@@ -81,16 +81,17 @@
         history_messages: chatHistory.length,
         mode: type || '',
       };
+      const analyzeRequest = {
+        user_input:     userInput,
+        chat_history:   chatHistory,
+        system_context: systemContext,
+      };
 
       try {
         const res = await Risuai.nativeFetch(`${serverUrl}/analyze`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            user_input:     userInput,
-            chat_history:   chatHistory,
-            system_context: systemContext,
-          }),
+          body: JSON.stringify(analyzeRequest),
         });
 
         if (!res.ok) {
@@ -128,6 +129,8 @@
             context_char: data.context_char,
             context_director: data.context_director,
             context_deep: data.context_deep || {},
+            analyze_request: analyzeRequest,
+            agent_io: data.agent_debug || {},
           },
         });
 
@@ -966,12 +969,14 @@ button.ghost{background:#15171b;color:#a8b0bd}
         ${debug ? `
           <div class="card">
             <h2>디버그 컨텍스트</h2>
+            ${debugBlock('Analyze 입력', formatAnalyzeRequest(debug.analyze_request))}
             ${debugBlock('세계관', debug.context_world)}
             ${debugBlock('플롯', debug.context_plot)}
             ${debugBlock('등장인물', debug.context_char)}
             ${debugBlock('디렉터', debug.context_director)}
             ${debugBlock('Deep Ensemble', formatDeepContext(debug.context_deep))}
           </div>` : ''}
+        ${debug ? agentIoPanel(debug.agent_io) : ''}
       `;
     }
 
@@ -981,6 +986,76 @@ button.ghost{background:#15171b;color:#a8b0bd}
         <details>
           <summary><span>${escHtml(label)}</span><span class="summary-note">펼쳐 보기</span></summary>
           <pre class="debug-block">${escHtml(text)}</pre>
+        </details>`;
+    }
+
+    function formatAnalyzeRequest(request) {
+      if (!request || typeof request !== 'object') return '';
+      return JSON.stringify(request, null, 2);
+    }
+
+    function agentIoPanel(agentIo) {
+      if (!agentIo || typeof agentIo !== 'object' || !Object.keys(agentIo).length) {
+        return `
+          <div class="card">
+            <h2>에이전트 I/O</h2>
+            <div class="example-url">에이전트별 input/output은 Full 사이드카 설정의 디버그 모드를 켠 뒤 실행한 요청에서 표시됩니다.</div>
+          </div>`;
+      }
+      const orderedNames = [
+        'worldbuilding',
+        'plot',
+        'character',
+        'director',
+        ...deepAgentNames(),
+      ].filter((name, index, arr) => arr.indexOf(name) === index);
+      const names = [
+        ...orderedNames.filter(name => agentIo[name]),
+        ...Object.keys(agentIo).filter(name => !orderedNames.includes(name)),
+      ];
+      return `
+        <div class="card">
+          <h2>에이전트 I/O</h2>
+          <div class="example-url">API key와 HTTP header는 기록하지 않습니다. 각 에이전트가 LLM에 보낸 system/user prompt와 응답 본문만 표시합니다.</div>
+          ${names.map(name => agentIoBlock(name, agentIo[name])).join('')}
+        </div>`;
+    }
+
+    function agentIoBlock(name, item) {
+      const labels = {
+        worldbuilding: '세계관 에이전트',
+        plot: '플롯 에이전트',
+        character: '등장인물 에이전트',
+        director: '디렉터 에이전트',
+        ...Object.fromEntries(deepAgentDefinitions().map(agent => [agent.name, agent.label])),
+      };
+      const messages = Array.isArray(item?.input_messages) ? item.input_messages : [];
+      const inputText = messages.map((message, index) => [
+        `#${index + 1} ${message.role || 'message'}`,
+        String(message.content || ''),
+      ].join('\n')).join('\n\n---\n\n');
+      const output = String(item?.output || '');
+      const error = String(item?.error || '');
+      const summary = [
+        item?.provider ? `provider=${item.provider}` : '',
+        item?.model ? `model=${item.model}` : '',
+        output ? `${output.length}자 output` : '',
+        error ? 'error' : '',
+      ].filter(Boolean).join(' · ');
+      return `
+        <details>
+          <summary><span>${escHtml(labels[name] || name)}</span><span class="summary-note">${escHtml(summary || name)}</span></summary>
+          <div class="details-body">
+            <div class="kv">
+              <div class="k">Provider</div><div class="v">${escHtml(item?.provider || '-')}</div>
+              <div class="k">Model</div><div class="v">${escHtml(item?.model || '-')}</div>
+              <div class="k">Temperature</div><div class="v">${escHtml(item?.temperature ?? '-')}</div>
+              <div class="k">Max Tokens</div><div class="v">${escHtml(item?.max_tokens ?? '제한 없음')}</div>
+            </div>
+            ${debugBlock('Input messages', inputText)}
+            ${debugBlock('Output', output)}
+            ${error ? debugBlock('Error', error) : ''}
+          </div>
         </details>`;
     }
 

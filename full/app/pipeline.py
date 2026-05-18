@@ -43,6 +43,7 @@ async def run_analysis(request: AnalyzeRequest) -> AnalyzeResponse:
         "round1_context": "",
         "round2_context": "",
         "deep_contexts": {},
+        "_agent_debug": {},
     }
 
     if mode == "ensemble-director":
@@ -61,6 +62,7 @@ async def run_analysis(request: AnalyzeRequest) -> AnalyzeResponse:
         context_plot=pipeline_context["context_plot"],
         context_char=pipeline_context["context_char"],
         pipeline_mode="classic",
+        agent_debug=pipeline_context["_agent_debug"],
         agent_timings_ms=timings,
     )
 
@@ -96,6 +98,7 @@ async def _run_ensemble_director_analysis(pipeline_context: dict) -> AnalyzeResp
         context_char=pipeline_context["context_char"],
         context_director=pipeline_context["context_director"],
         pipeline_mode="ensemble-director",
+        agent_debug=pipeline_context["_agent_debug"],
         agent_timings_ms=timings,
     )
 
@@ -135,6 +138,7 @@ async def _run_deep_ensemble_analysis(pipeline_context: dict) -> AnalyzeResponse
         context_director=deep_contexts.get("final_director", ""),
         context_deep=deep_contexts,
         pipeline_mode="deep-ensemble",
+        agent_debug=pipeline_context["_agent_debug"],
         agent_timings_ms=timings,
     )
 

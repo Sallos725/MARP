@@ -59,7 +59,16 @@ class BaseAgent(ABC):
             {"role": "system", "content": f"{system_prompt}\n\n{SOURCE_MATERIAL_RULES}"},
             {"role": "user",   "content": user_prompt},
         ]
-        return await self._call_llm(messages)
+        debug_entry = self._start_debug_entry(pipeline_context, messages)
+        try:
+            output = await self._call_llm(messages)
+            if debug_entry is not None:
+                debug_entry["output"] = output
+            return output
+        except Exception as exc:
+            if debug_entry is not None:
+                debug_entry["error"] = str(exc)
+            raise
 
     async def _call_llm(self, messages: list[dict]) -> str:
         timeout = float(config_store.load().get("request_timeout", 60.0))
@@ -86,6 +95,31 @@ class BaseAgent(ABC):
             text,
             "</source>",
         ])
+
+    def _start_debug_entry(self, pipeline_context: dict, messages: list[dict]) -> dict | None:
+        if not bool(config_store.load().get("debug_mode")):
+            return None
+        debug = pipeline_context.get("_agent_debug")
+        if not isinstance(debug, dict):
+            return None
+        cfg = self._cfg
+        entry = {
+            "provider": cfg.get("provider", ""),
+            "model": cfg.get("model", ""),
+            "temperature": cfg.get("temperature"),
+            "max_tokens": cfg.get("max_tokens"),
+            "input_messages": [
+                {
+                    "role": str(message.get("role", "")),
+                    "content": str(message.get("content", "")),
+                }
+                for message in messages
+            ],
+            "output": "",
+            "error": "",
+        }
+        debug[self.agent_name] = entry
+        return entry
 
     def _configured_system_prompt(self, pipeline_context: dict) -> str:
         custom = str(self._cfg.get("system_prompt") or "").strip()
