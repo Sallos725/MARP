@@ -49,6 +49,7 @@ async def status():
         version=app.version,
         ready=public["ready"],
         config={
+            "pipeline_mode": public["pipeline_mode"],
             "default_provider": public["default_provider"],
             "default_base_url": public["default_base_url"],
             "default_model": public["default_model"],
