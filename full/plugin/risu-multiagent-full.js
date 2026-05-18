@@ -119,6 +119,9 @@
           char_chars: stringLength(data.context_char),
           director_chars: stringLength(data.context_director),
           deep_chars: stringLength(formatDeepContext(data.context_deep)),
+          deep_agent_count: countDeepOutputs(data.context_deep),
+          expected_agent_count: data.pipeline_mode === 'deep-ensemble' ? 9 : (data.pipeline_mode === 'ensemble-director' ? 4 : 3),
+          round_summary: buildRoundSummary(data.context_deep, data.agent_timings_ms || {}),
           debug: {
             context_world: data.context_world,
             context_plot: data.context_plot,
@@ -925,6 +928,10 @@ button.ghost{background:#15171b;color:#a8b0bd}
       }
 
       const debug = lastRun.debug;
+      const isDeepRun = lastRun.pipeline_mode === 'deep-ensemble';
+      const roundSummary = lastRun.round_summary || buildRoundSummary(debug?.context_deep, lastRun.agent_timings_ms || {});
+      const observedCount = isDeepRun ? (lastRun.deep_agent_count ?? countDeepOutputs(debug?.context_deep)) : countClassicOutputs(lastRun);
+      const expectedCount = lastRun.expected_agent_count || (isDeepRun ? 9 : (lastRun.pipeline_mode === 'ensemble-director' ? 4 : 3));
       return `
         <div class="grid">
           <div class="card">
@@ -935,6 +942,7 @@ button.ghost{background:#15171b;color:#a8b0bd}
               <div class="k">소요 시간</div><div class="v">${escHtml(formatDuration(lastRun.duration_ms))}</div>
               <div class="k">서버</div><div class="v">${escHtml(lastRun.server_url || '-')}</div>
               <div class="k">파이프라인</div><div class="v">${escHtml(lastRun.pipeline_mode || 'classic')}</div>
+              <div class="k">실행 확인</div><div class="v">${runVerificationBadge(observedCount, expectedCount)}</div>
               <div class="k">HTTP</div><div class="v">${escHtml(lastRun.status_code || '-')}</div>
               <div class="k">모드</div><div class="v">${escHtml(lastRun.mode || '-')}</div>
             </div>
@@ -954,6 +962,7 @@ button.ghost{background:#15171b;color:#a8b0bd}
             </div>
           </div>
         </div>
+        ${isDeepRun ? deepRunPanel(roundSummary, lastRun.agent_timings_ms || {}) : timingsPanel(lastRun.agent_timings_ms || {})}
         ${debug ? `
           <div class="card">
             <h2>디버그 컨텍스트</h2>
@@ -973,6 +982,89 @@ button.ghost{background:#15171b;color:#a8b0bd}
           <summary><span>${escHtml(label)}</span><span class="summary-note">펼쳐 보기</span></summary>
           <pre class="debug-block">${escHtml(text)}</pre>
         </details>`;
+    }
+
+    function deepRounds() {
+      return [
+        ['lore_scout', 'scene_scout', 'voice_scout'],
+        ['continuity_critic', 'intent_critic', 'style_critic'],
+        ['beat_director', 'constraint_director', 'final_director'],
+      ];
+    }
+
+    function countDeepOutputs(contextDeep) {
+      if (!contextDeep || typeof contextDeep !== 'object') return 0;
+      return deepAgentNames().filter(name => String(contextDeep[name] || '').trim()).length;
+    }
+
+    function countClassicOutputs(lastRun) {
+      const keys = ['world_chars', 'plot_chars', 'char_chars', 'director_chars'];
+      return keys.filter(key => Number(lastRun?.[key] || 0) > 0).length;
+    }
+
+    function buildRoundSummary(contextDeep, timings = {}) {
+      const labels = Object.fromEntries(deepAgentDefinitions().map(agent => [agent.name, agent.label]));
+      return deepRounds().map((round, idx) => ({
+        round: idx + 1,
+        agents: round.map(name => {
+          const text = contextDeep && typeof contextDeep === 'object' ? String(contextDeep[name] || '') : '';
+          return {
+            name,
+            label: labels[name] || name,
+            chars: text.length,
+            timing_ms: Number(timings?.[name] || 0),
+            ok: Boolean(text.trim()),
+          };
+        }),
+      }));
+    }
+
+    function runVerificationBadge(observed, expected) {
+      const ok = observed >= expected;
+      return `<span class="badge ${ok ? 'ok' : 'warn'}">${escHtml(observed)}/${escHtml(expected)} 호출 출력 확인</span>`;
+    }
+
+    function deepRunPanel(roundSummary, timings) {
+      const totalMs = Object.values(timings || {}).reduce((sum, value) => sum + (Number(value) || 0), 0);
+      return `
+        <div class="card">
+          <h2>Deep Ensemble 실행 상세</h2>
+          <div class="example-url">각 라운드는 3개 병렬 호출입니다. 라운드 1 → 라운드 2 → 라운드 3 순서로 실행됩니다.</div>
+          <div class="kv">
+            <div class="k">호출 합계</div><div class="v">${escHtml(roundSummary.flatMap(r => r.agents).filter(a => a.ok).length)} / 9</div>
+            <div class="k">누적 LLM 시간</div><div class="v">${escHtml(formatDuration(totalMs))}</div>
+          </div>
+          ${roundSummary.map(round => `
+            <details open>
+              <summary><span>Round ${round.round}</span><span class="summary-note">${round.agents.filter(a => a.ok).length}/3 출력</span></summary>
+              <div class="details-body">
+                <div class="kv">
+                  ${round.agents.map(agent => `
+                    <div class="k">${escHtml(agent.label)}</div>
+                    <div class="v">
+                      <span class="badge ${agent.ok ? 'ok' : 'err'}">${agent.ok ? '출력 있음' : '없음'}</span>
+                      ${escHtml(agent.chars)}자 · ${escHtml(formatDuration(agent.timing_ms))}
+                    </div>
+                  `).join('')}
+                </div>
+              </div>
+            </details>
+          `).join('')}
+        </div>`;
+    }
+
+    function timingsPanel(timings) {
+      const entries = Object.entries(timings || {});
+      if (!entries.length) return '';
+      return `
+        <div class="card">
+          <h2>에이전트 타이밍</h2>
+          <div class="kv">
+            ${entries.map(([name, ms]) => `
+              <div class="k">${escHtml(name)}</div><div class="v">${escHtml(formatDuration(ms))}</div>
+            `).join('')}
+          </div>
+        </div>`;
     }
 
     function setupHandlers(data, serverUrl) {
