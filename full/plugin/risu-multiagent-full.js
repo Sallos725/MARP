@@ -1,7 +1,7 @@
 //@name risu_multiagent_full
 //@display-name MultiAgent RP — Full판
 //@api 3.0
-//@version 2.2.3
+//@version 2.2.4
 //@arg server_url string Full판 서버 URL (e.g. http://localhost:6009 or https://example.com/multi-agent)
 //@arg main_model_only string Run MultiAgent only for RisuAI main model requests; bypass auxiliary/submodel/memory/emotion/translation requests (default: 1)
 //@arg bypass_hypamemory string Skip MultiAgent analysis for RisuAI HypaMemory/memory requests (default: 1)
@@ -67,7 +67,10 @@
       const startedAt = Date.now();
       const serverUrl = await getServerUrl();
       const analyzeTimeoutMs = await getAnalyzeRequestTimeoutMs(serverUrl);
-      console.log(`MultiAgent Full판: analyze start timeout=${analyzeTimeoutMs}ms`);
+      const analyzeDebug = await getAnalyzeDebugMode(serverUrl);
+      if (analyzeDebug) {
+        console.log(`MultiAgent Full판: analyze start timeout=${analyzeTimeoutMs}ms`);
+      }
 
       // OpenAI messages → /analyze 요청 형식 변환
       const safeMessages = normalizeMessageArray(messages);
@@ -99,16 +102,23 @@
         duration_ms: 0,
       });
 
+      let heartbeat = null;
       try {
+        heartbeat = analyzeDebug ? startAnalyzeHeartbeat(startedAt, analyzeTimeoutMs) : null;
         const res = await Risuai.nativeFetch(`${serverUrl}/analyze`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(analyzeRequest),
           requestTimeoutMs: analyzeTimeoutMs,
         });
+        heartbeat?.stop();
+        heartbeat = null;
 
         if (!res.ok) {
           const errText = await res.text().catch(() => '');
+          if (analyzeDebug) {
+            console.warn(`MultiAgent Full판: analyze failed status=${res.status} duration=${Date.now() - startedAt}ms`);
+          }
           await recordLastRun({
             ...runBase,
             status: 'failed',
@@ -122,6 +132,9 @@
         }
 
         const data = await res.json();
+        if (analyzeDebug) {
+          console.log(`MultiAgent Full판: analyze complete status=${res.status} duration=${Date.now() - startedAt}ms pipeline=${data.pipeline_mode || 'classic'}`);
+        }
         await recordLastRun({
           ...runBase,
           status: 'success',
@@ -152,6 +165,9 @@
         return injectContext(messages, data.context_world, data.context_plot, data.context_char, data.context_director, data.context_deep);
 
       } catch (err) {
+        if (analyzeDebug) {
+          console.warn(`MultiAgent Full판: analyze connection failed duration=${Date.now() - startedAt}ms`, err);
+        }
         await recordLastRun({
           ...runBase,
           status: 'failed',
@@ -159,10 +175,29 @@
           duration_ms: Date.now() - startedAt,
           error: `연결 실패: ${err.message}`,
         });
-        console.log(`MultiAgent pipeline error: ${err.message}`);
+        if (analyzeDebug) {
+          console.log(`MultiAgent pipeline error: ${err.message}`);
+        }
         return messages;
+      } finally {
+        heartbeat?.stop();
       }
     });
+
+    function startAnalyzeHeartbeat(startedAt, timeoutMs) {
+      const interval = setInterval(() => {
+        const elapsed = Date.now() - startedAt;
+        console.log(`MultiAgent Full판: analyze pending elapsed=${elapsed}ms timeout=${timeoutMs}ms`);
+      }, 30_000);
+      return {
+        stop: () => clearInterval(interval),
+      };
+    }
+
+    async function getAnalyzeDebugMode(serverUrl) {
+      const cachedConfig = await loadSidecarConfigBackup(normalizeUrl(serverUrl));
+      return Boolean(cachedConfig?.debug_mode);
+    }
 
     function findLastIndex(arr, predicate) {
       for (let i = arr.length - 1; i >= 0; i -= 1) {
