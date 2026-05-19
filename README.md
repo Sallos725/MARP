@@ -6,6 +6,9 @@
 메인 모델이 그대로 생성한다 (캐릭터 카드, 로어북, 정규식 등 본체 기능을
 전혀 우회하지 않음).
 
+> 이 문서는 `main` 브랜치 기준의 안정판 설명이다. MDASH/deep-ensemble 실험판은
+> `codex/multiagent-mdash-quality` 브랜치의 README를 참고한다.
+
 ---
 
 ## 무엇을 해결하나
@@ -125,13 +128,13 @@ cp .env.example .env
 docker compose up -d
 ```
 
-기본 포트는 `8000`. `curl http://localhost:8000/health`로 확인.
+기본 포트는 `6009`. `curl http://localhost:6009/health`로 확인.
 
 ### 플러그인 등록
 
 1. `full/plugin/risu-multiagent-full.js`를 RisuAI에 Import.
 2. **MultiAgent Full** 버튼으로 설정 화면을 연다.
-3. **Sidecar URL**에 `http://localhost:8000` 입력 후 **사이드카 테스트**.
+3. **Sidecar URL**에 `http://localhost:6009` 입력 후 **사이드카 테스트**.
 4. 필요하면 에이전트별 공급자·모델·키를 개별 지정한다 (생략 시 DEFAULT 사용).
 5. **전체 테스트**가 통과하면 설정 완료.
 
@@ -246,7 +249,8 @@ Full판 플러그인은 RisuAI의 모든 system 메시지를 모아 `system_cont
 
 - **분석 한 번에 LLM 3회 호출.** 토큰 비용·레이턴시가 증가한다. 저렴한
   분석 모델을 쓰는 게 전제.
-- **분석이 실패하면 현재는 메인 요청도 막힌다** (fail-open 미구현, 추후 추가 예정).
+- **분석이 실패하면 fail-open.** Full판 플러그인은 원본 메시지를 그대로 통과시켜
+  채팅 자체는 막지 않는다. 최근 실행 상태 카드에서 실패 원인을 확인한다.
 - **API key는 평문 저장.** Lite는 RisuAI `pluginStorage`, Full은 사이드카의
   `config.json`. 공유 PC에서 사용 시 주의.
 - **Full판 사이드카는 기본적으로 인증 없이 동작.** 외부에 노출하려면 리버스
@@ -264,3 +268,10 @@ Full판 플러그인은 RisuAI의 모든 system 메시지를 모아 `system_cont
 
 - RisuAI 본체: <https://github.com/kwaroran/RisuAI>
 - RisuAI Plugin API v3 문서: RisuAI 위키 참조
+
+## 브랜치 안내
+
+- `main`: Lite판과 Full판의 기본 3-agent 파이프라인. 일반 사용과 배포 기준.
+- `codex/multiagent-mdash-quality`: Full판 전용 실험 브랜치. `ensemble-director`,
+  `deep-ensemble`, 에이전트별 프롬프트 편집, 디버그 I/O, 장시간 timeout 처리 등을
+  시험한다. Lite판은 실험 범위에서 제외한다.
