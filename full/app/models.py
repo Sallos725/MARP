@@ -21,6 +21,7 @@ class AnalyzeResponse(BaseModel):
     context_char: str
     context_director: str = ""
     context_deep: dict[str, str] = Field(default_factory=dict)
+    context_directives: dict[str, list[dict]] | None = None
     agent_debug: dict[str, dict] = Field(default_factory=dict)
     pipeline_mode: str = "classic"
     agent_timings_ms: dict[str, int] = Field(default_factory=dict)

@@ -1,4 +1,5 @@
 import asyncio
+import re
 from time import perf_counter
 
 from app.agents import WorldbuildingAgent, PlotAgent, CharacterAgent, DirectorAgent, DeepAgent
@@ -11,6 +12,75 @@ DEEP_ROUNDS: tuple[tuple[str, ...], ...] = (
     ("continuity_critic", "intent_critic", "style_critic"),
     ("beat_director", "constraint_director", "final_director"),
 )
+
+
+_DIRECTIVE_SECTION_RE = re.compile(
+    r"\[(HARD|SOFT|FYI)\]\s*\n(.*?)(?=\n\[(?:HARD|SOFT|FYI)\]|\Z)",
+    re.DOTALL | re.IGNORECASE,
+)
+_BULLET_RE = re.compile(r"^\s*[-*•]\s+(.+?)\s*$", re.MULTILINE)
+_NONE_MARKERS = {"(none)", "none", "n/a", "-"}
+
+
+def parse_directives(text: str) -> dict[str, list[str]]:
+    """에이전트 raw 응답에서 [HARD]/[SOFT]/[FYI] 추출. legacy는 전체를 soft로 폴백."""
+    raw = str(text or "").strip()
+    result: dict[str, list[str]] = {"hard": [], "soft": [], "fyi": []}
+    if not raw:
+        return result
+    matches = _DIRECTIVE_SECTION_RE.findall(raw)
+    if not matches:
+        for bullet in _BULLET_RE.findall(raw):
+            cleaned = bullet.strip()
+            if cleaned and cleaned.lower() not in _NONE_MARKERS:
+                result["soft"].append(cleaned)
+        if not result["soft"]:
+            result["soft"].append(raw[:400])
+        return result
+    for grade, body in matches:
+        key = grade.lower()
+        if key not in result:
+            continue
+        for bullet in _BULLET_RE.findall(body):
+            cleaned = bullet.strip()
+            if not cleaned or cleaned.lower() in _NONE_MARKERS:
+                continue
+            result[key].append(cleaned)
+    return result
+
+
+def _normalize_bullet(text: str) -> str:
+    s = re.sub(r"\s+", " ", str(text or "").lower()).strip()
+    s = re.sub(r"[.;,:!?]+$", "", s)
+    return s
+
+
+def aggregate_directives(
+    agent_outputs: dict[str, str],
+    agent_order: list[str] | tuple[str, ...] | None = None,
+) -> dict[str, list[dict]]:
+    """여러 에이전트 출력을 grade별로 dedup. 출처(sources) 메타데이터 보존."""
+    order = list(agent_order) if agent_order else list(agent_outputs.keys())
+    aggregated: dict[str, dict[str, dict]] = {"hard": {}, "soft": {}, "fyi": {}}
+    for name in order:
+        text = agent_outputs.get(name)
+        if not text:
+            continue
+        parsed = parse_directives(text)
+        for grade in ("hard", "soft", "fyi"):
+            for bullet in parsed[grade]:
+                key = _normalize_bullet(bullet)
+                if not key:
+                    continue
+                if key in aggregated[grade]:
+                    entry = aggregated[grade][key]
+                    if name not in entry["sources"]:
+                        entry["sources"].append(name)
+                    if len(bullet) > len(entry["text"]):
+                        entry["text"] = bullet
+                else:
+                    aggregated[grade][key] = {"text": bullet, "sources": [name]}
+    return {grade: list(aggregated[grade].values()) for grade in ("hard", "soft", "fyi")}
 
 
 async def run_analysis(request: AnalyzeRequest) -> AnalyzeResponse:
@@ -131,12 +201,18 @@ async def _run_deep_ensemble_analysis(pipeline_context: dict) -> AnalyzeResponse
 
         pipeline_context["context_deep"] = _format_deep_outputs(deep_contexts, deep_contexts.keys())
 
+    directives = aggregate_directives(
+        deep_contexts,
+        agent_order=[name for round_ in DEEP_ROUNDS for name in round_],
+    )
+
     return AnalyzeResponse(
         context_world=deep_contexts.get("lore_scout", ""),
         context_plot=deep_contexts.get("beat_director", ""),
         context_char=deep_contexts.get("voice_scout", ""),
         context_director=deep_contexts.get("final_director", ""),
         context_deep=deep_contexts,
+        context_directives=directives,
         pipeline_mode="deep-ensemble",
         agent_debug=pipeline_context["_agent_debug"],
         agent_timings_ms=timings,

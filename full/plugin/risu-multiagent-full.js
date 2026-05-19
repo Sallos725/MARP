@@ -30,6 +30,10 @@
     const ANALYZE_TIMEOUT_GRACE_MS = 30_000;
     const DEEP_INJECTION_CHAR_BUDGET = 6000;
     const CLASSIC_SECTION_CHAR_BUDGET = 1800;
+    const DIRECTIVE_HARD_BUDGET = 4000;
+    const DIRECTIVE_SOFT_BUDGET = 1500;
+    const DIRECTIVE_FYI_BUDGET = 500;
+    // legacy fallback: 서버가 context_directives를 못 채울 때만 사용
     const DEEP_INJECTION_SECTIONS = [
       ['final_director', 'Final Synthesis', 2400],
       ['constraint_director', 'Hard Constraints', 1300],
@@ -160,6 +164,7 @@
           deep_chars: stringLength(formatDeepContext(data.context_deep)),
           deep_agent_count: countDeepOutputs(data.context_deep),
           expected_agent_count: data.pipeline_mode === 'deep-ensemble' ? 9 : (data.pipeline_mode === 'ensemble-director' ? 4 : 3),
+          directive_counts: countDirectives(data.context_directives),
           round_summary: buildRoundSummary(data.context_deep, data.agent_timings_ms || {}),
           debug: {
             context_world: data.context_world,
@@ -167,12 +172,13 @@
             context_char: data.context_char,
             context_director: data.context_director,
             context_deep: data.context_deep || {},
+            context_directives: data.context_directives || null,
             analyze_request: analyzeRequest,
             agent_io: data.agent_debug || {},
           },
         });
 
-        return injectContext(messages, data.context_world, data.context_plot, data.context_char, data.context_director, data.context_deep);
+        return injectContext(messages, data.context_world, data.context_plot, data.context_char, data.context_director, data.context_deep, data.context_directives);
 
       } catch (err) {
         if (analyzeDebug) {
@@ -256,44 +262,66 @@
       ].join('\n')).join('\n\n');
     }
 
-    function injectContext(messages, contextWorld, contextPlot, contextChar, contextDirector, contextDeep) {
+    function injectContext(messages, contextWorld, contextPlot, contextChar, contextDirector, contextDeep, contextDirectives) {
       if (!Array.isArray(messages)) return messages;
-      const deepContext = formatDeepInjectionContext(contextDeep);
-      const parts = deepContext
-        ? [
-            '',
-            '---',
-            '[MultiAgent RP Deep Ensemble Context]',
-            '',
-            '[Deep Ensemble]',
-            deepContext,
-          ]
-        : [
-            '',
-            '---',
-            '[MultiAgent RP Analysis Context]',
-            '',
-            '[Worldbuilding Agent]',
-            clipForPrompt(contextWorld || '(none)', CLASSIC_SECTION_CHAR_BUDGET),
-            '',
-            '[Plot Agent]',
-            clipForPrompt(contextPlot || '(none)', CLASSIC_SECTION_CHAR_BUDGET),
-            '',
-            '[Character Agent]',
-            clipForPrompt(contextChar || '(none)', CLASSIC_SECTION_CHAR_BUDGET),
-          ];
-      if (!deepContext && contextDirector) {
-        parts.push(
+
+      // 우선순위: grade-aware directives > legacy deep ensemble > classic
+      const directiveBlock = formatDirectivesInjection(contextDirectives);
+      const deepContext = directiveBlock ? '' : formatDeepInjectionContext(contextDeep);
+
+      let parts;
+      let reviewInstruction;
+      if (directiveBlock) {
+        parts = [
           '',
-          '[Director Agent]',
-          clipForPrompt(contextDirector, CLASSIC_SECTION_CHAR_BUDGET),
-        );
+          '---',
+          '[MultiAgent RP — Graded Directives]',
+          '',
+          directiveBlock,
+        ];
+        reviewInstruction = [
+          'Directive grades:',
+          '- [HARD] = non-negotiable constraints. The reply MUST satisfy every HARD bullet. If two HARD bullets conflict, prefer the one from the user input or canon source.',
+          '- [SOFT] = strongly recommended guidance. Follow unless a HARD constraint forces otherwise.',
+          '- [FYI] = optional context. Use only if naturally helpful.',
+          'Do not mention these directives in the reply itself. Treat them as silent background.',
+        ].join('\n');
+      } else if (deepContext) {
+        parts = [
+          '',
+          '---',
+          '[MultiAgent RP Deep Ensemble Context]',
+          '',
+          '[Deep Ensemble]',
+          deepContext,
+        ];
+        reviewInstruction = 'Use these notes quietly as background context. Preserve established world details, narrative continuity, character voice, and motivations while allowing natural development.';
+      } else {
+        parts = [
+          '',
+          '---',
+          '[MultiAgent RP Analysis Context]',
+          '',
+          '[Worldbuilding Agent]',
+          clipForPrompt(contextWorld || '(none)', CLASSIC_SECTION_CHAR_BUDGET),
+          '',
+          '[Plot Agent]',
+          clipForPrompt(contextPlot || '(none)', CLASSIC_SECTION_CHAR_BUDGET),
+          '',
+          '[Character Agent]',
+          clipForPrompt(contextChar || '(none)', CLASSIC_SECTION_CHAR_BUDGET),
+        ];
+        if (contextDirector) {
+          parts.push('', '[Director Agent]', clipForPrompt(contextDirector, CLASSIC_SECTION_CHAR_BUDGET));
+        }
+        reviewInstruction = 'Use these notes quietly as background context. Preserve established world details, narrative continuity, character voice, and motivations while allowing natural development.';
       }
+
       const injection = [
         ...parts,
         '',
         '[Review Instructions]',
-        'Use these notes quietly as background context. Preserve established world details, narrative continuity, character voice, and motivations while allowing natural development.',
+        reviewInstruction,
         '---',
       ].join('\n');
 
@@ -304,6 +332,58 @@
         );
       }
       return [{ role: 'system', content: injection.replace(/^\n/, '') }, ...messages];
+    }
+
+    function formatDirectivesInjection(contextDirectives) {
+      if (!contextDirectives || typeof contextDirectives !== 'object') return '';
+      const hard = Array.isArray(contextDirectives.hard) ? contextDirectives.hard : [];
+      const soft = Array.isArray(contextDirectives.soft) ? contextDirectives.soft : [];
+      const fyi  = Array.isArray(contextDirectives.fyi)  ? contextDirectives.fyi  : [];
+      if (!hard.length && !soft.length && !fyi.length) return '';
+      const hardBlock = renderDirectiveSection('HARD', hard, DIRECTIVE_HARD_BUDGET);
+      const softBlock = renderDirectiveSection('SOFT', soft, DIRECTIVE_SOFT_BUDGET);
+      const fyiBudget = Math.max(0, Math.min(
+        DIRECTIVE_FYI_BUDGET,
+        DEEP_INJECTION_CHAR_BUDGET - hardBlock.length - softBlock.length - 20
+      ));
+      const fyiBlock = fyiBudget > 0 ? renderDirectiveSection('FYI', fyi, fyiBudget) : '';
+      return [hardBlock, softBlock, fyiBlock].filter(Boolean).join('\n\n');
+    }
+
+    function renderDirectiveSection(label, items, budget) {
+      if (!Array.isArray(items) || !items.length) return `[${label}]\n- (none)`;
+      const lines = [`[${label}]`];
+      let used = lines[0].length + 1;
+      let truncated = 0;
+      for (const item of items) {
+        const text = String(item?.text || item || '').trim();
+        if (!text) continue;
+        const sources = Array.isArray(item?.sources) ? item.sources : [];
+        const tag = sources.length ? ` ⟨src: ${sources.join(', ')}⟩` : '';
+        const bullet = `- ${text}${tag}`;
+        if (used + bullet.length + 1 > budget) {
+          truncated += 1;
+          continue;
+        }
+        lines.push(bullet);
+        used += bullet.length + 1;
+      }
+      if (truncated > 0) {
+        const warn = label === 'HARD'
+          ? `- [WARNING: ${truncated} HARD bullets dropped due to budget overflow]`
+          : `- [+${truncated} more ${label.toLowerCase()} bullets trimmed for budget]`;
+        lines.push(warn);
+      }
+      return lines.join('\n');
+    }
+
+    function countDirectives(contextDirectives) {
+      if (!contextDirectives || typeof contextDirectives !== 'object') return null;
+      return {
+        hard: Array.isArray(contextDirectives.hard) ? contextDirectives.hard.length : 0,
+        soft: Array.isArray(contextDirectives.soft) ? contextDirectives.soft.length : 0,
+        fyi:  Array.isArray(contextDirectives.fyi)  ? contextDirectives.fyi.length  : 0,
+      };
     }
 
     function formatDeepInjectionContext(contextDeep) {
@@ -1103,6 +1183,7 @@ button.ghost{background:#15171b;color:#a8b0bd}
         ${debug ? `
           <div class="card">
             <h2>디버그 컨텍스트</h2>
+            ${directivePanelBlock(debug.context_directives, lastRun.directive_counts)}
             ${debugBlock('Analyze 입력', formatAnalyzeRequest(debug.analyze_request))}
             ${debugBlock('세계관', debug.context_world)}
             ${debugBlock('플롯', debug.context_plot)}
@@ -1119,6 +1200,21 @@ button.ghost{background:#15171b;color:#a8b0bd}
       return `
         <details>
           <summary><span>${escHtml(label)}</span><span class="summary-note">펼쳐 보기</span></summary>
+          <pre class="debug-block">${escHtml(text)}</pre>
+        </details>`;
+    }
+
+    function directivePanelBlock(contextDirectives, counts) {
+      if (!contextDirectives || typeof contextDirectives !== 'object') return '';
+      const c = counts || countDirectives(contextDirectives) || { hard: 0, soft: 0, fyi: 0 };
+      const text = formatDirectivesInjection(contextDirectives);
+      if (!text) return '';
+      return `
+        <details open>
+          <summary>
+            <span>Graded Directives</span>
+            <span class="summary-note">HARD ${escHtml(c.hard)} · SOFT ${escHtml(c.soft)} · FYI ${escHtml(c.fyi)}</span>
+          </summary>
           <pre class="debug-block">${escHtml(text)}</pre>
         </details>`;
     }
