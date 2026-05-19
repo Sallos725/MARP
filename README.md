@@ -6,6 +6,9 @@
 메인 모델이 그대로 생성한다 (캐릭터 카드, 로어북, 정규식 등 본체 기능을
 전혀 우회하지 않음).
 
+> 이 문서는 `codex/multiagent-mdash-quality` 브랜치 기준의 MDASH/deep-ensemble
+> 실험판 설명이다. 안정판 3-agent 파이프라인은 `main` 브랜치의 README를 참고한다.
+
 ---
 
 ## 무엇을 해결하나
@@ -42,6 +45,10 @@
 | 추천 대상 | 배포·공유, 가볍게 쓰고 싶은 사람 | 자가 운용, 에이전트별 세밀 튜닝 |
 
 두 판은 독립적이다. **둘 다 깔지 말 것** — 한쪽만 골라 쓰면 된다.
+
+이 브랜치의 MDASH/deep-ensemble 실험은 **Full판 전용**이다. Lite판은 기본 3-agent
+흐름만 대상으로 보고, 9-agent deep-ensemble은 브라우저 메모리와 장시간 요청 부담이
+커서 실험 범위에서 제외한다.
 
 ---
 
@@ -125,13 +132,13 @@ cp .env.example .env
 docker compose up -d
 ```
 
-기본 포트는 `8000`. `curl http://localhost:8000/health`로 확인.
+기본 포트는 `6009`. `curl http://localhost:6009/health`로 확인.
 
 ### 플러그인 등록
 
 1. `full/plugin/risu-multiagent-full.js`를 RisuAI에 Import.
 2. **MultiAgent Full** 버튼으로 설정 화면을 연다.
-3. **Sidecar URL**에 `http://localhost:8000` 입력 후 **사이드카 테스트**.
+3. **Sidecar URL**에 `http://localhost:6009` 입력 후 **사이드카 테스트**.
 4. 필요하면 에이전트별 공급자·모델·키를 개별 지정한다 (생략 시 DEFAULT 사용).
 5. **전체 테스트**가 통과하면 설정 완료.
 
@@ -203,6 +210,36 @@ user prompt template에서 쓸 수 있는 토큰:
 {{context_lore_scout}}
 ```
 
+#### deep-ensemble 실행과 주입 전략
+
+`deep-ensemble`은 분석 호출은 9개를 모두 실행하지만, 메인 RP 모델에 9개 원문을 전부
+밀어 넣지는 않는다. 플러그인은 디버그용으로 전체 agent output을 보존하고, 실제 system
+prompt 주입은 기본 약 6000자 예산 안에서 다음 우선순위로 압축한다.
+
+1. `final_director`: 전체 9-agent 결과를 병합한 최종 지침
+2. `constraint_director`: 반드시 지킬 것 / 피할 것
+3. `beat_director`: 바로 다음 장면 비트
+4. `scene_scout`, `voice_scout`, `lore_scout`: 짧은 보조 메모
+
+이렇게 하면 deep 분석의 관점은 유지하면서 메인 모델의 출력 토큰을 과도하게 잡아먹는
+문제를 줄일 수 있다. 전체 원문은 최근 분석 탭의 디버그 패널에서 확인한다.
+
+#### 디버그와 장시간 요청
+
+Full 플러그인 `2.2.5` 기준으로 최근 분석 탭은 다음 정보를 보여준다.
+
+- 현재 실행 모드와 `deep-ensemble` 9/9 출력 확인
+- 라운드별 agent 출력 길이와 LLM 소요 시간
+- `/analyze` 입력 payload
+- 각 agent의 input messages, output, provider/model 설정
+
+`debug_mode`가 켜져 있으면 브라우저 콘솔에도 `/analyze` 시작, 30초 단위 pending,
+완료/실패 로그가 찍힌다. 꺼져 있으면 콘솔 진행 로그는 조용히 동작한다.
+
+플러그인은 사이드카의 `request_timeout` 설정을 기반으로 RisuAI `nativeFetch`의
+`requestTimeoutMs`도 함께 늘린다. Ollama Cloud처럼 첫 토큰까지 오래 걸리는 환경에서는
+GUI에서 타임아웃을 600초 이상으로 올려 실험할 수 있다.
+
 ### Vertex AI 사용 시
 
 API key 입력 대신 서비스 계정 JSON 파일을 GUI에서 업로드한다.
@@ -234,7 +271,7 @@ https://aiplatform.googleapis.com/v1/projects/PROJECT_ID/locations/global/endpoi
 | `GET /health` | 헬스 체크 |
 | `GET /status` | 설정 요약, 에이전트별 상태 (API key 원문은 미노출) |
 | `GET /config` / `PUT /config` | 설정 조회/저장 |
-| `POST /analyze` | 분석 3개 실행 후 컨텍스트 반환 |
+| `POST /analyze` | 현재 파이프라인 모드에 맞춰 분석 실행 후 컨텍스트 반환 |
 | `GET /test/llm?agent=...` | 저장된 키로 공급자별 연결 점검 |
 
 `POST /analyze` 요청 예시:
@@ -265,7 +302,15 @@ Full판 플러그인은 RisuAI의 모든 system 메시지를 모아 `system_cont
 {
   "context_world": "...",
   "context_plot":  "...",
-  "context_char":  "..."
+  "context_char":  "...",
+  "context_director": "...",
+  "context_deep": {
+    "final_director": "..."
+  },
+  "pipeline_mode": "deep-ensemble",
+  "agent_timings_ms": {
+    "final_director": 12345
+  }
 }
 ```
 
@@ -286,15 +331,18 @@ Full판 플러그인은 RisuAI의 모든 system 메시지를 모아 `system_cont
 
 ## 한계와 주의
 
-- **분석 한 번에 LLM 3회 호출.** 토큰 비용·레이턴시가 증가한다. 저렴한
-  분석 모델을 쓰는 게 전제.
-- **분석이 실패하면 현재는 메인 요청도 막힌다** (fail-open 미구현, 추후 추가 예정).
+- `classic`은 분석 한 번에 LLM 3회, `ensemble-director`는 4회, `deep-ensemble`은
+  9회 호출한다. 피크 동시 호출은 3개지만 총 비용과 레이턴시는 크게 증가한다.
+- **분석이 실패하면 fail-open.** Full판 플러그인은 원본 메시지를 그대로 통과시켜
+  채팅 자체는 막지 않는다. 최근 분석 상태와 디버그 패널에서 실패 원인을 확인한다.
 - **API key는 평문 저장.** Lite는 RisuAI `pluginStorage`, Full은 사이드카의
   `config.json`. 공유 PC에서 사용 시 주의.
 - **Full판 사이드카는 기본적으로 인증 없이 동작.** 외부에 노출하려면 리버스
   프록시에서 인증을 걸 것.
 - 분석 출력 언어는 모델 판단에 맡겨져 있어 메인 응답 언어와 다를 수 있다
   (튜닝 진행 중).
+- 이 브랜치는 실험 브랜치다. `v0.0.x` 태그는 로컬 실험 스냅샷 성격이며, 안정 배포
+  기준은 `main` 브랜치의 릴리스를 따른다.
 
 ---
 
@@ -306,3 +354,10 @@ Full판 플러그인은 RisuAI의 모든 system 메시지를 모아 `system_cont
 
 - RisuAI 본체: <https://github.com/kwaroran/RisuAI>
 - RisuAI Plugin API v3 문서: RisuAI 위키 참조
+
+## 브랜치 안내
+
+- `main`: Lite판과 Full판의 기본 3-agent 파이프라인. 일반 사용과 배포 기준.
+- `codex/multiagent-mdash-quality`: Full판 전용 MDASH/deep-ensemble 실험 브랜치.
+  `ensemble-director`, 9-agent `deep-ensemble`, 에이전트별 프롬프트 편집, 디버그 I/O,
+  장시간 timeout, 주입 컨텍스트 압축을 시험한다.
