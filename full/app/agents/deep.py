@@ -166,6 +166,9 @@ DEEP_AGENT_SPECS: dict[str, dict[str, str]] = {
             "- You MAY add NEW [HARD] bullets only if the user input directly demands them.\n"
             "- Order bullets: continuity/canon first, character/voice second, user-agency third, "
             "structural style last.\n"
+            "- HARD CAP: the final [HARD] list MUST contain AT MOST 15 bullets. If more than 15 "
+            "survive dedup, keep only the highest-priority ones (by the ordering above) and demote "
+            "the rest to [SOFT]. A short, ruthless HARD list is the goal.\n"
             "- Use [SOFT] for items the round-2 agents flagged but you downgrade.\n"
             "- Use [FYI] sparingly to record items you intentionally dropped (for audit).\n\n"
             + DIRECTIVE_OUTPUT_RULES

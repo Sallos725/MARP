@@ -13,6 +13,10 @@ DEEP_ROUNDS: tuple[tuple[str, ...], ...] = (
     ("beat_director", "constraint_director", "final_director"),
 )
 
+# A2 canonical: 최종 주입 HARD는 이 directors의 정리된 출력만 사용한다.
+# (constraint_director가 9개 HARD를 dedup/우선순위화, final_director가 보강)
+HARD_CANONICAL_AGENTS: tuple[str, ...] = ("constraint_director", "final_director")
+
 
 _DIRECTIVE_SECTION_RE = re.compile(
     r"\[(HARD|SOFT|FYI)\]\s*\n(.*?)(?=\n\[(?:HARD|SOFT|FYI)\]|\Z)",
@@ -211,10 +215,23 @@ async def _run_deep_ensemble_analysis(pipeline_context: dict) -> AnalyzeResponse
 
         pipeline_context["context_deep"] = _format_deep_outputs(deep_contexts, deep_contexts.keys())
 
-    directives = aggregate_directives(
+    # A2 canonical: HARD는 정리 담당 directors(constraint_director → final_director)에서만 모은다.
+    # scout/critic의 raw HARD는 이미 directors가 dedup/정리했으므로 중복 합산하지 않아 inflation을 막는다.
+    # SOFT/FYI는 9개 전체에서 모은다 (budget 비중이 작고 우선순위가 낮아 inflation 영향이 적음).
+    all_directives = aggregate_directives(
         deep_contexts,
         agent_order=[name for round_ in DEEP_ROUNDS for name in round_],
     )
+    hard_directives = aggregate_directives(
+        {name: deep_contexts.get(name, "") for name in HARD_CANONICAL_AGENTS},
+        agent_order=HARD_CANONICAL_AGENTS,
+    )
+    directives = {
+        # directors가 비었으면(실패 등) 전체 aggregate의 HARD로 폴백
+        "hard": hard_directives["hard"] or all_directives["hard"],
+        "soft": all_directives["soft"],
+        "fyi": all_directives["fyi"],
+    }
 
     return AnalyzeResponse(
         context_world=deep_contexts.get("lore_scout", ""),
