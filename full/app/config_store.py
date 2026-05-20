@@ -26,18 +26,21 @@ DEFAULTS: dict = {
     "worldbuilding_model":    "",
     "worldbuilding_temperature": None,
     "worldbuilding_max_tokens":  None,
+    "worldbuilding_extra_body_json": "",
     "plot_provider":          "",
     "plot_base_url":          "",
     "plot_api_key":           "",
     "plot_model":             "",
     "plot_temperature":       None,
     "plot_max_tokens":        None,
+    "plot_extra_body_json":    "",
     "character_provider":     "",
     "character_base_url":     "",
     "character_api_key":      "",
     "character_model":        "",
     "character_temperature":  None,
     "character_max_tokens":   None,
+    "character_extra_body_json": "",
     "context_window":         10,
     "debug_mode":             False,
     "request_timeout":        60.0,
@@ -105,18 +108,21 @@ def initialize_from_env() -> None:
             "worldbuilding_model":    s.worldbuilding_model,
             "worldbuilding_temperature": s.worldbuilding_temperature,
             "worldbuilding_max_tokens":  s.worldbuilding_max_tokens,
+            "worldbuilding_extra_body_json": s.worldbuilding_extra_body_json,
             "plot_provider":          s.plot_provider,
             "plot_base_url":          s.plot_base_url,
             "plot_api_key":           s.plot_api_key,
             "plot_model":             s.plot_model,
             "plot_temperature":       s.plot_temperature,
             "plot_max_tokens":        s.plot_max_tokens,
+            "plot_extra_body_json":    s.plot_extra_body_json,
             "character_provider":     s.character_provider,
             "character_base_url":     s.character_base_url,
             "character_api_key":      s.character_api_key,
             "character_model":        s.character_model,
             "character_temperature":  s.character_temperature,
             "character_max_tokens":   s.character_max_tokens,
+            "character_extra_body_json": s.character_extra_body_json,
             "context_window":         s.context_window,
             "debug_mode":             s.debug_mode,
             "request_timeout":        s.request_timeout,
@@ -134,6 +140,7 @@ def get_agent_config(agent_name: str) -> dict:
     prefix = agent_name.lower()
     temperature = cfg.get(f"{prefix}_temperature")
     max_tokens = cfg.get(f"{prefix}_max_tokens")
+    extra_body_json = str(cfg.get(f"{prefix}_extra_body_json") or "").strip()
     return {
         "provider": cfg.get(f"{prefix}_provider") or cfg["default_provider"],
         "base_url": cfg.get(f"{prefix}_base_url") or cfg["default_base_url"],
@@ -141,7 +148,7 @@ def get_agent_config(agent_name: str) -> dict:
         "model":    cfg.get(f"{prefix}_model")     or cfg["default_model"],
         "temperature": temperature if temperature is not None else cfg["default_temperature"],
         "max_tokens": max_tokens if max_tokens is not None else cfg["default_max_tokens"],
-        "extra_body_json": cfg["default_extra_body_json"],
+        "extra_body_json": extra_body_json or cfg["default_extra_body_json"],
     }
 
 
@@ -154,6 +161,7 @@ def public_status() -> dict:
         api_key = agent_cfg["api_key"]
         temperature = cfg.get(f"{name}_temperature")
         max_tokens = cfg.get(f"{name}_max_tokens")
+        agent_extra_body_json = str(cfg.get(f"{name}_extra_body_json") or "").strip()
         agent_status = {
             "name": name,
             "label": label,
@@ -168,6 +176,8 @@ def public_status() -> dict:
             "model_source": "override" if cfg.get(f"{name}_model") else "default",
             "temperature_source": "override" if temperature is not None else "default",
             "max_tokens_source": "override" if max_tokens is not None else "default",
+            "extra_body_json_source": "override" if agent_extra_body_json else "default",
+            "extra_body_json_set": bool(agent_cfg.get("extra_body_json")),
             "api_key_set": bool(api_key),
             "ready": bool(agent_cfg["base_url"] and api_key and agent_cfg["model"]),
         }

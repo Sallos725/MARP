@@ -56,6 +56,8 @@ class AgentStatus(BaseModel):
     model_source: str
     temperature_source: str
     max_tokens_source: str
+    extra_body_json_source: str
+    extra_body_json_set: bool
     api_key_set: bool
     ready: bool
 
@@ -102,6 +104,7 @@ class ConfigModel(BaseModel):
     worldbuilding_model: str = ""
     worldbuilding_temperature: float | None = None
     worldbuilding_max_tokens: int | None = None
+    worldbuilding_extra_body_json: str = ""
 
     plot_provider: str = ""
     plot_base_url: str = ""
@@ -109,6 +112,7 @@ class ConfigModel(BaseModel):
     plot_model: str = ""
     plot_temperature: float | None = None
     plot_max_tokens: int | None = None
+    plot_extra_body_json: str = ""
 
     character_provider: str = ""
     character_base_url: str = ""
@@ -116,6 +120,7 @@ class ConfigModel(BaseModel):
     character_model: str = ""
     character_temperature: float | None = None
     character_max_tokens: int | None = None
+    character_extra_body_json: str = ""
 
     context_window: int = 10
     debug_mode: bool = False

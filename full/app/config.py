@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     worldbuilding_model: str = ""
     worldbuilding_temperature: float | None = None
     worldbuilding_max_tokens: int | None = None
+    worldbuilding_extra_body_json: str = ""
 
     # 플롯 에이전트
     plot_provider: str = ""
@@ -32,6 +33,7 @@ class Settings(BaseSettings):
     plot_model: str = ""
     plot_temperature: float | None = None
     plot_max_tokens: int | None = None
+    plot_extra_body_json: str = ""
 
     # 등장인물 에이전트
     character_provider: str = ""
@@ -40,6 +42,7 @@ class Settings(BaseSettings):
     character_model: str = ""
     character_temperature: float | None = None
     character_max_tokens: int | None = None
+    character_extra_body_json: str = ""
 
     # 파이프라인 설정
     context_window: int = 10
@@ -71,6 +74,7 @@ class Settings(BaseSettings):
         model = getattr(self, f"{prefix}_model", "") or self.default_model
         temperature = getattr(self, f"{prefix}_temperature", None)
         max_tokens = getattr(self, f"{prefix}_max_tokens", None)
+        extra_body_json = str(getattr(self, f"{prefix}_extra_body_json", "") or "").strip()
         return {
             "provider": provider,
             "base_url": base_url,
@@ -78,7 +82,7 @@ class Settings(BaseSettings):
             "model": model,
             "temperature": temperature if temperature is not None else self.default_temperature,
             "max_tokens": max_tokens if max_tokens is not None else self.default_max_tokens,
-            "extra_body_json": self.default_extra_body_json,
+            "extra_body_json": extra_body_json or self.default_extra_body_json,
         }
 
 

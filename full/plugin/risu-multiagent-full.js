@@ -371,10 +371,10 @@
           <input id="${id}" type="${type}" value="${escHtml(fieldValue(cfg, id))}" placeholder="${escHtml(placeholder)}">
         </div>`;
 
-      const textareaField = (id, label, placeholder = '') => `
+      const textareaField = (id, label, placeholder = '', className = '') => `
         <div class="field">
           <label for="${id}">${label}</label>
-          <textarea id="${id}" spellcheck="false" placeholder="${escHtml(placeholder)}">${escHtml(fieldValue(cfg, id))}</textarea>
+          <textarea id="${id}" class="${escHtml(className)}" spellcheck="false" placeholder="${escHtml(placeholder)}">${escHtml(fieldValue(cfg, id))}</textarea>
         </div>`;
 
       const credentialField = (id, isSet) => `
@@ -421,6 +421,18 @@
               ${field(`${name}_temperature`, 'Temperature', 'number', '기본값 사용')}
               ${field(`${name}_max_tokens`, 'Max Tokens', 'number', '기본값 사용')}
             </div>
+            <div class="row2">
+              <label>
+                <input id="${name}_gateway_caching_auto" type="checkbox" ${checkedAttr(gatewayCachingAutoEnabled(v(`${name}_extra_body_json`)))}>
+                Vercel Gateway automatic caching
+              </label>
+              <label>
+                <input id="${name}_gateway_zdr" type="checkbox" ${checkedAttr(gatewayZdrEnabled(v(`${name}_extra_body_json`)))}>
+                Vercel Gateway Zero Data Retention
+              </label>
+            </div>
+            <div class="example-url">이 에이전트에만 적용할 Vercel providerOptions입니다. 비워두면 기본 LLM 설정의 추가 JSON을 상속합니다.</div>
+            ${textareaField(`${name}_extra_body_json`, '추가 JSON body', '{"providerOptions":{"gateway":{"caching":"auto","zeroDataRetention":true}}}', 'extra-body-json')}
           </div>
         </details>`;
 
@@ -479,6 +491,7 @@ details[open]>summary::before{content:'v'}
 label{display:block;font-size:.75rem;color:#9aa4b2;margin-bottom:4px}
 input,select,textarea{width:100%;padding:9px 10px;border-radius:6px;border:1px solid #343944;background:#0f1115;color:#eef2f7;font-size:.86rem}
 textarea{min-height:92px;resize:vertical}
+textarea.extra-body-json{min-height:118px}
 input:focus,select:focus,textarea:focus{outline:none;border-color:#5585d9}
 input[type=checkbox]{width:auto;margin-right:7px}
 .custom-provider,.vertex-credential{display:none;margin-top:8px}
@@ -853,6 +866,7 @@ button.ghost{background:#15171b;color:#a8b0bd}
             <div class="k">모델</div><div class="v">${escHtml(agent.model || '-')}</div>
             <div class="k">Temp</div><div class="v">${escHtml(agent.temperature ?? '-')}</div>
             <div class="k">Max</div><div class="v">${escHtml(agent.max_tokens ?? '제한 없음')}</div>
+            <div class="k">추가 JSON</div><div class="v">${agent.extra_body_json_set ? (agent.extra_body_json_source === 'override' ? '개별 적용' : '기본값 상속') : '없음'}</div>
             <div class="k">상속</div><div class="v">${sourceText(agent)}</div>
           </div>
         </div>`;
@@ -870,6 +884,7 @@ button.ghost{background:#15171b;color:#a8b0bd}
         const model = cfg[`${name}_model`] || cfg.default_model || '';
         const temperature = cfg[`${name}_temperature`] ?? cfg.default_temperature ?? 0.7;
         const maxTokens = cfg[`${name}_max_tokens`] ?? cfg.default_max_tokens ?? null;
+        const extraBodyJson = cfg[`${name}_extra_body_json`] || cfg.default_extra_body_json || '';
         return {
           name,
           label,
@@ -884,6 +899,8 @@ button.ghost{background:#15171b;color:#a8b0bd}
           model_source: cfg[`${name}_model`] ? 'override' : 'default',
           temperature_source: cfg[`${name}_temperature`] !== undefined && cfg[`${name}_temperature`] !== null ? 'override' : 'default',
           max_tokens_source: cfg[`${name}_max_tokens`] !== undefined && cfg[`${name}_max_tokens`] !== null ? 'override' : 'default',
+          extra_body_json_source: cfg[`${name}_extra_body_json`] ? 'override' : 'default',
+          extra_body_json_set: Boolean(extraBodyJson),
           api_key_set: Boolean(apiKey),
           ready: Boolean(baseUrl && apiKey && model),
         };
@@ -911,6 +928,7 @@ button.ghost{background:#15171b;color:#a8b0bd}
       if (agent.model_source === 'override') parts.push('모델 개별');
       if (agent.temperature_source === 'override') parts.push('온도 개별');
       if (agent.max_tokens_source === 'override') parts.push('토큰 개별');
+      if (agent.extra_body_json_source === 'override') parts.push('추가 JSON 개별');
       return parts.length ? parts.join(', ') : '전체 기본값';
     }
 
@@ -1093,18 +1111,21 @@ button.ghost{background:#15171b;color:#a8b0bd}
         worldbuilding_model:    getInputValue('worldbuilding_model'),
         worldbuilding_temperature: optionalFloat('worldbuilding_temperature'),
         worldbuilding_max_tokens:  optionalInt('worldbuilding_max_tokens'),
+        worldbuilding_extra_body_json: normalizeExtraBodyJson(getInputValue('worldbuilding_extra_body_json')),
         plot_provider:          getProviderValue('plot_provider', ''),
         plot_base_url:          getInputValue('plot_base_url'),
         plot_api_key:           secret('plot_api_key'),
         plot_model:             getInputValue('plot_model'),
         plot_temperature:       optionalFloat('plot_temperature'),
         plot_max_tokens:        optionalInt('plot_max_tokens'),
+        plot_extra_body_json:    normalizeExtraBodyJson(getInputValue('plot_extra_body_json')),
         character_provider:     getProviderValue('character_provider', ''),
         character_base_url:     getInputValue('character_base_url'),
         character_api_key:      secret('character_api_key'),
         character_model:        getInputValue('character_model'),
         character_temperature:  optionalFloat('character_temperature'),
         character_max_tokens:   optionalInt('character_max_tokens'),
+        character_extra_body_json: normalizeExtraBodyJson(getInputValue('character_extra_body_json')),
         context_window:         parseInt(getInputValue('context_window')) || 10,
         request_timeout:        parseFloat(getInputValue('request_timeout')) || 60,
         debug_mode:             document.getElementById('debug_mode')?.checked || false,
@@ -1304,13 +1325,18 @@ button.ghost{background:#15171b;color:#a8b0bd}
     }
 
     function setupExtraBodyActions() {
-      const bodyId = 'default_extra_body_json';
-      const cachingId = 'gateway_caching_auto';
-      const zdrId = 'gateway_zdr';
-      document.getElementById(cachingId)?.addEventListener('change', () => updateGatewayBodyFromCheckboxes(bodyId, cachingId, zdrId));
-      document.getElementById(zdrId)?.addEventListener('change', () => updateGatewayBodyFromCheckboxes(bodyId, cachingId, zdrId));
-      document.getElementById(bodyId)?.addEventListener('input', () => syncGatewayCheckboxesFromBody(bodyId, cachingId, zdrId));
-      syncGatewayCheckboxesFromBody(bodyId, cachingId, zdrId);
+      const targets = [
+        ['default_extra_body_json', 'gateway_caching_auto', 'gateway_zdr'],
+        ['worldbuilding_extra_body_json', 'worldbuilding_gateway_caching_auto', 'worldbuilding_gateway_zdr'],
+        ['plot_extra_body_json', 'plot_gateway_caching_auto', 'plot_gateway_zdr'],
+        ['character_extra_body_json', 'character_gateway_caching_auto', 'character_gateway_zdr'],
+      ];
+      for (const [bodyId, cachingId, zdrId] of targets) {
+        document.getElementById(cachingId)?.addEventListener('change', () => updateGatewayBodyFromCheckboxes(bodyId, cachingId, zdrId));
+        document.getElementById(zdrId)?.addEventListener('change', () => updateGatewayBodyFromCheckboxes(bodyId, cachingId, zdrId));
+        document.getElementById(bodyId)?.addEventListener('input', () => syncGatewayCheckboxesFromBody(bodyId, cachingId, zdrId));
+        syncGatewayCheckboxesFromBody(bodyId, cachingId, zdrId);
+      }
     }
 
     function updateEndpointExample(baseId) {
