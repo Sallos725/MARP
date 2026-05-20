@@ -1756,6 +1756,7 @@ button.ghost{background:#15171b;color:#a8b0bd}
             <div class="k">누적 LLM 시간</div><div class="v">${escHtml(formatDuration(totalMs))}</div>
             <div class="k">임계 지연</div><div class="v">${escHtml(formatDuration(criticalPathMs))}</div>
           </div>
+          ${deepWaterfall(roundSummary, criticalPathMs)}
           ${roundSummary.map(round => `
             <details open>
               <summary><span>Round ${round.round}</span><span class="summary-note">${round.agents.filter(a => a.ok).length}/3 출력</span></summary>
@@ -1772,6 +1773,42 @@ button.ghost{background:#15171b;color:#a8b0bd}
               </div>
             </details>
           `).join('')}
+        </div>`;
+    }
+
+    function deepWaterfall(roundSummary, criticalPathMs) {
+      if (!Array.isArray(roundSummary) || !roundSummary.length) return '';
+      const total = Number(criticalPathMs) || 1;
+      const pct = (val) => `${Math.max(1.5, Math.min(100, (Number(val) || 0) / total * 100))}%`;
+      const roundColors = ['#3b82f6', '#10b981', '#f59e0b', '#a855f7'];
+      let cursorMs = 0; // 각 라운드 시작 오프셋 = 직전 라운드들의 max 누적 (라운드는 순차 실행)
+      const rows = [];
+
+      roundSummary.forEach((round, idx) => {
+        const roundLeft = cursorMs;
+        const color = roundColors[idx % roundColors.length];
+        round.agents.forEach(agent => {
+          const ms = Number(agent.timing_ms || 0);
+          const dim = agent.ok ? '' : 'opacity:.4;';
+          rows.push(`
+            <div class="waterfall-row" style="margin-bottom:6px">
+              <div style="display:flex;justify-content:space-between;font-size:.68rem;margin-bottom:2px">
+                <span style="color:#dde3ec;font-weight:600">R${escHtml(round.round)} · ${escHtml(agent.label)}</span>
+                <span style="color:#8d96a5">${escHtml(formatDuration(ms))}</span>
+              </div>
+              <div style="background:#22252c;border-radius:4px;height:7px;position:relative;overflow:hidden;${dim}">
+                <div style="background:${color};position:absolute;left:${pct(roundLeft)};top:0;bottom:0;width:${pct(ms)};border-radius:4px"></div>
+              </div>
+            </div>`);
+        });
+        const roundMax = Math.max(0, ...round.agents.map(a => Number(a.timing_ms || 0)));
+        cursorMs += roundMax;
+      });
+
+      return `
+        <div style="background:#111318;padding:12px;border-radius:8px;border:1px solid #272a34;margin:10px 0">
+          <div style="font-size:.7rem;color:#8d96a5;margin-bottom:8px">지연 속도 분석 — 라운드 순차 · 라운드 내 3병렬 (critical path ${escHtml(formatDuration(total))})</div>
+          ${rows.join('')}
         </div>`;
     }
 
