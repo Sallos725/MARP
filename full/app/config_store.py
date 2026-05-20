@@ -41,6 +41,10 @@ DEFAULTS: dict = {
     "context_window":         10,
     "debug_mode":             False,
     "request_timeout":        60.0,
+    "strict_mode":            False,
+    "injection_position":     "system-end",
+    "injection_format":       "classic",
+    "analysis_language":      "auto",
 }
 
 AGENTS: tuple[tuple[str, str], ...] = (
@@ -116,6 +120,10 @@ def initialize_from_env() -> None:
             "context_window":         s.context_window,
             "debug_mode":             s.debug_mode,
             "request_timeout":        s.request_timeout,
+            "strict_mode":            getattr(s, "strict_mode", False),
+            "injection_position":     getattr(s, "injection_position", "system-end"),
+            "injection_format":       getattr(s, "injection_format", "classic"),
+            "analysis_language":      getattr(s, "analysis_language", "auto"),
         })
     except Exception:
         save(dict(DEFAULTS))
@@ -177,6 +185,10 @@ def public_status() -> dict:
         "context_window": int(cfg["context_window"]),
         "debug_mode": bool(cfg["debug_mode"]),
         "request_timeout": float(cfg["request_timeout"]),
+        "strict_mode": bool(cfg.get("strict_mode", False)),
+        "injection_position": str(cfg.get("injection_position", "system-end")),
+        "injection_format": str(cfg.get("injection_format", "classic")),
+        "analysis_language": str(cfg.get("analysis_language", "auto")),
         "agents": agents,
         "ready": all(agent["ready"] for agent in agents),
     }

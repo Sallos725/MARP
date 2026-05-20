@@ -53,8 +53,18 @@ class BaseAgent(ABC):
         pass
 
     async def run(self, pipeline_context: dict) -> str:
+        lang = pipeline_context.get("analysis_language", "auto")
+        lang_instruction = ""
+        if lang == "ko":
+            lang_instruction = "\n\nCRITICAL: You MUST write your analysis notes and bullet points ONLY in Korean (한국어)."
+        elif lang == "en":
+            lang_instruction = "\n\nCRITICAL: You MUST write your analysis notes and bullet points ONLY in English."
+        elif lang == "ja":
+            lang_instruction = "\n\nCRITICAL: You MUST write your analysis notes and bullet points ONLY in Japanese (日本語)."
+
+        system_content = f"{self.build_system_prompt(pipeline_context)}\n\n{SOURCE_MATERIAL_RULES}{lang_instruction}"
         messages = [
-            {"role": "system", "content": f"{self.build_system_prompt(pipeline_context)}\n\n{SOURCE_MATERIAL_RULES}"},
+            {"role": "system", "content": system_content},
             {"role": "user",   "content": self.build_user_prompt(pipeline_context)},
         ]
         return await self._call_llm(messages)

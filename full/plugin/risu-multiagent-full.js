@@ -7,6 +7,10 @@
 //@arg bypass_hypamemory string Skip MultiAgent analysis for RisuAI HypaMemory/memory requests (default: 1)
 //@arg bypass_translate string Skip MultiAgent analysis for RisuAI built-in LLM translation requests (default: 1)
 //@arg bypass_lb_process string Skip MultiAgent analysis for <lb-process> helper LLM requests (default: 1)
+//@arg strict_mode string Strict mode safety policy (1 = strict block, 0 = lenient fail-open). e.g. 0
+//@arg injection_position string Context injection position (system-end or before-last-user). e.g. system-end
+//@arg injection_format string Context injection format (classic, xml, or markdown-table). e.g. classic
+//@arg analysis_language string Analysis language (auto, en, ko, ja). e.g. auto
 
 /**
  * MultiAgent RP Pipeline — Full판 플러그인 (RisuAI Plugin API v3.0)
@@ -41,6 +45,10 @@
         bypassHypaMemory: parseEnabled(await Risuai.getArgument('bypass_hypamemory'), settings.bypassHypaMemory ?? true),
         bypassTranslate: parseEnabled(await Risuai.getArgument('bypass_translate'), settings.bypassTranslate ?? true),
         bypassLbProcess: parseEnabled(await Risuai.getArgument('bypass_lb_process'), settings.bypassLbProcess ?? true),
+        strictMode: parseEnabled(await Risuai.getArgument('strict_mode'), settings.strictMode ?? false),
+        injectionPosition: (await Risuai.getArgument('injection_position')) || settings.injectionPosition || 'system-end',
+        injectionFormat: (await Risuai.getArgument('injection_format')) || settings.injectionFormat || 'classic',
+        analysisLanguage: (await Risuai.getArgument('analysis_language')) || settings.analysisLanguage || 'auto',
       };
     }
 
@@ -73,12 +81,15 @@
       const chatHistory = (lastUserIdx >= 0 ? nonSystem.slice(0, lastUserIdx) : nonSystem)
         .map(m => ({ role: m.role, content: messageContent(m) }));
 
+      const chatHistoryChars = chatHistory.reduce((acc, m) => acc + stringLength(m.content), 0);
+
       const runBase = {
         server_url: serverUrl,
         started_at: new Date(startedAt).toISOString(),
         input_chars: stringLength(userInput),
         system_chars: stringLength(systemContext),
         history_messages: chatHistory.length,
+        history_chars: chatHistoryChars,
         mode: type || '',
       };
 
@@ -87,34 +98,45 @@
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            user_input:     userInput,
-            chat_history:   chatHistory,
-            system_context: systemContext,
+            user_input:        userInput,
+            chat_history:      chatHistory,
+            system_context:    systemContext,
+            analysis_language: bypass.analysisLanguage,
           }),
         });
 
         if (!res.ok) {
           const errText = await res.text().catch(() => '');
+          const errMsg = `서버 오류 ${res.status}: ${errText.slice(0, 200)}`;
           await recordLastRun({
             ...runBase,
             success: false,
             status_code: res.status,
             duration_ms: Date.now() - startedAt,
-            error: `서버 오류 ${res.status}: ${errText.slice(0, 200)}`,
+            error: errMsg,
           });
-          // 분석 실패해도 채팅은 막지 않도록 원본 메시지 그대로 통과
+          if (bypass.strictMode) {
+            Risuai.showToast(`MultiAgent 분석 실패 (Strict): HTTP ${res.status}`, 'error');
+            throw new Error(`MultiAgent 분석 실패 (Strict): HTTP ${res.status}`);
+          }
+          // 분석 실패해도 Lenient 모드면 채팅은 막지 않도록 원본 메시지 그대로 통과
           return messages;
         }
 
         const data = await res.json();
+        const hasErrors = data.errors && Object.keys(data.errors).length > 0;
+        const errMessages = hasErrors ? Object.entries(data.errors).map(([k, v]) => `${k}: ${v}`).join(', ') : '';
+
         await recordLastRun({
           ...runBase,
-          success: true,
+          success: !hasErrors,
           status_code: res.status,
           duration_ms: Date.now() - startedAt,
           world_chars: stringLength(data.context_world),
           plot_chars: stringLength(data.context_plot),
           char_chars: stringLength(data.context_char),
+          latency_ms: data.latency_ms,
+          error: errMessages,
           debug: {
             context_world: data.context_world,
             context_plot: data.context_plot,
@@ -122,16 +144,25 @@
           },
         });
 
-        return injectContext(messages, data.context_world, data.context_plot, data.context_char);
+        if (bypass.strictMode && hasErrors) {
+          Risuai.showToast(`MultiAgent 에이전트 실패 (Strict): ${errMessages}`, 'error');
+          throw new Error(`MultiAgent 에이전트 실패 (Strict): ${errMessages}`);
+        }
+
+        return injectContext(messages, data.context_world, data.context_plot, data.context_char, bypass.injectionPosition, bypass.injectionFormat);
 
       } catch (err) {
         await recordLastRun({
           ...runBase,
           success: false,
           duration_ms: Date.now() - startedAt,
-          error: `연결 실패: ${err.message}`,
+          error: `실행 실패: ${err.message}`,
         });
         console.log(`MultiAgent pipeline error: ${err.message}`);
+        if (bypass.strictMode) {
+          Risuai.showToast(`MultiAgent 오류 발생 (Strict): ${err.message}`, 'error');
+          throw err;
+        }
         return messages;
       }
     });
@@ -183,34 +214,77 @@
       ].join('\n')).join('\n\n');
     }
 
-    function injectContext(messages, contextWorld, contextPlot, contextChar) {
+    function injectContext(messages, contextWorld, contextPlot, contextChar, position = 'system-end', format = 'classic') {
       if (!Array.isArray(messages)) return messages;
-      const injection = [
-        '',
-        '---',
-        '[MultiAgent RP Analysis Context]',
-        '',
-        '[Worldbuilding Agent]',
-        contextWorld || '(none)',
-        '',
-        '[Plot Agent]',
-        contextPlot || '(none)',
-        '',
-        '[Character Agent]',
-        contextChar || '(none)',
-        '',
-        '[Review Instructions]',
-        'Use these notes quietly as background context. Preserve established world details, narrative continuity, character voice, and motivations while allowing natural development.',
-        '---',
-      ].join('\n');
 
+      // 1. 포맷 조립
+      let body = '';
+      if (format === 'xml') {
+        body = [
+          '<MultiAgentRpContext>',
+          '  <WorldbuildingAgent>',
+          contextWorld ? contextWorld.split('\n').map(l => '    ' + l).join('\n') : '    (none)',
+          '  </WorldbuildingAgent>',
+          '  <PlotAgent>',
+          contextPlot ? contextPlot.split('\n').map(l => '    ' + l).join('\n') : '    (none)',
+          '  </PlotAgent>',
+          '  <CharacterAgent>',
+          contextChar ? contextChar.split('\n').map(l => '    ' + l).join('\n') : '    (none)',
+          '  </CharacterAgent>',
+          '  <ReviewInstructions>',
+          '    Use these notes quietly as background context. Preserve established world details, narrative continuity, character voice, and motivations while allowing natural development.',
+          '  </ReviewInstructions>',
+          '</MultiAgentRpContext>'
+        ].join('\n');
+      } else if (format === 'markdown-table') {
+        const cleanVal = (val) => val ? val.trim().replace(/\n/g, '<br>') : '(none)';
+        body = [
+          '| 에이전트 | 분석 지침 및 가이드라인 |',
+          '|---|---|',
+          `| **세계관 (Worldbuilding)** | ${cleanVal(contextWorld)} |`,
+          `| **플롯 (Plot)** | ${cleanVal(contextPlot)} |`,
+          `| **등장인물 (Character)** | ${cleanVal(contextChar)} |`,
+          '| **주의사항** | 조용히 이 지시를 배경 맥락으로 사용할 것. 기존 설정과 성격 일치 유지. |'
+        ].join('\n');
+      } else {
+        // classic
+        body = [
+          '---',
+          '[MultiAgent RP Analysis Context]',
+          '',
+          '[Worldbuilding Agent]',
+          contextWorld || '(none)',
+          '',
+          '[Plot Agent]',
+          contextPlot || '(none)',
+          '',
+          '[Character Agent]',
+          contextChar || '(none)',
+          '',
+          '[Review Instructions]',
+          'Use these notes quietly as background context. Preserve established world details, narrative continuity, character voice, and motivations while allowing natural development.',
+          '---',
+        ].join('\n');
+      }
+
+      // 2. 위치 주입
+      if (position === 'before-last-user') {
+        const lastUserIdx = findLastIndex(messages, m => m?.role === 'user');
+        if (lastUserIdx >= 0) {
+          const result = [...messages];
+          result.splice(lastUserIdx, 0, { role: 'system', content: body });
+          return result;
+        }
+      }
+
+      // Default/system-end
       const lastSystemIdx = findLastIndex(messages, m => m?.role === 'system');
       if (lastSystemIdx >= 0) {
         return messages.map((m, idx) =>
-          idx === lastSystemIdx ? { ...m, content: messageContent(m) + injection } : m
+          idx === lastSystemIdx ? { ...m, content: messageContent(m) + '\n\n' + body } : m
         );
       }
-      return [{ role: 'system', content: injection.replace(/^\n/, '') }, ...messages];
+      return [{ role: 'system', content: body }, ...messages];
     }
 
     // ── 설정 GUI ──────────────────────────────────────────────────────────────
@@ -579,6 +653,41 @@ button.ghost{background:#15171b;color:#a8b0bd}
           <input id="request_timeout" type="number" min="10" max="300" value="${escHtml(v('request_timeout', '60'))}">
         </div>
       </div>
+      <div class="row2" style="margin-top: 10px;">
+        <div class="field">
+          <label for="strict_mode">안전 정책 (Strict Mode)</label>
+          <select id="strict_mode" style="width:100%;background:#1e222b;color:#dde3ec;border:1px solid #3f4453;border-radius:4px;padding:6px;font-size:.8rem">
+            <option value="0" ${!bypass.strictMode ? 'selected' : ''}>Lenient (실패 시 무시하고 진행 - 권장)</option>
+            <option value="1" ${bypass.strictMode ? 'selected' : ''}>Strict (에이전트 실패 시 요청 차단)</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="analysis_language">분석 타겟 언어</label>
+          <select id="analysis_language" style="width:100%;background:#1e222b;color:#dde3ec;border:1px solid #3f4453;border-radius:4px;padding:6px;font-size:.8rem">
+            <option value="auto" ${bypass.analysisLanguage === 'auto' ? 'selected' : ''}>자동 감지 (Auto)</option>
+            <option value="en" ${bypass.analysisLanguage === 'en' ? 'selected' : ''}>영어 고정 (English)</option>
+            <option value="ko" ${bypass.analysisLanguage === 'ko' ? 'selected' : ''}>한국어 고정 (Korean)</option>
+            <option value="ja" ${bypass.analysisLanguage === 'ja' ? 'selected' : ''}>일본어 고정 (Japanese)</option>
+          </select>
+        </div>
+      </div>
+      <div class="row2" style="margin-top: 10px; margin-bottom: 12px;">
+        <div class="field">
+          <label for="injection_position">컨텍스트 주입 위치</label>
+          <select id="injection_position" style="width:100%;background:#1e222b;color:#dde3ec;border:1px solid #3f4453;border-radius:4px;padding:6px;font-size:.8rem">
+            <option value="system-end" ${bypass.injectionPosition === 'system-end' ? 'selected' : ''}>System 맨 끝 (Default)</option>
+            <option value="before-last-user" ${bypass.injectionPosition === 'before-last-user' ? 'selected' : ''}>마지막 User 입력 바로 직전</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="injection_format">컨텍스트 주입 포맷</label>
+          <select id="injection_format" style="width:100%;background:#1e222b;color:#dde3ec;border:1px solid #3f4453;border-radius:4px;padding:6px;font-size:.8rem">
+            <option value="classic" ${bypass.injectionFormat === 'classic' ? 'selected' : ''}>Classic 대괄호 포맷</option>
+            <option value="xml" ${bypass.injectionFormat === 'xml' ? 'selected' : ''}>XML 태그 포맷</option>
+            <option value="markdown-table" ${bypass.injectionFormat === 'markdown-table' ? 'selected' : ''}>Markdown 테이블 포맷</option>
+          </select>
+        </div>
+      </div>
       <label>
         <input id="debug_mode" type="checkbox" ${cfg.debug_mode ? 'checked' : ''}>
         디버그 모드
@@ -815,6 +924,58 @@ button.ghost{background:#15171b;color:#a8b0bd}
       }
 
       const debug = lastRun.debug;
+      const lat = lastRun.latency_ms || {};
+      const wMs = lat.worldbuilding || 0;
+      const pMs = lat.plot || 0;
+      const cMs = lat.character || 0;
+      const total = lastRun.duration_ms || (wMs + Math.max(pMs, cMs)) || 1;
+
+      const pct = (val) => `${Math.max(2, Math.min(100, (val / total) * 100))}%`;
+
+      const systemChars = lastRun.system_chars || 0;
+      const historyChars = lastRun.history_chars || 0;
+      const inputChars = lastRun.input_chars || 0;
+      const worldChars = lastRun.world_chars || 0;
+      const plotChars = lastRun.plot_chars || 0;
+      const charChars = lastRun.char_chars || 0;
+
+      const estInputChars = (systemChars + historyChars + inputChars) + (historyChars + inputChars + worldChars) * 2;
+      const estOutputChars = worldChars + plotChars + charChars;
+
+      const inputTokens = Math.round(estInputChars / 3.8);
+      const outputTokens = Math.round(estOutputChars / 3.8);
+      const costUsd = (inputTokens * 0.15 / 1000000) + (outputTokens * 0.60 / 1000000);
+      const costText = costUsd > 0 ? `$${costUsd.toFixed(6)}` : '$0.000000';
+
+      let waterfallHtml = '';
+      if (wMs || pMs || cMs) {
+        waterfallHtml = `
+          <div class="card" style="margin-top: 15px;">
+            <h2>지연 속도 분석 (Latency Waterfall)</h2>
+            <div style="background: #111318; padding: 12px; border-radius: 8px; border: 1px solid #272a34;">
+              <div class="waterfall-row" style="margin-bottom:8px">
+                <div style="display:flex;justify-content:space-between;font-size:.7rem;margin-bottom:3px"><span style="color:#dde3ec;font-weight:600">1. 세계관 에이전트 (Worldbuilding)</span><span style="color:#8d96a5">${wMs}ms</span></div>
+                <div style="background:#22252c;border-radius:4px;height:8px;position:relative;overflow:hidden">
+                  <div style="background:#3b82f6;position:absolute;left:0;top:0;bottom:0;width:${pct(wMs)};border-radius:4px"></div>
+                </div>
+              </div>
+              <div class="waterfall-row" style="margin-bottom:8px">
+                <div style="display:flex;justify-content:space-between;font-size:.7rem;margin-bottom:3px"><span style="color:#dde3ec;font-weight:600">2. 플롯 에이전트 (Plot - 병렬)</span><span style="color:#8d96a5">${pMs}ms</span></div>
+                <div style="background:#22252c;border-radius:4px;height:8px;position:relative;overflow:hidden">
+                  <div style="background:#10b981;position:absolute;left:${pct(wMs)};top:0;bottom:0;width:${pct(pMs)};border-radius:4px"></div>
+                </div>
+              </div>
+              <div class="waterfall-row">
+                <div style="display:flex;justify-content:space-between;font-size:.7rem;margin-bottom:3px"><span style="color:#dde3ec;font-weight:600">3. 등장인물 에이전트 (Character - 병렬)</span><span style="color:#8d96a5">${cMs}ms</span></div>
+                <div style="background:#22252c;border-radius:4px;height:8px;position:relative;overflow:hidden">
+                  <div style="background:#f59e0b;position:absolute;left:${pct(wMs)};top:0;bottom:0;width:${pct(cMs)};border-radius:4px"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        `;
+      }
+
       return `
         <div class="grid">
           <div class="card">
@@ -830,17 +991,20 @@ button.ghost{background:#15171b;color:#a8b0bd}
             ${lastRun.error ? `<div class="error-text" style="margin-top:10px">${escHtml(lastRun.error)}</div>` : ''}
           </div>
           <div class="card">
-            <h2>요청 규모</h2>
+            <h2>요청 규모 및 비용</h2>
             <div class="kv">
               <div class="k">현재 입력</div><div class="v">${escHtml(lastRun.input_chars ?? '-')}자</div>
               <div class="k">시스템</div><div class="v">${escHtml(lastRun.system_chars ?? '-')}자</div>
-              <div class="k">히스토리</div><div class="v">${escHtml(lastRun.history_messages ?? '-')}개 메시지</div>
+              <div class="k">히스토리</div><div class="v">${escHtml(lastRun.history_messages ?? '-')}개 메시지 (${escHtml(historyChars)}자)</div>
               <div class="k">세계관</div><div class="v">${escHtml(lastRun.world_chars ?? '-')}자</div>
               <div class="k">플롯</div><div class="v">${escHtml(lastRun.plot_chars ?? '-')}자</div>
               <div class="k">캐릭터</div><div class="v">${escHtml(lastRun.char_chars ?? '-')}자</div>
+              <div class="k" style="border-top:1px solid #272a34;padding-top:6px;font-weight:bold;color:#dde3ec">예상 토큰 수</div><div class="v" style="border-top:1px solid #272a34;padding-top:6px;font-weight:bold;color:#dde3ec">In: ~${inputTokens} / Out: ~${outputTokens}</div>
+              <div class="k" style="font-weight:bold;color:#10b981">예상 비용 (USD)</div><div class="v" style="font-weight:bold;color:#10b981">${costText}</div>
             </div>
           </div>
         </div>
+        ${waterfallHtml}
         ${debug ? `
           <div class="card">
             <h2>디버그 컨텍스트</h2>
@@ -944,6 +1108,10 @@ button.ghost{background:#15171b;color:#a8b0bd}
         context_window:         parseInt(getInputValue('context_window')) || 10,
         request_timeout:        parseFloat(getInputValue('request_timeout')) || 60,
         debug_mode:             document.getElementById('debug_mode')?.checked || false,
+        strict_mode:            getInputValue('strict_mode') === '1',
+        injection_position:     getInputValue('injection_position') || 'system-end',
+        injection_format:       getInputValue('injection_format') || 'classic',
+        analysis_language:      getInputValue('analysis_language') || 'auto',
       };
     }
 
@@ -975,6 +1143,10 @@ button.ghost{background:#15171b;color:#a8b0bd}
         bypassHypaMemory: getCheckboxValue('bypass_hypamemory'),
         bypassTranslate: getCheckboxValue('bypass_translate'),
         bypassLbProcess: getCheckboxValue('bypass_lb_process'),
+        strictMode: getInputValue('strict_mode') === '1',
+        injectionPosition: getInputValue('injection_position') || 'system-end',
+        injectionFormat: getInputValue('injection_format') || 'classic',
+        analysisLanguage: getInputValue('analysis_language') || 'auto',
       };
     }
 
@@ -983,6 +1155,10 @@ button.ghost{background:#15171b;color:#a8b0bd}
       await Risuai.setArgument('bypass_hypamemory', settings.bypassHypaMemory ? '1' : '0');
       await Risuai.setArgument('bypass_translate', settings.bypassTranslate ? '1' : '0');
       await Risuai.setArgument('bypass_lb_process', settings.bypassLbProcess ? '1' : '0');
+      await Risuai.setArgument('strict_mode', settings.strictMode ? '1' : '0');
+      await Risuai.setArgument('injection_position', settings.injectionPosition || 'system-end');
+      await Risuai.setArgument('injection_format', settings.injectionFormat || 'classic');
+      await Risuai.setArgument('analysis_language', settings.analysisLanguage || 'auto');
     }
 
     async function loadPluginSettings() {
@@ -1004,6 +1180,10 @@ button.ghost{background:#15171b;color:#a8b0bd}
         bypassHypaMemory: Boolean(bypass.bypassHypaMemory),
         bypassTranslate: Boolean(bypass.bypassTranslate),
         bypassLbProcess: Boolean(bypass.bypassLbProcess),
+        strictMode: Boolean(bypass.strictMode),
+        injectionPosition: String(bypass.injectionPosition || 'system-end'),
+        injectionFormat: String(bypass.injectionFormat || 'classic'),
+        analysisLanguage: String(bypass.analysisLanguage || 'auto'),
         savedAt: new Date().toISOString(),
       });
     }

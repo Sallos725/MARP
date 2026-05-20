@@ -60,6 +60,10 @@ async def status():
             "context_window": public["context_window"],
             "debug_mode": public["debug_mode"],
             "request_timeout": public["request_timeout"],
+            "strict_mode": public["strict_mode"],
+            "injection_position": public["injection_position"],
+            "injection_format": public["injection_format"],
+            "analysis_language": public["analysis_language"],
         },
         agents=public["agents"],
     )
