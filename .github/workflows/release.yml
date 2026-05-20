@@ -1,0 +1,101 @@
+name: Release packages
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and publish release assets
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Build release archives
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          python3 - <<'PY'
+          import os
+          import shutil
+          import sys
+          import zipfile
+          from pathlib import Path
+
+          tag = os.environ.get("GITHUB_REF_NAME", "").strip()
+          if not tag:
+              sys.exit("GITHUB_REF_NAME is required")
+          if "/" in tag or tag in {".", ".."}:
+              sys.exit(f"Refusing unsafe tag name: {tag!r}")
+
+          root = Path.cwd()
+          dist = root / "dist"
+          shutil.rmtree(dist, ignore_errors=True)
+          dist.mkdir(parents=True, exist_ok=True)
+
+          full_root = dist / "full"
+          full_plugin_dir = full_root / "plugin"
+          full_plugin_dir.mkdir(parents=True, exist_ok=True)
+
+          shutil.copytree(
+              root / "full" / "app",
+              full_root / "app",
+              ignore=shutil.ignore_patterns("__pycache__", "*.pyc", ".pytest_cache"),
+          )
+          shutil.copy2(
+              root / "full" / "plugin" / "risu-multiagent-full.js",
+              full_plugin_dir / f"multiagent-full-{tag}.js",
+          )
+          for name in ("requirements.txt", "Dockerfile", "docker-compose.yml", ".env.example"):
+              shutil.copy2(root / "full" / name, full_root / name)
+
+          shutil.copy2(
+              root / "lite" / "risu-multiagent.js",
+              dist / f"multiagent-lite-{tag}.js",
+          )
+
+          def write_zip(output_path: Path, source_dir: Path) -> None:
+              with zipfile.ZipFile(output_path, "w", zipfile.ZIP_DEFLATED) as archive:
+                  for path in sorted(source_dir.rglob("*")):
+                      if path.is_file():
+                          archive.write(path, path.relative_to(source_dir).as_posix())
+
+          write_zip(dist / f"multiagent-full-{tag}.zip", full_root)
+
+          for asset in sorted(path for path in dist.glob("multiagent-*") if path.is_file()):
+              print(asset.name)
+              if asset.suffix == ".zip":
+                  with zipfile.ZipFile(asset) as archive:
+                      for name in archive.namelist():
+                          print(f"  {name}")
+          PY
+
+      - name: Build readable release notes
+        run: python3 .github/scripts/build_release_notes.py
+
+      - name: Publish GitHub release assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          tag="${GITHUB_REF_NAME}"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release edit "$tag" --title "$tag" --notes-file dist/release-notes.md
+            gh release upload "$tag" dist/multiagent-* --clobber
+          else
+            gh release create "$tag" dist/multiagent-* \
+              --target "$GITHUB_SHA" \
+              --title "$tag" \
+              --notes-file dist/release-notes.md
+          fi
