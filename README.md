@@ -119,10 +119,10 @@ Vercel AI Gateway용 **automatic caching**과 **Zero Data Retention** 체크박�
 
 ### 사전 준비
 
-- Docker, Docker Compose 또는 Python 3.11+
+- Docker, Docker Compose
 - 분석 LLM API 키 (공급자별)
 
-### 사이드카 기동 (Docker)
+### 사이드카 기동
 
 ```bash
 cd full
@@ -134,22 +134,6 @@ docker compose up -d
 
 기본 포트는 `6009`. `curl http://localhost:6009/health`로 확인.
 
-### 사이드카 기동 (스크립트)
-
-Docker 없이 실행하려면 `full/run.sh`를 쓸 수 있다. 첫 실행 때 `.env`가 없으면
-`.env.example`을 복사하고, `.venv`를 만든 뒤 필요한 Python 패키지를 설치한다.
-
-```bash
-cd full
-./run.sh
-```
-
-포트와 호스트는 환경변수로 바꿀 수 있다.
-
-```bash
-HOST=127.0.0.1 PORT=6009 ./run.sh
-```
-
 ### 플러그인 등록
 
 1. `full/plugin/risu-multiagent-full.js`를 RisuAI에 Import.
@@ -158,12 +142,11 @@ HOST=127.0.0.1 PORT=6009 ./run.sh
 4. 필요하면 에이전트별 공급자·모델·키를 개별 지정한다 (생략 시 DEFAULT 사용).
 5. **전체 테스트**가 통과하면 설정 완료.
 
-Full판도 기본 LLM 설정과 각 에이전트 설정에 추가 JSON body 블럭이 있다.
-Vercel AI Gateway를 쓸 때는 **automatic caching**과 **Zero Data Retention**
-체크박스를 켜면 `providerOptions.gateway`가 JSON 블럭에 반영된다. 에이전트별
-JSON body가 비어 있으면 기본 LLM 설정의 JSON body를 상속하고, 값이 있으면 해당
-에이전트 호출에만 적용된다. 사이드카의 OpenAI-compatible/Vertex
-`chat/completions` 호출에 병합되며 Anthropic 직접 호출에는 적용하지 않는다.
+Full판도 기본 LLM 설정에 추가 JSON body 블럭이 있다. Vercel AI Gateway를 쓸 때는
+Lite판과 같은 방식으로 **automatic caching**과 **Zero Data Retention** 체크박스를
+켜면 `providerOptions.gateway`가 JSON 블럭에 반영되고, 사이드카의
+OpenAI-compatible/Vertex `chat/completions` 호출에 병합된다. Anthropic 직접 호출에는
+적용하지 않는다.
 
 ### 주요 환경변수 (`full/.env`)
 
