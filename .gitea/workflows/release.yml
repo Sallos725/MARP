@@ -40,10 +40,8 @@ jobs:
           dist.mkdir(parents=True, exist_ok=True)
 
           full_root = dist / "full"
-          lite_root = dist / "lite"
           full_plugin_dir = full_root / "plugin"
           full_plugin_dir.mkdir(parents=True, exist_ok=True)
-          lite_root.mkdir(parents=True, exist_ok=True)
 
           shutil.copytree(
               root / "full" / "app",
@@ -52,11 +50,14 @@ jobs:
           )
           shutil.copy2(
               root / "full" / "plugin" / "risu-multiagent-full.js",
-              full_plugin_dir / f"multiagent-full-{tag}.json",
+              full_plugin_dir / f"multiagent-full-{tag}.js",
           )
+          for name in ("requirements.txt", "Dockerfile", "docker-compose.yml", ".env.example"):
+              shutil.copy2(root / "full" / name, full_root / name)
+
           shutil.copy2(
               root / "lite" / "risu-multiagent.js",
-              lite_root / f"multiagent-lite-{tag}.json",
+              dist / f"multiagent-lite-{tag}.js",
           )
 
           def write_zip(output_path: Path, source_dir: Path) -> None:
@@ -66,13 +67,13 @@ jobs:
                           archive.write(path, path.relative_to(source_dir).as_posix())
 
           write_zip(dist / f"multiagent-full-{tag}.zip", full_root)
-          write_zip(dist / f"multiagent-lite-{tag}.zip", lite_root)
 
-          for package in sorted(dist.glob("*.zip")):
-              print(package.name)
-              with zipfile.ZipFile(package) as archive:
-                  for name in archive.namelist():
-                      print(f"  {name}")
+          for asset in sorted(path for path in dist.glob("multiagent-*") if path.is_file()):
+              print(asset.name)
+              if asset.suffix == ".zip":
+                  with zipfile.ZipFile(asset) as archive:
+                      for name in archive.namelist():
+                          print(f"  {name}")
           PY
 
       - name: Publish release assets
@@ -117,9 +118,9 @@ jobs:
           if not tag:
               sys.exit("GITHUB_REF_NAME is required")
 
-          packages = sorted(Path("dist").glob("multiagent-*.zip"))
-          if not packages:
-              sys.exit("No release packages found in dist/")
+          assets = sorted(path for path in Path("dist").glob("multiagent-*") if path.is_file())
+          if not assets:
+              sys.exit("No release assets found in dist/")
 
           def api_request(method, path, payload=None, content_type="application/json"):
               data = None
@@ -177,9 +178,10 @@ jobs:
           if release_id is None:
               sys.exit(f"Release response did not include an id: {release}")
 
-          package_names = {package.name for package in packages}
+          asset_names = {asset.name for asset in assets}
+          obsolete_asset_names = {f"multiagent-lite-{tag}.zip"}
           for asset in release.get("assets") or []:
-              if asset.get("name") in package_names and asset.get("id") is not None:
+              if asset.get("name") in asset_names | obsolete_asset_names and asset.get("id") is not None:
                   delete_status, delete_body = api_request(
                       "DELETE",
                       f"{repo_path}/releases/{release_id}/assets/{asset['id']}",
@@ -187,22 +189,29 @@ jobs:
                   if delete_status not in {200, 204}:
                       sys.exit(f"Failed to replace asset {asset['name']}: HTTP {delete_status} {delete_body}")
 
+          def content_type_for(file_path):
+              if file_path.suffix == ".zip":
+                  return "application/zip"
+              if file_path.suffix == ".js":
+                  return "application/javascript"
+              return "application/octet-stream"
+
           def multipart_body(field_name, file_path):
               boundary = f"----risu-multiagent-{secrets.token_hex(16)}"
               file_bytes = file_path.read_bytes()
               header = (
                   f"--{boundary}\r\n"
                   f'Content-Disposition: form-data; name="{field_name}"; filename="{file_path.name}"\r\n'
-                  "Content-Type: application/zip\r\n\r\n"
+                  f"Content-Type: {content_type_for(file_path)}\r\n\r\n"
               ).encode("utf-8")
               footer = f"\r\n--{boundary}--\r\n".encode("utf-8")
               return boundary, header + file_bytes + footer
 
-          for package in packages:
-              boundary, body = multipart_body("attachment", package)
+          for asset in assets:
+              boundary, body = multipart_body("attachment", asset)
               upload_path = (
                   f"{repo_path}/releases/{release_id}/assets"
-                  f"?name={urllib.parse.quote(package.name, safe='')}"
+                  f"?name={urllib.parse.quote(asset.name, safe='')}"
               )
               upload_status, upload_body = api_request(
                   "POST",
@@ -211,6 +220,6 @@ jobs:
                   f"multipart/form-data; boundary={boundary}",
               )
               if upload_status not in {200, 201}:
-                  sys.exit(f"Failed to upload {package.name}: HTTP {upload_status} {upload_body}")
-              print(f"Uploaded {package.name}")
+                  sys.exit(f"Failed to upload {asset.name}: HTTP {upload_status} {upload_body}")
+              print(f"Uploaded {asset.name}")
           PY
