@@ -58,6 +58,8 @@ class AgentStatus(BaseModel):
     model_source: str
     temperature_source: str
     max_tokens_source: str
+    extra_body_json_source: str
+    extra_body_json_set: bool
     api_key_set: bool
     ready: bool
     active: bool = True
@@ -107,6 +109,7 @@ class ConfigModel(BaseModel):
     worldbuilding_model: str = ""
     worldbuilding_temperature: float | None = None
     worldbuilding_max_tokens: int | None = None
+    worldbuilding_extra_body_json: str = ""
     worldbuilding_system_prompt: str = ""
     worldbuilding_user_prompt_template: str = ""
 
@@ -116,6 +119,7 @@ class ConfigModel(BaseModel):
     plot_model: str = ""
     plot_temperature: float | None = None
     plot_max_tokens: int | None = None
+    plot_extra_body_json: str = ""
     plot_system_prompt: str = ""
     plot_user_prompt_template: str = ""
 
@@ -125,6 +129,7 @@ class ConfigModel(BaseModel):
     character_model: str = ""
     character_temperature: float | None = None
     character_max_tokens: int | None = None
+    character_extra_body_json: str = ""
     character_system_prompt: str = ""
     character_user_prompt_template: str = ""
 
@@ -134,6 +139,7 @@ class ConfigModel(BaseModel):
     director_model: str = ""
     director_temperature: float | None = None
     director_max_tokens: int | None = None
+    director_extra_body_json: str = ""
     director_system_prompt: str = ""
     director_user_prompt_template: str = ""
 

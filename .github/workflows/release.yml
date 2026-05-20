@@ -55,7 +55,7 @@ jobs:
               root / "full" / "plugin" / "risu-multiagent-full.js",
               full_plugin_dir / f"multiagent-full-{tag}.js",
           )
-          for name in ("requirements.txt", "Dockerfile", "docker-compose.yml", ".env.example"):
+          for name in ("requirements.txt", "Dockerfile", "docker-compose.yml", ".env.example", "run.sh"):
               shutil.copy2(root / "full" / name, full_root / name)
 
           shutil.copy2(
