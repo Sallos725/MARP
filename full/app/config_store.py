@@ -55,6 +55,7 @@ DEFAULTS: dict = {
     "context_window":         10,
     "debug_mode":             False,
     "request_timeout":        60.0,
+    "analysis_language":      "auto",
 }
 
 AGENTS: tuple[tuple[str, str], ...] = (
@@ -183,6 +184,7 @@ def initialize_from_env() -> None:
             "context_window":         s.context_window,
             "debug_mode":             s.debug_mode,
             "request_timeout":        s.request_timeout,
+            "analysis_language":      getattr(s, "analysis_language", "auto"),
         })
     except Exception:
         save(dict(DEFAULTS))
@@ -248,6 +250,7 @@ def public_status() -> dict:
         "context_window": int(cfg["context_window"]),
         "debug_mode": bool(cfg["debug_mode"]),
         "request_timeout": float(cfg["request_timeout"]),
+        "analysis_language": str(cfg.get("analysis_language") or "auto"),
         "agents": agents,
         "ready": all(agent["ready"] for agent in agents if agent["active"]),
     }

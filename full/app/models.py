@@ -13,6 +13,7 @@ class AnalyzeRequest(BaseModel):
     world_summary: str = ""
     char_summary: str = ""
     context_window: int | None = None
+    analysis_language: str = "auto"
 
 
 class AnalyzeResponse(BaseModel):
@@ -25,6 +26,7 @@ class AnalyzeResponse(BaseModel):
     agent_debug: dict[str, dict] = Field(default_factory=dict)
     pipeline_mode: str = "classic"
     agent_timings_ms: dict[str, int] = Field(default_factory=dict)
+    errors: dict[str, str] = Field(default_factory=dict)
 
 
 class PublicConfigStatus(BaseModel):
@@ -39,6 +41,7 @@ class PublicConfigStatus(BaseModel):
     context_window: int
     debug_mode: bool
     request_timeout: float
+    analysis_language: str
 
 
 class AgentStatus(BaseModel):
@@ -137,3 +140,4 @@ class ConfigModel(BaseModel):
     context_window: int = 10
     debug_mode: bool = False
     request_timeout: float = 60.0
+    analysis_language: str = "auto"

@@ -55,8 +55,11 @@ class BaseAgent(ABC):
     async def run(self, pipeline_context: dict) -> str:
         system_prompt = self._configured_system_prompt(pipeline_context)
         user_prompt = self._configured_user_prompt(pipeline_context)
+        language_instruction = self._analysis_language_instruction(
+            pipeline_context.get("analysis_language", "auto")
+        )
         messages = [
-            {"role": "system", "content": f"{system_prompt}\n\n{SOURCE_MATERIAL_RULES}"},
+            {"role": "system", "content": f"{system_prompt}\n\n{SOURCE_MATERIAL_RULES}{language_instruction}"},
             {"role": "user",   "content": user_prompt},
         ]
         debug_entry = self._start_debug_entry(pipeline_context, messages)
@@ -95,6 +98,16 @@ class BaseAgent(ABC):
             text,
             "</source>",
         ])
+
+    def _analysis_language_instruction(self, value: str) -> str:
+        normalized = str(value or "auto").strip().lower()
+        if normalized == "ko":
+            return "\n\nCRITICAL: Write analysis notes and directive bullets only in Korean (한국어)."
+        if normalized == "en":
+            return "\n\nCRITICAL: Write analysis notes and directive bullets only in English."
+        if normalized == "ja":
+            return "\n\nCRITICAL: Write analysis notes and directive bullets only in Japanese (日本語)."
+        return ""
 
     def _start_debug_entry(self, pipeline_context: dict, messages: list[dict]) -> dict | None:
         if not bool(config_store.load().get("debug_mode")):

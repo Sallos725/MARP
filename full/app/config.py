@@ -60,6 +60,7 @@ class Settings(BaseSettings):
     context_window: int = 10
     debug_mode: bool = False
     request_timeout: float = 60.0
+    analysis_language: str = "auto"
 
     @field_validator(
         "default_max_tokens",

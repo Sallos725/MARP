@@ -1,12 +1,19 @@
 //@name risu_multiagent_full
 //@display-name MultiAgent RP — Full판
 //@api 3.0
-//@version 2.2.5
+//@version 2.3.0
 //@arg server_url string Full판 서버 URL (e.g. http://localhost:6009 or https://example.com/multi-agent)
 //@arg main_model_only string Run MultiAgent only for RisuAI main model requests; bypass auxiliary/submodel/memory/emotion/translation requests (default: 1)
 //@arg bypass_hypamemory string Skip MultiAgent analysis for RisuAI HypaMemory/memory requests (default: 1)
 //@arg bypass_translate string Skip MultiAgent analysis for RisuAI built-in LLM translation requests (default: 1)
 //@arg bypass_lb_process string Skip MultiAgent analysis for <lb-process> helper LLM requests (default: 1)
+//@arg strict_mode string Strict mode: block chat when the sidecar or any active agent fails (default: 0)
+//@arg injection_position string Injection position: system-end or before-last-user (default: system-end)
+//@arg injection_format string Injection format: compact, classic, or xml (default: compact)
+//@arg analysis_language string Agent analysis language: auto, ko, en, or ja (default: auto)
+//@arg max_context_tokens string Main model context cap for budgeting; 0 disables cap (default: 0)
+//@arg reserve_output_tokens string Output tokens to reserve before injection budgeting (default: 1024)
+//@arg injection_char_budget string Maximum MultiAgent injection characters before context cap (default: 6000)
 
 /**
  * MultiAgent RP Pipeline — Full판 플러그인 (RisuAI Plugin API v3.0)
@@ -23,16 +30,17 @@
 
 (async () => {
   try {
+    const PLUGIN_VERSION = '2.3.0';
     const PLUGIN_SETTINGS_KEY = 'risu_multiagent_full_plugin_settings_v1';
     const SIDECAR_CONFIG_BACKUP_KEY = 'risu_multiagent_full_sidecar_config_backup_v1';
     const STORAGE_VERSION = 1;
     const DEFAULT_ANALYZE_TIMEOUT_SECONDS = 3000;
     const ANALYZE_TIMEOUT_GRACE_MS = 30_000;
-    const DEEP_INJECTION_CHAR_BUDGET = 6000;
+    const DEFAULT_MAX_CONTEXT_TOKENS = 0;
+    const DEFAULT_RESERVE_OUTPUT_TOKENS = 1024;
+    const DEFAULT_INJECTION_CHAR_BUDGET = 6000;
+    const ESTIMATED_CHARS_PER_TOKEN = 3.8;
     const CLASSIC_SECTION_CHAR_BUDGET = 1800;
-    const DIRECTIVE_HARD_BUDGET = 4000;
-    const DIRECTIVE_SOFT_BUDGET = 1500;
-    const DIRECTIVE_FYI_BUDGET = 500;
     // legacy fallback: 서버가 context_directives를 못 채울 때만 사용
     const DEEP_INJECTION_SECTIONS = [
       ['final_director', 'Final Synthesis', 2400],
@@ -57,6 +65,36 @@
         bypassHypaMemory: parseEnabled(await Risuai.getArgument('bypass_hypamemory'), settings.bypassHypaMemory ?? true),
         bypassTranslate: parseEnabled(await Risuai.getArgument('bypass_translate'), settings.bypassTranslate ?? true),
         bypassLbProcess: parseEnabled(await Risuai.getArgument('bypass_lb_process'), settings.bypassLbProcess ?? true),
+        strictMode: parseEnabled(await Risuai.getArgument('strict_mode'), settings.strictMode ?? false),
+        injectionPosition: normalizeChoice(
+          (await Risuai.getArgument('injection_position')) || settings.injectionPosition,
+          ['system-end', 'before-last-user'],
+          'system-end'
+        ),
+        injectionFormat: normalizeChoice(
+          (await Risuai.getArgument('injection_format')) || settings.injectionFormat,
+          ['compact', 'classic', 'xml'],
+          'compact'
+        ),
+        analysisLanguage: normalizeChoice(
+          (await Risuai.getArgument('analysis_language')) || settings.analysisLanguage,
+          ['auto', 'ko', 'en', 'ja'],
+          'auto'
+        ),
+        maxContextTokens: normalizeNonNegativeInt(
+          await Risuai.getArgument('max_context_tokens'),
+          settings.maxContextTokens ?? DEFAULT_MAX_CONTEXT_TOKENS
+        ),
+        reserveOutputTokens: normalizeNonNegativeInt(
+          await Risuai.getArgument('reserve_output_tokens'),
+          settings.reserveOutputTokens ?? DEFAULT_RESERVE_OUTPUT_TOKENS
+        ),
+        injectionCharBudget: normalizeIntInRange(
+          await Risuai.getArgument('injection_char_budget'),
+          settings.injectionCharBudget ?? DEFAULT_INJECTION_CHAR_BUDGET,
+          500,
+          20000
+        ),
       };
     }
 
@@ -67,21 +105,25 @@
 
     Risuai.addRisuReplacer('beforeRequest', async (messages, type) => {
       const bypass = await getBypassSettings();
+      const serverUrl = await getServerUrl();
+      const analyzeDebug = await getAnalyzeDebugMode(serverUrl);
       if (!Array.isArray(messages)) {
-        console.log('MultiAgent Full판: invalid message array bypassed');
+        if (analyzeDebug) {
+          console.log('MultiAgent Full판: invalid message array bypassed');
+        }
         return messages;
       }
 
       const bypassReason = getBypassReason(messages, type, bypass);
       if (bypassReason) {
-        console.log(`MultiAgent Full판: ${bypassReason} bypassed`);
+        if (analyzeDebug) {
+          console.log(`MultiAgent Full판: ${bypassReason} bypassed`);
+        }
         return messages;
       }
 
       const startedAt = Date.now();
-      const serverUrl = await getServerUrl();
       const analyzeTimeoutMs = await getAnalyzeRequestTimeoutMs(serverUrl);
-      const analyzeDebug = await getAnalyzeDebugMode(serverUrl);
       if (analyzeDebug) {
         console.log(`MultiAgent Full판: analyze start timeout=${analyzeTimeoutMs}ms`);
       }
@@ -94,6 +136,8 @@
       const userInput   = lastUserIdx >= 0 ? messageContent(nonSystem[lastUserIdx]) : '';
       const chatHistory = (lastUserIdx >= 0 ? nonSystem.slice(0, lastUserIdx) : nonSystem)
         .map(m => ({ role: m.role, content: messageContent(m) }));
+      const chatHistoryChars = chatHistory.reduce((sum, item) => sum + stringLength(item.content), 0);
+      const promptChars = estimateMessagesChars(safeMessages);
 
       const runBase = {
         server_url: serverUrl,
@@ -101,13 +145,23 @@
         input_chars: stringLength(userInput),
         system_chars: stringLength(systemContext),
         history_messages: chatHistory.length,
+        history_chars: chatHistoryChars,
+        prompt_chars: promptChars,
         mode: type || '',
         request_timeout_ms: analyzeTimeoutMs,
+        strict_mode: bypass.strictMode,
+        injection_position: bypass.injectionPosition,
+        injection_format: bypass.injectionFormat,
+        analysis_language: bypass.analysisLanguage,
+        max_context_tokens: bypass.maxContextTokens,
+        reserve_output_tokens: bypass.reserveOutputTokens,
+        injection_char_budget: bypass.injectionCharBudget,
       };
       const analyzeRequest = {
         user_input:     userInput,
         chat_history:   chatHistory,
         system_context: systemContext,
+        analysis_language: bypass.analysisLanguage,
       };
       await recordLastRun({
         ...runBase,
@@ -141,6 +195,12 @@
             duration_ms: Date.now() - startedAt,
             error: `서버 오류 ${res.status}: ${errText.slice(0, 200)}`,
           });
+          if (bypass.strictMode) {
+            showToastSafe(`MultiAgent 분석 실패 (Strict): HTTP ${res.status}`, 'error');
+            const strictError = new Error(`MultiAgent 분석 실패 (Strict): HTTP ${res.status}`);
+            strictError.alreadyRecorded = true;
+            throw strictError;
+          }
           // 분석 실패해도 채팅은 막지 않도록 원본 메시지 그대로 통과
           return messages;
         }
@@ -149,14 +209,31 @@
         if (analyzeDebug) {
           console.log(`MultiAgent Full판: analyze complete status=${res.status} duration=${Date.now() - startedAt}ms pipeline=${data.pipeline_mode || 'classic'}`);
         }
+        const errors = isPlainObject(data.errors) ? data.errors : {};
+        const hasErrors = Object.keys(errors).length > 0;
+        const errorSummary = hasErrors
+          ? Object.entries(errors).map(([name, err]) => `${name}: ${err}`).join('\n')
+          : '';
+        const injectionResult = injectContext(
+          messages,
+          data.context_world,
+          data.context_plot,
+          data.context_char,
+          data.context_director,
+          data.context_deep,
+          data.context_directives,
+          bypass
+        );
         await recordLastRun({
           ...runBase,
-          status: 'success',
-          success: true,
+          status: hasErrors ? 'partial' : 'success',
+          success: !hasErrors,
           status_code: res.status,
           duration_ms: Date.now() - startedAt,
           pipeline_mode: data.pipeline_mode || 'classic',
           agent_timings_ms: data.agent_timings_ms || {},
+          errors,
+          error: errorSummary,
           world_chars: stringLength(data.context_world),
           plot_chars: stringLength(data.context_plot),
           char_chars: stringLength(data.context_char),
@@ -166,6 +243,7 @@
           expected_agent_count: data.pipeline_mode === 'deep-ensemble' ? 9 : (data.pipeline_mode === 'ensemble-director' ? 4 : 3),
           directive_counts: countDirectives(data.context_directives),
           round_summary: buildRoundSummary(data.context_deep, data.agent_timings_ms || {}),
+          ...injectionResult.stats,
           debug: {
             context_world: data.context_world,
             context_plot: data.context_plot,
@@ -174,25 +252,42 @@
             context_deep: data.context_deep || {},
             context_directives: data.context_directives || null,
             analyze_request: analyzeRequest,
+            errors,
             agent_io: data.agent_debug || {},
           },
         });
 
-        return injectContext(messages, data.context_world, data.context_plot, data.context_char, data.context_director, data.context_deep, data.context_directives);
+        if (bypass.strictMode && hasErrors) {
+          showToastSafe('MultiAgent 에이전트 실패 (Strict): 최근 분석 탭에서 실패 에이전트를 확인하세요.', 'error');
+          const strictError = new Error(`MultiAgent 에이전트 실패 (Strict): ${errorSummary}`);
+          strictError.alreadyRecorded = true;
+          throw strictError;
+        }
+
+        return injectionResult.messages;
 
       } catch (err) {
+        const message = errorMessage(err);
         if (analyzeDebug) {
           console.warn(`MultiAgent Full판: analyze connection failed duration=${Date.now() - startedAt}ms`, err);
         }
-        await recordLastRun({
-          ...runBase,
-          status: 'failed',
-          success: false,
-          duration_ms: Date.now() - startedAt,
-          error: `연결 실패: ${err.message}`,
-        });
+        if (!err?.alreadyRecorded) {
+          await recordLastRun({
+            ...runBase,
+            status: 'failed',
+            success: false,
+            duration_ms: Date.now() - startedAt,
+            error: `연결 실패: ${message}`,
+          });
+        }
         if (analyzeDebug) {
-          console.log(`MultiAgent pipeline error: ${err.message}`);
+          console.log(`MultiAgent pipeline error: ${message}`);
+        }
+        if (bypass.strictMode) {
+          if (!err?.alreadyRecorded) {
+            showToastSafe(`MultiAgent 오류 발생 (Strict): ${message}`, 'error');
+          }
+          throw err;
         }
         return messages;
       } finally {
@@ -262,119 +357,219 @@
       ].join('\n')).join('\n\n');
     }
 
-    function injectContext(messages, contextWorld, contextPlot, contextChar, contextDirector, contextDeep, contextDirectives) {
-      if (!Array.isArray(messages)) return messages;
-
-      // 우선순위: grade-aware directives > legacy deep ensemble > classic
-      const directiveBlock = formatDirectivesInjection(contextDirectives);
-      const deepContext = directiveBlock ? '' : formatDeepInjectionContext(contextDeep);
-
-      let parts;
-      let reviewInstruction;
-      if (directiveBlock) {
-        parts = [
-          '',
-          '---',
-          '[MultiAgent RP — Graded Directives]',
-          '',
-          directiveBlock,
-        ];
-        reviewInstruction = [
-          'Directive grades:',
-          '- [HARD] = non-negotiable constraints. The reply MUST satisfy every HARD bullet. If two HARD bullets conflict, prefer the one from the user input or canon source.',
-          '- [SOFT] = strongly recommended guidance. Follow unless a HARD constraint forces otherwise.',
-          '- [FYI] = optional context. Use only if naturally helpful.',
-          'Do not mention these directives in the reply itself. Treat them as silent background.',
-        ].join('\n');
-      } else if (deepContext) {
-        parts = [
-          '',
-          '---',
-          '[MultiAgent RP Deep Ensemble Context]',
-          '',
-          '[Deep Ensemble]',
-          deepContext,
-        ];
-        reviewInstruction = 'Use these notes quietly as background context. Preserve established world details, narrative continuity, character voice, and motivations while allowing natural development.';
-      } else {
-        parts = [
-          '',
-          '---',
-          '[MultiAgent RP Analysis Context]',
-          '',
-          '[Worldbuilding Agent]',
-          clipForPrompt(contextWorld || '(none)', CLASSIC_SECTION_CHAR_BUDGET),
-          '',
-          '[Plot Agent]',
-          clipForPrompt(contextPlot || '(none)', CLASSIC_SECTION_CHAR_BUDGET),
-          '',
-          '[Character Agent]',
-          clipForPrompt(contextChar || '(none)', CLASSIC_SECTION_CHAR_BUDGET),
-        ];
-        if (contextDirector) {
-          parts.push('', '[Director Agent]', clipForPrompt(contextDirector, CLASSIC_SECTION_CHAR_BUDGET));
-        }
-        reviewInstruction = 'Use these notes quietly as background context. Preserve established world details, narrative continuity, character voice, and motivations while allowing natural development.';
+    function injectContext(messages, contextWorld, contextPlot, contextChar, contextDirector, contextDeep, contextDirectives, options = {}) {
+      const budget = computeInjectionBudget(messages, options);
+      if (!Array.isArray(messages)) {
+        return { messages, stats: { ...budget, injection_chars: 0, injection_source: 'none', injection_skipped: true } };
+      }
+      if (budget.budget_chars <= 0) {
+        return {
+          messages,
+          stats: {
+            ...budget,
+            injection_chars: 0,
+            injection_source: 'none',
+            injection_skipped: true,
+            injection_reason: 'context budget exhausted',
+          },
+        };
       }
 
-      const injection = [
-        ...parts,
+      const payload = buildInjectionPayload(
+        contextWorld,
+        contextPlot,
+        contextChar,
+        contextDirector,
+        contextDeep,
+        contextDirectives,
+        budget.budget_chars,
+        options.injectionFormat
+      );
+      if (!payload.injection) {
+        return { messages, stats: { ...budget, injection_chars: 0, injection_source: 'none', injection_skipped: true } };
+      }
+
+      const nextMessages = insertInjection(messages, payload.injection, options.injectionPosition);
+      const totalInputChars = budget.estimated_prompt_chars + payload.injection.length;
+      return {
+        messages: nextMessages,
+        stats: {
+          ...budget,
+          injection_chars: payload.injection.length,
+          injection_source: payload.source,
+          injection_skipped: false,
+          estimated_input_tokens_with_injection: estimateTokensFromChars(totalInputChars),
+        },
+      };
+    }
+
+    function buildInjectionPayload(contextWorld, contextPlot, contextChar, contextDirector, contextDeep, contextDirectives, budgetChars, format) {
+      const normalizedFormat = normalizeChoice(format, ['compact', 'classic', 'xml'], 'compact');
+      const reviewDirective = [
+        'Directive grades:',
+        '- [HARD] = non-negotiable constraints. The reply MUST satisfy every HARD bullet. If two HARD bullets conflict, prefer the one from the user input or canon source.',
+        '- [SOFT] = strongly recommended guidance. Follow unless a HARD constraint forces otherwise.',
+        '- [FYI] = optional context. Use only if naturally helpful.',
+        'Do not mention these directives in the reply itself. Treat them as silent background.',
+      ].join('\n');
+      const reviewGeneral = 'Use these notes quietly as background context. Preserve established world details, narrative continuity, character voice, and motivations while allowing natural development.';
+      const reviewBudget = normalizedFormat === 'compact' ? 260 : 520;
+      const contentBudget = Math.max(0, budgetChars - reviewBudget);
+
+      const directiveBlock = formatDirectivesInjection(contextDirectives, contentBudget, normalizedFormat);
+      if (directiveBlock) {
+        return {
+          source: 'directives',
+          injection: clipForPrompt(formatInjectionEnvelope(
+            'MultiAgent RP Graded Directives',
+            directiveBlock,
+            reviewDirective,
+            normalizedFormat
+          ), budgetChars),
+        };
+      }
+
+      const deepContext = formatDeepInjectionContext(contextDeep, contentBudget, normalizedFormat);
+      if (deepContext) {
+        return {
+          source: 'deep',
+          injection: clipForPrompt(formatInjectionEnvelope(
+            'MultiAgent RP Deep Ensemble Context',
+            deepContext,
+            reviewGeneral,
+            normalizedFormat
+          ), budgetChars),
+        };
+      }
+
+      const classicContext = formatClassicInjectionContext(
+        contextWorld,
+        contextPlot,
+        contextChar,
+        contextDirector,
+        contentBudget,
+        normalizedFormat
+      );
+      return {
+        source: 'classic',
+        injection: clipForPrompt(formatInjectionEnvelope(
+          'MultiAgent RP Analysis Context',
+          classicContext,
+          reviewGeneral,
+          normalizedFormat
+        ), budgetChars),
+      };
+    }
+
+    function formatInjectionEnvelope(title, body, reviewInstruction, format) {
+      if (!body) return '';
+      if (format === 'xml') {
+        return [
+          '<multiagent-rp>',
+          `  <title>${escXml(title)}</title>`,
+          indentXmlBlock(body, 2),
+          '  <review-instructions>',
+          ...reviewInstruction.split('\n').map(line => `    ${escXml(line)}`),
+          '  </review-instructions>',
+          '</multiagent-rp>',
+        ].join('\n');
+      }
+      if (format === 'compact') {
+        return [
+          '',
+          '---',
+          `[${title}]`,
+          body,
+          '[Review]',
+          reviewInstruction,
+          '---',
+        ].join('\n');
+      }
+      return [
+        '',
+        '---',
+        `[${title}]`,
+        '',
+        body,
         '',
         '[Review Instructions]',
         reviewInstruction,
         '---',
       ].join('\n');
-
-      const lastSystemIdx = findLastIndex(messages, m => m?.role === 'system');
-      if (lastSystemIdx >= 0) {
-        return messages.map((m, idx) =>
-          idx === lastSystemIdx ? { ...m, content: messageContent(m) + injection } : m
-        );
-      }
-      return [{ role: 'system', content: injection.replace(/^\n/, '') }, ...messages];
     }
 
-    function formatDirectivesInjection(contextDirectives) {
+    function formatDirectivesInjection(contextDirectives, budgetChars = DEFAULT_INJECTION_CHAR_BUDGET, format = 'compact') {
       if (!contextDirectives || typeof contextDirectives !== 'object') return '';
       const hard = Array.isArray(contextDirectives.hard) ? contextDirectives.hard : [];
       const soft = Array.isArray(contextDirectives.soft) ? contextDirectives.soft : [];
       const fyi  = Array.isArray(contextDirectives.fyi)  ? contextDirectives.fyi  : [];
       if (!hard.length && !soft.length && !fyi.length) return '';
-      const hardBlock = renderDirectiveSection('HARD', hard, DIRECTIVE_HARD_BUDGET);
-      const softBlock = renderDirectiveSection('SOFT', soft, DIRECTIVE_SOFT_BUDGET);
-      const fyiBudget = Math.max(0, Math.min(
-        DIRECTIVE_FYI_BUDGET,
-        DEEP_INJECTION_CHAR_BUDGET - hardBlock.length - softBlock.length - 20
-      ));
-      const fyiBlock = fyiBudget > 0 ? renderDirectiveSection('FYI', fyi, fyiBudget) : '';
-      return [hardBlock, softBlock, fyiBlock].filter(Boolean).join('\n\n');
+
+      const budget = Math.max(0, Math.floor(Number(budgetChars) || 0));
+      if (budget <= 80) return '';
+      const hardBudget = Math.max(80, Math.floor(budget * 0.72));
+      const softBudget = Math.max(0, Math.floor(budget * 0.22));
+      const fyiBudget = Math.max(0, budget - hardBudget - softBudget - 20);
+      const blocks = [
+        renderDirectiveSection('HARD', hard, hardBudget, format),
+        softBudget > 40 ? renderDirectiveSection('SOFT', soft, softBudget, format) : '',
+        fyiBudget > 40 ? renderDirectiveSection('FYI', fyi, fyiBudget, format) : '',
+      ].filter(Boolean);
+      return clipForPrompt(blocks.join(format === 'compact' ? '\n' : '\n\n'), budget);
     }
 
-    function renderDirectiveSection(label, items, budget) {
-      if (!Array.isArray(items) || !items.length) return `[${label}]\n- (none)`;
-      const lines = [`[${label}]`];
-      let used = lines[0].length + 1;
+    function renderDirectiveSection(label, items, budget, format = 'compact') {
+      if (!Array.isArray(items) || !items.length) {
+        return '';
+      }
+      const opening = format === 'xml'
+        ? `  <directives grade="${label.toLowerCase()}">`
+        : `[${label}]`;
+      const closing = format === 'xml' ? '  </directives>' : '';
+      const lines = [opening];
+      let used = opening.length + closing.length + 2;
       let truncated = 0;
+
       for (const item of items) {
         const text = String(item?.text || item || '').trim();
         if (!text) continue;
         const sources = Array.isArray(item?.sources) ? item.sources : [];
-        const tag = sources.length ? ` ⟨src: ${sources.join(', ')}⟩` : '';
-        const bullet = `- ${text}${tag}`;
+        const bullet = formatDirectiveItem(text, sources, format);
         if (used + bullet.length + 1 > budget) {
-          truncated += 1;
+          const remaining = Math.max(0, budget - used - closing.length - 2);
+          if (label === 'HARD' && remaining > 90) {
+            lines.push(clipForPrompt(bullet, remaining));
+            used = budget;
+          } else {
+            truncated += 1;
+          }
           continue;
         }
         lines.push(bullet);
         used += bullet.length + 1;
       }
+
       if (truncated > 0) {
         const warn = label === 'HARD'
-          ? `- [WARNING: ${truncated} HARD bullets dropped due to budget overflow]`
-          : `- [+${truncated} more ${label.toLowerCase()} bullets trimmed for budget]`;
-        lines.push(warn);
+          ? `WARNING: ${truncated} HARD bullets trimmed for budget`
+          : `+${truncated} more ${label.toLowerCase()} bullets trimmed`;
+        const warnLine = format === 'xml' ? `    <item>${escXml(warn)}</item>` : `- [${warn}]`;
+        if (used + warnLine.length + 1 <= budget) {
+          lines.push(warnLine);
+        }
       }
+      if (closing) lines.push(closing);
       return lines.join('\n');
+    }
+
+    function formatDirectiveItem(text, sources, format) {
+      const cleanSources = Array.isArray(sources) ? sources.filter(Boolean).map(String) : [];
+      if (format === 'xml') {
+        const attr = cleanSources.length ? ` sources="${escAttr(cleanSources.join(','))}"` : '';
+        return `    <item${attr}>${escXml(text)}</item>`;
+      }
+      const tag = cleanSources.length ? ` (src: ${cleanSources.join(', ')})` : '';
+      return `- ${text}${tag}`;
     }
 
     function countDirectives(contextDirectives) {
@@ -386,10 +581,10 @@
       };
     }
 
-    function formatDeepInjectionContext(contextDeep) {
+    function formatDeepInjectionContext(contextDeep, budgetChars = DEFAULT_INJECTION_CHAR_BUDGET, format = 'compact') {
       if (!contextDeep || typeof contextDeep !== 'object') return '';
       const used = [];
-      let remaining = DEEP_INJECTION_CHAR_BUDGET;
+      let remaining = Math.max(0, Math.floor(Number(budgetChars) || 0));
 
       for (const [name, label, preferredBudget] of DEEP_INJECTION_SECTIONS) {
         if (remaining <= 0) break;
@@ -399,15 +594,129 @@
         const budget = Math.max(0, Math.min(preferredBudget, remaining - header.length - 2));
         if (budget <= 0) continue;
         const clipped = clipForPrompt(raw, budget);
-        used.push(`${header}\n${clipped}`);
+        if (format === 'xml') {
+          used.push([
+            `  <section name="${escAttr(label)}">`,
+            ...clipped.split('\n').map(line => `    ${escXml(line)}`),
+            '  </section>',
+          ].join('\n'));
+        } else {
+          used.push(`${header}\n${clipped}`);
+        }
         remaining -= header.length + clipped.length + 2;
       }
 
       if (!used.length) {
-        return clipForPrompt(formatDeepContext(contextDeep), DEEP_INJECTION_CHAR_BUDGET);
+        const fallback = clipForPrompt(formatDeepContext(contextDeep), budgetChars);
+        if (format === 'xml') {
+          return [
+            '  <section name="Deep Ensemble">',
+            ...fallback.split('\n').map(line => `    ${escXml(line)}`),
+            '  </section>',
+          ].join('\n');
+        }
+        return fallback;
       }
 
       return used.join('\n\n');
+    }
+
+    function formatClassicInjectionContext(contextWorld, contextPlot, contextChar, contextDirector, budgetChars, format) {
+      const sections = [
+        ['Worldbuilding Agent', contextWorld || '(none)'],
+        ['Plot Agent', contextPlot || '(none)'],
+        ['Character Agent', contextChar || '(none)'],
+      ];
+      if (contextDirector) {
+        sections.push(['Director Agent', contextDirector]);
+      }
+      const sectionBudget = Math.max(120, Math.floor((Number(budgetChars) || 0) / Math.max(1, sections.length)));
+      if (format === 'xml') {
+        return sections.map(([label, text]) => [
+          `  <section name="${escAttr(label)}">`,
+          ...clipForPrompt(text, sectionBudget).split('\n').map(line => `    ${escXml(line)}`),
+          '  </section>',
+        ].join('\n')).join('\n');
+      }
+      return sections.map(([label, text]) => [
+        `[${label}]`,
+        clipForPrompt(text, Math.min(CLASSIC_SECTION_CHAR_BUDGET, sectionBudget)),
+      ].join('\n')).join(format === 'compact' ? '\n' : '\n\n');
+    }
+
+    function insertInjection(messages, injection, position = 'system-end') {
+      const cleanInjection = String(injection || '').replace(/^\n/, '');
+      if (position === 'before-last-user') {
+        const lastUserIdx = findLastIndex(messages, m => m?.role === 'user');
+        if (lastUserIdx >= 0) {
+          const result = [...messages];
+          result.splice(lastUserIdx, 0, { role: 'system', content: cleanInjection });
+          return result;
+        }
+      }
+
+      const lastSystemIdx = findLastIndex(messages, m => m?.role === 'system');
+      if (lastSystemIdx >= 0) {
+        return messages.map((m, idx) =>
+          idx === lastSystemIdx ? { ...m, content: messageContent(m) + '\n\n' + cleanInjection } : m
+        );
+      }
+      return [{ role: 'system', content: cleanInjection }, ...messages];
+    }
+
+    function computeInjectionBudget(messages, options = {}) {
+      const maxContextTokens = normalizeNonNegativeInt(options.maxContextTokens, DEFAULT_MAX_CONTEXT_TOKENS);
+      const reserveOutputTokens = normalizeNonNegativeInt(options.reserveOutputTokens, DEFAULT_RESERVE_OUTPUT_TOKENS);
+      const baseBudgetChars = normalizeIntInRange(options.injectionCharBudget, DEFAULT_INJECTION_CHAR_BUDGET, 500, 20000);
+      const estimatedPromptChars = estimateMessagesChars(messages);
+      const estimatedPromptTokens = estimateTokensFromChars(estimatedPromptChars);
+      let estimatedRemainingTokens = null;
+      let budgetChars = baseBudgetChars;
+
+      if (maxContextTokens > 0) {
+        estimatedRemainingTokens = Math.max(0, maxContextTokens - reserveOutputTokens - estimatedPromptTokens);
+        budgetChars = Math.min(baseBudgetChars, Math.max(0, Math.floor(estimatedRemainingTokens * ESTIMATED_CHARS_PER_TOKEN)));
+      }
+
+      return {
+        max_context_tokens: maxContextTokens,
+        reserve_output_tokens: reserveOutputTokens,
+        base_budget_chars: baseBudgetChars,
+        budget_chars: budgetChars,
+        estimated_prompt_chars: estimatedPromptChars,
+        estimated_prompt_tokens: estimatedPromptTokens,
+        estimated_remaining_tokens: estimatedRemainingTokens,
+      };
+    }
+
+    function estimateMessagesChars(messages) {
+      if (!Array.isArray(messages)) return 0;
+      return messages.reduce((sum, message) => {
+        const role = String(message?.role || '');
+        const content = messageContent(message);
+        return sum + role.length + content.length + 12;
+      }, 0);
+    }
+
+    function estimateTokensFromChars(chars) {
+      const value = Number(chars) || 0;
+      return Math.ceil(value / ESTIMATED_CHARS_PER_TOKEN);
+    }
+
+    function indentXmlBlock(value, depth) {
+      const prefix = '  '.repeat(Math.max(0, depth));
+      return String(value || '').split('\n').map(line => `${prefix}${line}`).join('\n');
+    }
+
+    function escXml(str) {
+      return String(str || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+    }
+
+    function escAttr(str) {
+      return escXml(str).replace(/"/g, '&quot;');
     }
 
     function clipForPrompt(value, maxChars) {
@@ -523,7 +832,7 @@
       const agents = status?.agents || fallbackAgents(cfg);
       const activeAgents = agents.filter(agent => agent.active !== false);
       const lastRun = data.lastRun || null;
-      const bypass = data.bypass || { mainModelOnly: true, bypassHypaMemory: true, bypassTranslate: true, bypassLbProcess: true };
+      const bypass = data.bypass || defaultPluginBehaviorSettings();
       const configBackup = data.configBackup || { exists: false, savedAt: '' };
 
       const v = (key, fallback = '') => {
@@ -531,6 +840,7 @@
         return (val !== undefined && val !== null) ? String(val) : fallback;
       };
       const pipelineMode = publicCfg.pipeline_mode || v('pipeline_mode', 'classic');
+      const analysisLanguage = bypass.analysisLanguage || publicCfg.analysis_language || v('analysis_language', 'auto');
 
       const field = (id, label, type = 'text', placeholder = '') => `
         <div class="field">
@@ -542,6 +852,13 @@
         <div class="field">
           <label for="${id}">${label}</label>
           <textarea id="${id}" class="${escHtml(className)}" spellcheck="false" placeholder="${escHtml(placeholder)}">${escHtml(fieldValue(cfg, id))}</textarea>
+        </div>`;
+
+      const optionSelected = (value, selected) => String(value) === String(selected) ? 'selected' : '';
+      const pluginNumberField = (id, label, value, placeholder = '') => `
+        <div class="field">
+          <label for="${id}">${label}</label>
+          <input id="${id}" type="number" min="0" value="${escHtml(value ?? '')}" placeholder="${escHtml(placeholder)}">
         </div>`;
 
       const promptHelp = `
@@ -687,7 +1004,7 @@ button.ghost{background:#15171b;color:#a8b0bd}
 <div class="wrap">
   <div class="top">
     <div>
-      <h1>MultiAgent RP Full판 <span class="summary-note">v2.2.5</span></h1>
+      <h1>MultiAgent RP Full판 <span class="summary-note">v${PLUGIN_VERSION}</span></h1>
       <p class="subtitle">RisuAI 메인 모델 호출 직전에 Full 사이드카 분석을 끼워 넣어 system 프롬프트에 주입합니다.</p>
     </div>
     <div class="header-actions">
@@ -749,6 +1066,12 @@ button.ghost{background:#15171b;color:#a8b0bd}
           <div class="k">서버 버전</div><div class="v">${escHtml(status?.version || '-')}</div>
           <div class="k">사이드카</div><div class="v">${escHtml(serverUrl)}</div>
           <div class="k">파이프라인</div><div class="v">${escHtml(pipelineMode)}</div>
+          <div class="k">분석 언어</div><div class="v">${escHtml(analysisLanguage)}</div>
+          <div class="k">Strict</div><div class="v">${bypass.strictMode ? '켜짐' : '꺼짐'}</div>
+          <div class="k">주입 위치</div><div class="v">${escHtml(bypass.injectionPosition || 'system-end')}</div>
+          <div class="k">주입 포맷</div><div class="v">${escHtml(bypass.injectionFormat || 'compact')}</div>
+          <div class="k">컨텍스트 캡</div><div class="v">${bypass.maxContextTokens ? `${escHtml(bypass.maxContextTokens)} tokens` : '꺼짐'}</div>
+          <div class="k">출력 예약</div><div class="v">${escHtml(bypass.reserveOutputTokens ?? DEFAULT_RESERVE_OUTPUT_TOKENS)} tokens</div>
           <div class="k">Provider</div><div class="v">${escHtml(publicCfg.default_provider || v('default_provider', 'openai'))}</div>
           <div class="k">기본 모델</div><div class="v">${escHtml(publicCfg.default_model || v('default_model', 'gpt-4o-mini'))}</div>
           <div class="k">기본 URL</div><div class="v">${escHtml(publicCfg.default_base_url || v('default_base_url', 'https://api.openai.com/v1'))}</div>
@@ -845,6 +1168,51 @@ button.ghost{background:#15171b;color:#a8b0bd}
           <input id="request_timeout" type="number" min="10" max="3000" value="${escHtml(v('request_timeout', '60'))}">
         </div>
       </div>
+      <div class="row2">
+        <div class="field">
+          <label for="analysis_language">분석 언어</label>
+          <select id="analysis_language">
+            <option value="auto" ${optionSelected('auto', analysisLanguage)}>auto — 모델/맥락에 맡김</option>
+            <option value="ko" ${optionSelected('ko', analysisLanguage)}>ko — 한국어 지시문</option>
+            <option value="en" ${optionSelected('en', analysisLanguage)}>en — English directives</option>
+            <option value="ja" ${optionSelected('ja', analysisLanguage)}>ja — 日本語 directives</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="injection_format">주입 포맷</label>
+          <select id="injection_format">
+            <option value="compact" ${optionSelected('compact', bypass.injectionFormat)}>compact — 토큰 절약형</option>
+            <option value="classic" ${optionSelected('classic', bypass.injectionFormat)}>classic — 읽기 쉬운 블록</option>
+            <option value="xml" ${optionSelected('xml', bypass.injectionFormat)}>xml — 구조 강조</option>
+          </select>
+        </div>
+      </div>
+      <div class="row2">
+        <div class="field">
+          <label for="injection_position">주입 위치</label>
+          <select id="injection_position">
+            <option value="system-end" ${optionSelected('system-end', bypass.injectionPosition)}>system-end — 마지막 system에 추가</option>
+            <option value="before-last-user" ${optionSelected('before-last-user', bypass.injectionPosition)}>before-last-user — 마지막 user 직전</option>
+          </select>
+        </div>
+        <label>
+          <input id="strict_mode" type="checkbox" ${checkedAttr(bypass.strictMode)}>
+          Strict mode
+        </label>
+      </div>
+      <div class="example-url">Strict mode는 분석 서버나 에이전트 하나라도 실패하면 채팅 요청을 막습니다. 평소에는 꺼두면 부분 성공 결과만 주입하고 원본 요청은 계속 진행합니다.</div>
+      <div class="row2">
+        ${pluginNumberField('max_context_tokens', '최대 컨텍스트 토큰', bypass.maxContextTokens ?? DEFAULT_MAX_CONTEXT_TOKENS, '0 = 자동 제한 끔')}
+        ${pluginNumberField('reserve_output_tokens', '출력 예약 토큰', bypass.reserveOutputTokens ?? DEFAULT_RESERVE_OUTPUT_TOKENS, '1024')}
+      </div>
+      <div class="row2">
+        ${pluginNumberField('injection_char_budget', '주입 문자 상한', bypass.injectionCharBudget ?? DEFAULT_INJECTION_CHAR_BUDGET, '6000')}
+        <div class="field">
+          <label>예산 방식</label>
+          <input type="text" value="HARD 우선 압축, 남는 예산만 SOFT/FYI" readonly>
+        </div>
+      </div>
+      <div class="example-url">최대 컨텍스트 토큰을 설정하면 현재 system/history/user 입력을 먼저 추정하고, 출력 예약 토큰을 뺀 뒤 남는 만큼만 MultiAgent 지시문을 주입합니다.</div>
       <label>
         <input id="debug_mode" type="checkbox" ${cfg.debug_mode ? 'checked' : ''}>
         디버그 모드
@@ -886,6 +1254,9 @@ button.ghost{background:#15171b;color:#a8b0bd}
         <li>Vercel AI Gateway를 쓸 때는 기본 LLM 설정의 caching/ZDR 체크박스로 providerOptions.gateway JSON을 만들 수 있고, 아래 JSON 블럭을 직접 수정할 수도 있습니다.</li>
         <li>LLM 인증 테스트는 생성 호출 없이 provider별 인증/모델 조회 경로만 확인합니다. 실제 분석은 토큰을 사용합니다.</li>
         <li>분석 실패 시에도 채팅은 막히지 않습니다. 원본 프롬프트가 그대로 메인 모델에 전달됩니다.</li>
+        <li>Strict mode를 켜면 분석 서버 또는 에이전트 실패 시 채팅 요청을 막습니다. 실험 중에는 꺼두는 것을 권장합니다.</li>
+        <li>최대 컨텍스트 토큰을 설정하면 출력 예약 토큰을 먼저 남기고, 남은 예산 안에서 HARD 지시문을 우선 주입합니다.</li>
+        <li>주입 포맷은 compact가 기본입니다. xml/classic은 디버깅에는 읽기 쉽지만 입력 토큰이 더 커질 수 있습니다.</li>
         <li>디버그 모드를 켜면 최근 분석 탭에서 각 에이전트 출력을 펼쳐 볼 수 있습니다.</li>
         <li>메인 모델 전용 모드가 기본으로 켜져 있어 submodel, memory, emotion, otherAx, translate 호출은 분석 파이프라인을 우회합니다.</li>
         <li>HypaMemory/HypaV3의 memory request mode는 별도 우회 옵션이 기본으로 켜져 있습니다.</li>
@@ -1099,6 +1470,9 @@ button.ghost{background:#15171b;color:#a8b0bd}
       if (lastRun?.status === 'running') {
         return '<span class="badge">실행 중</span>';
       }
+      if (lastRun?.status === 'partial') {
+        return '<span class="badge warn">부분 성공</span>';
+      }
       return `<span class="badge ${lastRun?.success ? 'ok' : 'err'}">${lastRun?.success ? '성공' : '실패'}</span>`;
     }
 
@@ -1170,7 +1544,10 @@ button.ghost{background:#15171b;color:#a8b0bd}
             <div class="kv">
               <div class="k">현재 입력</div><div class="v">${escHtml(lastRun.input_chars ?? '-')}자</div>
               <div class="k">시스템</div><div class="v">${escHtml(lastRun.system_chars ?? '-')}자</div>
-              <div class="k">히스토리</div><div class="v">${escHtml(lastRun.history_messages ?? '-')}개 메시지</div>
+              <div class="k">히스토리</div><div class="v">${escHtml(lastRun.history_messages ?? '-')}개 메시지 · ${escHtml(lastRun.history_chars ?? '-')}자</div>
+              <div class="k">원본 프롬프트</div><div class="v">${escHtml(lastRun.estimated_prompt_tokens ?? '-')} tokens 추정</div>
+              <div class="k">주입</div><div class="v">${escHtml(lastRun.injection_chars ?? '-')}자 · ${escHtml(lastRun.injection_source || '-')}</div>
+              <div class="k">예상 입력</div><div class="v">${escHtml(lastRun.estimated_input_tokens_with_injection ?? '-')} tokens</div>
               <div class="k">세계관</div><div class="v">${escHtml(lastRun.world_chars ?? '-')}자</div>
               <div class="k">플롯</div><div class="v">${escHtml(lastRun.plot_chars ?? '-')}자</div>
               <div class="k">캐릭터</div><div class="v">${escHtml(lastRun.char_chars ?? '-')}자</div>
@@ -1179,7 +1556,9 @@ button.ghost{background:#15171b;color:#a8b0bd}
             </div>
           </div>
         </div>
-        ${isDeepRun ? deepRunPanel(roundSummary, lastRun.agent_timings_ms || {}) : timingsPanel(lastRun.agent_timings_ms || {})}
+        ${isDeepRun ? deepRunPanel(roundSummary, lastRun.agent_timings_ms || {}) : timingsPanel(lastRun.agent_timings_ms || {}, lastRun.pipeline_mode || 'classic')}
+        ${tokenBudgetPanel(lastRun)}
+        ${errorsPanel(lastRun.errors)}
         ${debug ? `
           <div class="card">
             <h2>디버그 컨텍스트</h2>
@@ -1217,6 +1596,42 @@ button.ghost{background:#15171b;color:#a8b0bd}
           </summary>
           <pre class="debug-block">${escHtml(text)}</pre>
         </details>`;
+    }
+
+    function tokenBudgetPanel(lastRun) {
+      if (!lastRun) return '';
+      const cap = Number(lastRun.max_context_tokens || 0);
+      const remaining = lastRun.estimated_remaining_tokens;
+      const criticalPath = estimateCriticalPathMs(lastRun.pipeline_mode, lastRun.agent_timings_ms || {});
+      return `
+        <div class="card">
+          <h2>토큰 예산 / 지연</h2>
+          <div class="kv">
+            <div class="k">컨텍스트 캡</div><div class="v">${cap > 0 ? `${escHtml(cap)} tokens` : '꺼짐'}</div>
+            <div class="k">출력 예약</div><div class="v">${escHtml(lastRun.reserve_output_tokens ?? '-')} tokens</div>
+            <div class="k">주입 상한</div><div class="v">${escHtml(lastRun.base_budget_chars ?? '-')}자 → 실제 ${escHtml(lastRun.budget_chars ?? '-')}자</div>
+            <div class="k">남은 예산</div><div class="v">${remaining === null || remaining === undefined ? '캡 꺼짐' : `${escHtml(remaining)} tokens 추정`}</div>
+            <div class="k">주입 위치</div><div class="v">${escHtml(lastRun.injection_position || '-')}</div>
+            <div class="k">주입 포맷</div><div class="v">${escHtml(lastRun.injection_format || '-')}</div>
+            <div class="k">임계 지연</div><div class="v">${escHtml(formatDuration(criticalPath))}</div>
+            <div class="k">LLM 합계</div><div class="v">${escHtml(formatDuration(totalTimingMs(lastRun.agent_timings_ms || {})))}</div>
+          </div>
+          ${lastRun.injection_skipped ? `<div class="example-url">주입 생략: ${escHtml(lastRun.injection_reason || 'no injection')}</div>` : ''}
+        </div>`;
+    }
+
+    function errorsPanel(errors) {
+      if (!errors || typeof errors !== 'object' || !Object.keys(errors).length) return '';
+      return `
+        <div class="card">
+          <h2>에이전트 실패</h2>
+          <div class="example-url">Lenient 모드에서는 실패한 에이전트만 제외하고 남은 분석 결과를 계속 주입합니다.</div>
+          <div class="kv">
+            ${Object.entries(errors).map(([name, error]) => `
+              <div class="k">${escHtml(name)}</div><div class="v error-text">${escHtml(error)}</div>
+            `).join('')}
+          </div>
+        </div>`;
     }
 
     function formatAnalyzeRequest(request) {
@@ -1330,7 +1745,8 @@ button.ghost{background:#15171b;color:#a8b0bd}
     }
 
     function deepRunPanel(roundSummary, timings) {
-      const totalMs = Object.values(timings || {}).reduce((sum, value) => sum + (Number(value) || 0), 0);
+      const totalMs = totalTimingMs(timings);
+      const criticalPathMs = estimateCriticalPathMs('deep-ensemble', timings);
       return `
         <div class="card">
           <h2>Deep Ensemble 실행 상세</h2>
@@ -1338,6 +1754,7 @@ button.ghost{background:#15171b;color:#a8b0bd}
           <div class="kv">
             <div class="k">호출 합계</div><div class="v">${escHtml(roundSummary.flatMap(r => r.agents).filter(a => a.ok).length)} / 9</div>
             <div class="k">누적 LLM 시간</div><div class="v">${escHtml(formatDuration(totalMs))}</div>
+            <div class="k">임계 지연</div><div class="v">${escHtml(formatDuration(criticalPathMs))}</div>
           </div>
           ${roundSummary.map(round => `
             <details open>
@@ -1358,18 +1775,34 @@ button.ghost{background:#15171b;color:#a8b0bd}
         </div>`;
     }
 
-    function timingsPanel(timings) {
+    function timingsPanel(timings, pipelineMode = 'classic') {
       const entries = Object.entries(timings || {});
       if (!entries.length) return '';
       return `
         <div class="card">
           <h2>에이전트 타이밍</h2>
           <div class="kv">
+            <div class="k">임계 지연</div><div class="v">${escHtml(formatDuration(estimateCriticalPathMs(pipelineMode, timings)))}</div>
             ${entries.map(([name, ms]) => `
               <div class="k">${escHtml(name)}</div><div class="v">${escHtml(formatDuration(ms))}</div>
             `).join('')}
           </div>
         </div>`;
+    }
+
+    function totalTimingMs(timings) {
+      return Object.values(timings || {}).reduce((sum, value) => sum + (Number(value) || 0), 0);
+    }
+
+    function estimateCriticalPathMs(pipelineMode, timings) {
+      const safe = name => Number(timings?.[name] || 0);
+      if (pipelineMode === 'deep-ensemble') {
+        return deepRounds().reduce((sum, round) => sum + Math.max(...round.map(safe)), 0);
+      }
+      if (pipelineMode === 'ensemble-director') {
+        return Math.max(safe('worldbuilding'), safe('plot'), safe('character')) + safe('director');
+      }
+      return totalTimingMs(timings);
     }
 
     function setupHandlers(data, serverUrl) {
@@ -1472,6 +1905,7 @@ button.ghost{background:#15171b;color:#a8b0bd}
         context_window:         parseInt(getInputValue('context_window')) || 10,
         request_timeout:        parseFloat(getInputValue('request_timeout')) || 60,
         debug_mode:             document.getElementById('debug_mode')?.checked || false,
+        analysis_language:      normalizeChoice(getInputValue('analysis_language'), ['auto', 'ko', 'en', 'ja'], 'auto'),
       };
       for (const name of deepAgentNames()) {
         collectAgentConfig(next, name, secret);
@@ -1518,6 +1952,13 @@ button.ghost{background:#15171b;color:#a8b0bd}
         bypassHypaMemory: getCheckboxValue('bypass_hypamemory'),
         bypassTranslate: getCheckboxValue('bypass_translate'),
         bypassLbProcess: getCheckboxValue('bypass_lb_process'),
+        strictMode: getCheckboxValue('strict_mode'),
+        injectionPosition: normalizeChoice(getInputValue('injection_position'), ['system-end', 'before-last-user'], 'system-end'),
+        injectionFormat: normalizeChoice(getInputValue('injection_format'), ['compact', 'classic', 'xml'], 'compact'),
+        analysisLanguage: normalizeChoice(getInputValue('analysis_language'), ['auto', 'ko', 'en', 'ja'], 'auto'),
+        maxContextTokens: normalizeNonNegativeInt(getInputValue('max_context_tokens'), DEFAULT_MAX_CONTEXT_TOKENS),
+        reserveOutputTokens: normalizeNonNegativeInt(getInputValue('reserve_output_tokens'), DEFAULT_RESERVE_OUTPUT_TOKENS),
+        injectionCharBudget: normalizeIntInRange(getInputValue('injection_char_budget'), DEFAULT_INJECTION_CHAR_BUDGET, 500, 20000),
       };
     }
 
@@ -1526,6 +1967,13 @@ button.ghost{background:#15171b;color:#a8b0bd}
       await Risuai.setArgument('bypass_hypamemory', settings.bypassHypaMemory ? '1' : '0');
       await Risuai.setArgument('bypass_translate', settings.bypassTranslate ? '1' : '0');
       await Risuai.setArgument('bypass_lb_process', settings.bypassLbProcess ? '1' : '0');
+      await Risuai.setArgument('strict_mode', settings.strictMode ? '1' : '0');
+      await Risuai.setArgument('injection_position', settings.injectionPosition || 'system-end');
+      await Risuai.setArgument('injection_format', settings.injectionFormat || 'compact');
+      await Risuai.setArgument('analysis_language', settings.analysisLanguage || 'auto');
+      await Risuai.setArgument('max_context_tokens', String(settings.maxContextTokens ?? DEFAULT_MAX_CONTEXT_TOKENS));
+      await Risuai.setArgument('reserve_output_tokens', String(settings.reserveOutputTokens ?? DEFAULT_RESERVE_OUTPUT_TOKENS));
+      await Risuai.setArgument('injection_char_budget', String(settings.injectionCharBudget ?? DEFAULT_INJECTION_CHAR_BUDGET));
     }
 
     async function loadPluginSettings() {
@@ -1547,6 +1995,13 @@ button.ghost{background:#15171b;color:#a8b0bd}
         bypassHypaMemory: Boolean(bypass.bypassHypaMemory),
         bypassTranslate: Boolean(bypass.bypassTranslate),
         bypassLbProcess: Boolean(bypass.bypassLbProcess),
+        strictMode: Boolean(bypass.strictMode),
+        injectionPosition: bypass.injectionPosition || 'system-end',
+        injectionFormat: bypass.injectionFormat || 'compact',
+        analysisLanguage: bypass.analysisLanguage || 'auto',
+        maxContextTokens: Number(bypass.maxContextTokens ?? DEFAULT_MAX_CONTEXT_TOKENS),
+        reserveOutputTokens: Number(bypass.reserveOutputTokens ?? DEFAULT_RESERVE_OUTPUT_TOKENS),
+        injectionCharBudget: Number(bypass.injectionCharBudget ?? DEFAULT_INJECTION_CHAR_BUDGET),
         savedAt: new Date().toISOString(),
       });
     }
@@ -1879,6 +2334,55 @@ button.ghost{background:#15171b;color:#a8b0bd}
       return !['0', 'false', 'off', 'no', 'disabled'].includes(normalized);
     }
 
+    function normalizeChoice(value, allowed, fallback) {
+      const normalized = String(value || '').trim().toLowerCase();
+      return allowed.includes(normalized) ? normalized : fallback;
+    }
+
+    function normalizeNonNegativeInt(value, fallback) {
+      return normalizeIntInRange(value, fallback, 0, 1_000_000);
+    }
+
+    function normalizeIntInRange(value, fallback, min, max) {
+      if (value === undefined || value === null || String(value).trim() === '') {
+        return fallback;
+      }
+      const parsed = parseInt(String(value), 10);
+      if (!Number.isFinite(parsed)) return fallback;
+      return Math.min(max, Math.max(min, parsed));
+    }
+
+    function defaultPluginBehaviorSettings() {
+      return {
+        mainModelOnly: true,
+        bypassHypaMemory: true,
+        bypassTranslate: true,
+        bypassLbProcess: true,
+        strictMode: false,
+        injectionPosition: 'system-end',
+        injectionFormat: 'compact',
+        analysisLanguage: 'auto',
+        maxContextTokens: DEFAULT_MAX_CONTEXT_TOKENS,
+        reserveOutputTokens: DEFAULT_RESERVE_OUTPUT_TOKENS,
+        injectionCharBudget: DEFAULT_INJECTION_CHAR_BUDGET,
+      };
+    }
+
+    function showToastSafe(text, type = 'error') {
+      try {
+        if (typeof Risuai.showToast === 'function') {
+          Risuai.showToast(text, type);
+        }
+      } catch (_) {}
+    }
+
+    function errorMessage(err) {
+      if (err && typeof err === 'object' && 'message' in err) {
+        return String(err.message || err);
+      }
+      return String(err || 'unknown error');
+    }
+
     function checkedAttr(value) {
       return value ? 'checked' : '';
     }
@@ -2079,7 +2583,7 @@ button.ghost{background:#15171b;color:#a8b0bd}
       return `${(ms / 1000).toFixed(1)}초`;
     }
 
-    console.log('MultiAgent RP Full판 플러그인 v2.2.5 (beforeRequest 훅) 로드됨');
+    console.log(`MultiAgent RP Full판 플러그인 v${PLUGIN_VERSION} (beforeRequest 훅) 로드됨`);
 
   } catch (err) {
     console.log(`MultiAgent Full판 init error: ${err.message}`);
