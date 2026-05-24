@@ -390,7 +390,6 @@
           role: 'user',
           content:
             `${sourceBlock('Worldbuilding Agent Notes', contextWorld)}\n\n` +
-            `${sourceBlock('Plot Agent Notes', contextPlot || '')}\n\n` +
             `${sourceBlock('Recent Conversation', history)}\n\n` +
             `${sourceBlock('Current User Input', userInput)}\n\n` +
             'Write the plot direction notes.',
