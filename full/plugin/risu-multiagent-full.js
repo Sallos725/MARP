@@ -1,7 +1,7 @@
 //@name risu_multiagent_full
 //@display-name MultiAgent RP — Full판
 //@api 3.0
-//@version 0.8.0
+//@version 0.8.1
 //@arg server_url string Full판 서버 URL (e.g. http://localhost:6009 or https://example.com/multi-agent)
 //@arg main_model_only string Run MultiAgent only for RisuAI main model requests; bypass auxiliary/submodel/memory/emotion/translation requests (default: 1)
 //@arg bypass_hypamemory string Skip MultiAgent analysis for RisuAI HypaMemory/memory requests (default: 1)
@@ -27,7 +27,7 @@
 
 (async () => {
   try {
-    const PLUGIN_VERSION = '0.8.0';
+    const PLUGIN_VERSION = '0.8.1';
     const PROMPT_PACK_VERSION = 1;
     const PLUGIN_SETTINGS_KEY = 'risu_multiagent_full_plugin_settings_v1';
     const SIDECAR_CONFIG_BACKUP_KEY = 'risu_multiagent_full_sidecar_config_backup_v1';

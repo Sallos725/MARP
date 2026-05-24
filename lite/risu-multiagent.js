@@ -1,7 +1,7 @@
 //@name risu_multiagent
 //@display-name MultiAgent RP Pipeline
 //@api 3.0
-//@version 0.8.0
+//@version 0.8.1
 //@arg agent_provider string Analysis agent provider label. e.g. openai
 //@arg agent_base_url string Analysis agent API base URL. e.g. https://api.openai.com/v1, https://api.anthropic.com/v1, or Vertex AI OpenAI-compatible endpoint
 //@arg agent_api_key string Analysis agent API key
@@ -38,7 +38,7 @@
     const CONFIG_VAULT_VERSION = 1;
     const LAST_RUN_KEY = 'risu_multiagent_lite_last_run_v1';
     const LAST_RUN_VERSION = 1;
-    const PLUGIN_VERSION = '0.8.0';
+    const PLUGIN_VERSION = '0.8.1';
     const PROMPT_PACK_VERSION = 1;
 
     // ── 설정 로드 ─────────────────────────────────────────────────────────────
