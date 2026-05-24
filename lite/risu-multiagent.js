@@ -891,10 +891,12 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
       return `
         <div class="card">
           <h2>프롬프트 관리</h2>
-          <p>각 에이전트의 override 텍스트만 저장합니다. 기본값으로 되돌리기는 override 칸을 비워 내장 프롬프트를 다시 사용합니다.</p>
+          <p>각 에이전트의 override 텍스트만 저장합니다. export/import JSON으로 공유할 수 있고, 기본값으로 되돌리기는 override 칸을 비워 내장 프롬프트를 다시 사용합니다.</p>
           <div style="height:10px"></div>
           <div class="header-actions" style="justify-content:flex-start">
+            <input id="prompt-import-input" type="file" accept=".json,application/json" hidden>
             <button id="prompt-export-all-btn" type="button">프롬프트 전체 export</button>
+            <button id="prompt-import-all-btn" type="button" class="ghost">프롬프트 import</button>
             <button id="prompt-reset-all-btn" type="button" class="ghost">전체 기본값으로 되돌리기</button>
           </div>
         </div>
@@ -928,6 +930,7 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
             <div class="prompt-actions">
               <button type="button" class="ghost" data-prompt-reset="${name}">기본값으로 되돌리기</button>
               <button type="button" class="ghost" data-prompt-export="${name}">이 에이전트 프롬프트 export</button>
+              <button type="button" class="ghost" data-prompt-import="${name}">이 에이전트 프롬프트 import</button>
             </div>
             <div class="field">
               <label for="${name}_system_prompt">System Prompt Override</label>
@@ -988,6 +991,13 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
       });
       document.getElementById('prompt-export-all-btn')?.addEventListener('click', () => {
         exportLitePromptPack();
+      });
+      document.getElementById('prompt-import-all-btn')?.addEventListener('click', () => {
+        triggerLitePromptImport();
+      });
+      document.getElementById('prompt-import-input')?.addEventListener('change', handleLitePromptImport);
+      document.querySelectorAll('[data-prompt-import]').forEach(btn => {
+        btn.addEventListener('click', () => triggerLitePromptImport(btn.dataset.promptImport));
       });
       document.getElementById('prompt-reset-all-btn')?.addEventListener('click', () => {
         resetAllLitePromptOverrides();
@@ -1498,6 +1508,80 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
       liteAgentNames().forEach(resetLitePromptOverrides);
     }
 
+    let litePromptImportFilter = null;
+
+    function promptPackString(entry, keys) {
+      for (const key of keys) {
+        if (entry[key] !== undefined && entry[key] !== null) return String(entry[key]);
+      }
+      return '';
+    }
+
+    function normalizeLitePromptPack(raw) {
+      if (!raw || typeof raw !== 'object') throw new Error('JSON 객체가 아닙니다.');
+      const version = raw.risuMultiagentPromptPackVersion;
+      if (version != null && version !== PROMPT_PACK_VERSION) {
+        throw new Error(`지원하지 않는 pack 버전입니다: ${version}`);
+      }
+      const prompts = Array.isArray(raw.prompts) ? raw.prompts : [];
+      if (!prompts.length) throw new Error('prompts 배열이 비어 있습니다.');
+      return prompts;
+    }
+
+    function applyLitePromptPack(pack, filterName = null) {
+      const prompts = normalizeLitePromptPack(pack);
+      let applied = 0;
+      for (const entry of prompts) {
+        const name = entry?.name;
+        if (!name || !liteAgentNames().includes(name)) continue;
+        if (filterName && name !== filterName) continue;
+        if (entry.enabled !== undefined) setCheckboxValue(`${name}_enabled`, entry.enabled !== false);
+        setElementValue(`${name}_system_prompt`, promptPackString(entry, [
+          'system_prompt_override',
+          'systemPrompt',
+          'system_prompt',
+        ]));
+        setElementValue(`${name}_user_prompt_template`, promptPackString(entry, [
+          'user_prompt_template_override',
+          'userPromptTemplate',
+          'user_prompt_template',
+        ]));
+        applied += 1;
+      }
+      if (!applied) {
+        throw new Error(filterName
+          ? `${filterName} 에이전트 항목을 찾을 수 없습니다.`
+          : '적용할 에이전트 항목이 없습니다.');
+      }
+      return applied;
+    }
+
+    function triggerLitePromptImport(filterName = null) {
+      litePromptImportFilter = filterName;
+      document.getElementById('prompt-import-input')?.click();
+    }
+
+    async function handleLitePromptImport(event) {
+      const input = event?.target;
+      const file = input?.files?.[0];
+      const filterName = litePromptImportFilter;
+      litePromptImportFilter = null;
+      if (!file) return;
+      try {
+        const pack = JSON.parse(await file.text());
+        const count = applyLitePromptPack(pack, filterName);
+        const editionNote = pack.edition && pack.edition !== 'lite'
+          ? ` (${pack.edition} edition export)`
+          : '';
+        const scope = filterName ? `${liteDefaultPrompts()[filterName]?.label || filterName} ` : '';
+        showMsg(`${scope}프롬프트 ${count}건을 불러왔습니다${editionNote}. 저장하면 적용됩니다.`, true);
+      } catch (err) {
+        showMsg(`프롬프트 import 실패: ${err.message}`, false);
+      } finally {
+        if (input) input.value = '';
+      }
+    }
+
     function exportLitePromptPack(name = null) {
       const defaults = liteDefaultPrompts();
       const names = name ? [name] : liteAgentNames();
@@ -1560,6 +1644,11 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
 
     function getCheckboxValue(id) {
       return Boolean(document.getElementById(id)?.checked);
+    }
+
+    function setCheckboxValue(id, checked) {
+      const el = document.getElementById(id);
+      if (el && el.type === 'checkbox') el.checked = Boolean(checked);
     }
 
     function providerSelect(id, value) {
