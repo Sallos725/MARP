@@ -1,7 +1,7 @@
 //@name risu_multiagent_full
 //@display-name MultiAgent RP — Full판
 //@api 3.0
-//@version 2.0.9
+//@version 0.8.0
 //@arg server_url string Full판 서버 URL (e.g. http://localhost:6009 or https://example.com/multi-agent)
 //@arg main_model_only string Run MultiAgent only for RisuAI main model requests; bypass auxiliary/submodel/memory/emotion/translation requests (default: 1)
 //@arg bypass_hypamemory string Skip MultiAgent analysis for RisuAI HypaMemory/memory requests (default: 1)
@@ -27,6 +27,8 @@
 
 (async () => {
   try {
+    const PLUGIN_VERSION = '0.8.0';
+    const PROMPT_PACK_VERSION = 1;
     const PLUGIN_SETTINGS_KEY = 'risu_multiagent_full_plugin_settings_v1';
     const SIDECAR_CONFIG_BACKUP_KEY = 'risu_multiagent_full_sidecar_config_backup_v1';
     const STORAGE_VERSION = 1;
@@ -315,6 +317,7 @@
         lastRun: await loadLastRun(),
         bypass: await getBypassSettings(),
         configBackup: await getSidecarConfigBackupInfo(),
+        defaultPrompts: null,
         connected: false,
         statusError: '',
       };
@@ -344,6 +347,15 @@
         data.config = await loadSidecarConfigBackup(serverUrl) || {};
       }
 
+      try {
+        const promptsRes = await Risuai.nativeFetch(`${serverUrl}/prompts/defaults`, { method: 'GET' });
+        if (promptsRes.ok) {
+          data.defaultPrompts = await promptsRes.json();
+        }
+      } catch (_) {
+        data.defaultPrompts = null;
+      }
+
       return data;
     }
 
@@ -355,10 +367,16 @@
       const publicCfg = status?.config || {};
       const connected = data.connected;
       const ready = Boolean(status?.ready);
-      const agents = status?.agents || fallbackAgents(cfg);
+      const agents = (status?.agents || fallbackAgents(cfg)).filter(agent => ['worldbuilding', 'plot', 'character'].includes(agent.name));
+      const activeAgents = agents.filter(agent => agent.active !== false);
+      const readyValue = activeAgents.length ? (ready ? '실행 가능' : '설정 필요') : '모두 OFF';
+      const readySub = activeAgents.length
+        ? (ready ? `${activeAgents.length}개 활성 에이전트 준비 완료` : 'API Key 또는 모델 설정 확인 필요')
+        : '설정 탭에서 필요한 에이전트를 켜세요';
       const lastRun = data.lastRun || null;
       const bypass = data.bypass || { mainModelOnly: true, bypassHypaMemory: true, bypassTranslate: true, bypassLbProcess: true };
       const configBackup = data.configBackup || { exists: false, savedAt: '' };
+      const defaultPrompts = data.defaultPrompts || {};
 
       const v = (key, fallback = '') => {
         const val = cfg[key];
@@ -405,13 +423,27 @@
           </div>
         </div>`;
 
-      const agentSettings = (name, label, apiKeySet) => `
+      const agentSettings = (name, label, apiKeySet) => {
+        const defaultPrompt = defaultPrompts?.agents?.[name] || null;
+        const customSystem = Boolean(v(`${name}_system_prompt`));
+        const customUser = Boolean(v(`${name}_user_prompt_template`));
+        return `
         <details>
           <summary>
             <span>${label}</span>
-            <span class="summary-note">비워두면 기본값 사용</span>
+            <span class="summary-note">${customSystem || customUser ? '커스텀 프롬프트 적용 중' : '비워두면 기본값 사용'}</span>
           </summary>
           <div class="details-body">
+            <div class="agent-toggle">
+              <div>
+                <strong>에이전트 실행</strong>
+                <div class="check-desc">꺼두면 분석 파이프라인에서 이 에이전트 호출을 건너뜁니다.</div>
+              </div>
+              <label>
+                <input id="${name}_enabled" type="checkbox" ${checkedAttr(cfg[`${name}_enabled`] !== false)}>
+                ON
+              </label>
+            </div>
             ${providerSelect(`${name}_provider`, 'Provider', v(`${name}_provider`), true)}
             ${field(`${name}_base_url`, 'Endpoint Base URL', 'text', '기본값 사용')}
             <div class="example-url" data-example-for="${name}_base_url">예시 URL: ${escHtml(exampleChatUrl(v(`${name}_base_url`) || v('default_base_url', 'https://api.openai.com/v1')))}</div>
@@ -433,8 +465,23 @@
             </div>
             <div class="example-url">이 에이전트에만 적용할 Vercel providerOptions입니다. 비워두면 기본 LLM 설정의 추가 JSON을 상속합니다.</div>
             ${textareaField(`${name}_extra_body_json`, '추가 JSON body', '{"providerOptions":{"gateway":{"caching":"auto","zeroDataRetention":true}}}', 'extra-body-json')}
+            <div class="prompt-actions">
+              <button type="button" class="ghost" data-prompt-reset="${name}">기본값으로 되돌리기</button>
+              <button type="button" class="ghost" data-prompt-export="${name}">이 에이전트 프롬프트 export</button>
+            </div>
+            ${textareaField(`${name}_system_prompt`, 'System Prompt Override', '비워두면 내장 system prompt 사용', 'prompt-template')}
+            ${textareaField(`${name}_user_prompt_template`, 'User Prompt Template Override', '비워두면 내장 user prompt template 사용', 'prompt-template')}
+            ${defaultPrompt ? `
+              <details>
+                <summary><span>내장 기본 프롬프트 보기</span><span class="summary-note">rollback 기준</span></summary>
+                <div class="details-body">
+                  <div class="prompt-preview">[System]\n${escHtml(defaultPrompt.system_prompt || '')}\n\n[User]\n${escHtml(defaultPrompt.user_prompt_template || '')}</div>
+                </div>
+              </details>` : ''}
+            <div class="example-url">템플릿 토큰: {{user_input}}, {{chat_history}}, {{system_context}}, {{world_summary}}, {{char_summary}}, {{context_world}}, {{context_plot}}, {{context_char}}</div>
           </div>
         </details>`;
+      };
 
       return `<!DOCTYPE html><html><head><meta charset="utf-8">
 <style>
@@ -514,6 +561,11 @@ button:hover{background:#2a3039}
 button.primary{background:#2f6fed;border-color:#2f6fed;color:#fff}
 button.primary:hover{background:#275fce}
 button.ghost{background:#15171b;color:#a8b0bd}
+.agent-toggle{display:flex;align-items:center;justify-content:space-between;gap:10px;background:#15171b;border:1px solid #262a31;border-radius:8px;padding:10px 12px;margin-bottom:10px}
+.agent-toggle strong{font-size:.84rem}
+.prompt-actions{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0 10px}
+textarea.prompt-template{min-height:140px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.78rem}
+.prompt-preview{white-space:pre-wrap;overflow:auto;max-height:220px;background:#0f1115;border:1px solid #303640;border-radius:7px;padding:10px;color:#d9e1ec;font-size:.78rem;line-height:1.5}
 @media (max-width: 860px){
   .top{display:block}
   .header-actions{justify-content:flex-start;margin-top:12px}
@@ -524,7 +576,7 @@ button.ghost{background:#15171b;color:#a8b0bd}
 <div class="wrap">
   <div class="top">
     <div>
-      <h1>MultiAgent RP Full판</h1>
+      <h1>MultiAgent RP Full판 <span class="summary-note">v${PLUGIN_VERSION}</span></h1>
       <p class="subtitle">RisuAI 메인 모델 호출 직전에 분석 3개(세계관/플롯/캐릭터)를 끼워 넣어 system 프롬프트에 주입합니다.</p>
     </div>
     <div class="header-actions">
@@ -542,9 +594,14 @@ button.ghost{background:#15171b;color:#a8b0bd}
       <div class="metric-sub">${escHtml(serverUrl)}</div>
     </div>
     <div class="metric">
+      <div class="metric-label">버전</div>
+      <div class="metric-value">Plugin v${escHtml(PLUGIN_VERSION)}</div>
+      <div class="metric-sub">Sidecar v${escHtml(status?.version || '-')}</div>
+    </div>
+    <div class="metric">
       <div class="metric-label">분석 준비</div>
-      <div class="metric-value">${ready ? '실행 가능' : '설정 필요'}</div>
-      <div class="metric-sub">${ready ? '3개 분석 에이전트 준비 완료' : 'API Key 또는 모델 설정 확인 필요'}</div>
+      <div class="metric-value">${escHtml(readyValue)}</div>
+      <div class="metric-sub">${escHtml(readySub)}</div>
     </div>
     <div class="metric">
       <div class="metric-label">분석 모델</div>
@@ -584,6 +641,7 @@ button.ghost{background:#15171b;color:#a8b0bd}
         <h2>현재 구성</h2>
         <div class="kv">
           <div class="k">서버 버전</div><div class="v">${escHtml(status?.version || '-')}</div>
+          <div class="k">플러그인 버전</div><div class="v">v${escHtml(PLUGIN_VERSION)}</div>
           <div class="k">사이드카</div><div class="v">${escHtml(serverUrl)}</div>
           <div class="k">Provider</div><div class="v">${escHtml(publicCfg.default_provider || v('default_provider', 'openai'))}</div>
           <div class="k">기본 모델</div><div class="v">${escHtml(publicCfg.default_model || v('default_model', 'gpt-4o-mini'))}</div>
@@ -620,6 +678,16 @@ button.ghost{background:#15171b;color:#a8b0bd}
         <input id="server_url" type="text" value="${escHtml(serverUrl)}" placeholder="http://localhost:6009">
       </div>
       <div class="example-url">예시 URL: ${escHtml(normalizeUrl(serverUrl) + '/analyze')}</div>
+    </div>
+
+    <div class="card">
+      <h2>프롬프트 관리</h2>
+      <p>각 에이전트의 override 텍스트만 저장합니다. 기본값으로 되돌리기는 override 칸을 비워 내장 프롬프트를 다시 사용합니다.</p>
+      <div style="height:10px"></div>
+      <div class="header-actions" style="justify-content:flex-start">
+        <button id="prompt-export-all-btn" type="button">프롬프트 전체 export</button>
+        <button id="prompt-reset-all-btn" type="button" class="ghost">전체 기본값으로 되돌리기</button>
+      </div>
     </div>
 
     <div class="card">
@@ -852,13 +920,17 @@ button.ghost{background:#15171b;color:#a8b0bd}
 
     function agentCard(agent) {
       const readyClass = agent.ready ? 'ok' : 'err';
+      const active = agent.active !== false;
+      const badgeClass = !active ? 'neutral' : readyClass;
+      const badgeText = !active ? '실행 제외' : (agent.ready ? '준비됨' : '미완료');
       return `
         <div class="card">
           <div class="agent-head">
             <div class="agent-name">${escHtml(agent.label)}</div>
-            <span class="badge ${readyClass}">${agent.ready ? '준비됨' : '미완료'}</span>
+            <span class="badge ${badgeClass}">${badgeText}</span>
           </div>
           <div class="kv">
+            <div class="k">실행</div><div class="v">${agent.enabled === false ? 'OFF' : 'ON'}</div>
             <div class="k">Provider</div><div class="v">${escHtml(agent.provider || '-')}</div>
             <div class="k">Endpoint</div><div class="v">${escHtml(agent.base_url || '-')}</div>
             <div class="k">예시 URL</div><div class="v">${escHtml(exampleChatUrl(agent.base_url))}</div>
@@ -867,11 +939,11 @@ button.ghost{background:#15171b;color:#a8b0bd}
             <div class="k">Temp</div><div class="v">${escHtml(agent.temperature ?? '-')}</div>
             <div class="k">Max</div><div class="v">${escHtml(agent.max_tokens ?? '제한 없음')}</div>
             <div class="k">추가 JSON</div><div class="v">${agent.extra_body_json_set ? (agent.extra_body_json_source === 'override' ? '개별 적용' : '기본값 상속') : '없음'}</div>
+            <div class="k">프롬프트</div><div class="v">${agent.system_prompt_custom || agent.user_prompt_template_custom ? '커스텀' : '내장'}</div>
             <div class="k">상속</div><div class="v">${sourceText(agent)}</div>
           </div>
         </div>`;
     }
-
     function fallbackAgents(cfg) {
       const labels = {
         worldbuilding: '세계관 에이전트',
@@ -888,6 +960,8 @@ button.ghost{background:#15171b;color:#a8b0bd}
         return {
           name,
           label,
+          enabled: cfg[`${name}_enabled`] !== false,
+          active: cfg[`${name}_enabled`] !== false,
           provider: cfg[`${name}_provider`] || cfg.default_provider || 'openai',
           base_url: baseUrl,
           model,
@@ -902,6 +976,8 @@ button.ghost{background:#15171b;color:#a8b0bd}
           extra_body_json_source: cfg[`${name}_extra_body_json`] ? 'override' : 'default',
           extra_body_json_set: Boolean(extraBodyJson),
           api_key_set: Boolean(apiKey),
+          system_prompt_custom: Boolean(cfg[`${name}_system_prompt`]),
+          user_prompt_template_custom: Boolean(cfg[`${name}_user_prompt_template`]),
           ready: Boolean(baseUrl && apiKey && model),
         };
       });
@@ -1065,6 +1141,26 @@ button.ghost{background:#15171b;color:#a8b0bd}
       document.getElementById('llm-test-btn')?.addEventListener('click', () => testLlm(serverUrl));
       document.getElementById('all-test-btn')?.addEventListener('click', () => testAll(serverUrl));
 
+      const defaultPrompts = data.defaultPrompts || {};
+      document.getElementById('prompt-export-all-btn')?.addEventListener('click', () => {
+        exportPromptPack(defaultPrompts, data.status?.version || '');
+      });
+      document.getElementById('prompt-reset-all-btn')?.addEventListener('click', () => {
+        resetAllPromptOverrides();
+        showMsg('모든 프롬프트 override를 비웠습니다. 저장하면 내장 기본값으로 rollback됩니다.', true);
+      });
+      document.querySelectorAll('[data-prompt-reset]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          resetAgentPromptOverrides(btn.dataset.promptReset);
+          showMsg(`${promptAgentLabel(btn.dataset.promptReset)} override를 비웠습니다. 저장하면 rollback됩니다.`, true);
+        });
+      });
+      document.querySelectorAll('[data-prompt-export]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          exportAgentPrompt(btn.dataset.promptExport, defaultPrompts, data.status?.version || '');
+        });
+      });
+
       document.getElementById('save-btn')?.addEventListener('click', async () => {
         const currentServerUrl = normalizeUrl(getInputValue('server_url') || serverUrl);
         try {
@@ -1105,6 +1201,9 @@ button.ghost{background:#15171b;color:#a8b0bd}
         default_temperature:    requiredFloat('default_temperature', 0.7),
         default_max_tokens:     optionalInt('default_max_tokens'),
         default_extra_body_json: normalizeExtraBodyJson(getInputValue('default_extra_body_json')),
+        worldbuilding_enabled: getCheckboxValue('worldbuilding_enabled'),
+        worldbuilding_system_prompt: getRawElementValue('worldbuilding_system_prompt'),
+        worldbuilding_user_prompt_template: getRawElementValue('worldbuilding_user_prompt_template'),
         worldbuilding_provider: getProviderValue('worldbuilding_provider', ''),
         worldbuilding_base_url: getInputValue('worldbuilding_base_url'),
         worldbuilding_api_key:  secret('worldbuilding_api_key'),
@@ -1112,6 +1211,9 @@ button.ghost{background:#15171b;color:#a8b0bd}
         worldbuilding_temperature: optionalFloat('worldbuilding_temperature'),
         worldbuilding_max_tokens:  optionalInt('worldbuilding_max_tokens'),
         worldbuilding_extra_body_json: normalizeExtraBodyJson(getInputValue('worldbuilding_extra_body_json')),
+        plot_enabled: getCheckboxValue('plot_enabled'),
+        plot_system_prompt: getRawElementValue('plot_system_prompt'),
+        plot_user_prompt_template: getRawElementValue('plot_user_prompt_template'),
         plot_provider:          getProviderValue('plot_provider', ''),
         plot_base_url:          getInputValue('plot_base_url'),
         plot_api_key:           secret('plot_api_key'),
@@ -1119,6 +1221,9 @@ button.ghost{background:#15171b;color:#a8b0bd}
         plot_temperature:       optionalFloat('plot_temperature'),
         plot_max_tokens:        optionalInt('plot_max_tokens'),
         plot_extra_body_json:    normalizeExtraBodyJson(getInputValue('plot_extra_body_json')),
+        character_enabled: getCheckboxValue('character_enabled'),
+        character_system_prompt: getRawElementValue('character_system_prompt'),
+        character_user_prompt_template: getRawElementValue('character_user_prompt_template'),
         character_provider:     getProviderValue('character_provider', ''),
         character_base_url:     getInputValue('character_base_url'),
         character_api_key:      secret('character_api_key'),
@@ -1138,6 +1243,93 @@ button.ghost{background:#15171b;color:#a8b0bd}
 
     function getInputValue(id) {
       return document.getElementById(id)?.value?.trim() || '';
+    }
+
+    function getRawElementValue(id) {
+      return document.getElementById(id)?.value || '';
+    }
+
+    function setElementValue(id, value) {
+      const el = document.getElementById(id);
+      if (el) el.value = value;
+    }
+
+    function promptAgentNames() {
+      return ['worldbuilding', 'plot', 'character'];
+    }
+
+    function promptAgentLabel(name) {
+      const labels = {
+        worldbuilding: '세계관 에이전트',
+        plot: '플롯 에이전트',
+        character: '등장인물 에이전트',
+      };
+      return labels[name] || name;
+    }
+
+    function resetAgentPromptOverrides(name) {
+      if (!name) return;
+      setElementValue(`${name}_system_prompt`, '');
+      setElementValue(`${name}_user_prompt_template`, '');
+    }
+
+    function resetAllPromptOverrides() {
+      promptAgentNames().forEach(resetAgentPromptOverrides);
+    }
+
+    function promptOverrideEntry(name, defaultPrompts = {}) {
+      const defaults = defaultPrompts?.agents?.[name] || {};
+      const systemOverride = getRawElementValue(`${name}_system_prompt`).trim();
+      const userOverride = getRawElementValue(`${name}_user_prompt_template`).trim();
+      return {
+        name,
+        label: promptAgentLabel(name),
+        enabled: getCheckboxValue(`${name}_enabled`),
+        system_prompt_override: systemOverride,
+        user_prompt_template_override: userOverride,
+        uses_default_system_prompt: !systemOverride,
+        uses_default_user_prompt_template: !userOverride,
+        default_system_prompt: defaults.system_prompt || '',
+        default_user_prompt_template: defaults.user_prompt_template || '',
+      };
+    }
+
+    function downloadJson(filename, data) {
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }
+
+    function exportPromptPack(defaultPrompts = {}, sidecarVersion = '') {
+      const pack = {
+        risuMultiagentPromptPackVersion: PROMPT_PACK_VERSION,
+        edition: 'full',
+        pluginVersion: PLUGIN_VERSION,
+        sidecarVersion,
+        exportedAt: new Date().toISOString(),
+        prompts: promptAgentNames().map(name => promptOverrideEntry(name, defaultPrompts)),
+      };
+      downloadJson(`risu-multiagent-full-prompts-v${PLUGIN_VERSION}.json`, pack);
+      showMsg('프롬프트 JSON export를 생성했습니다.', true);
+    }
+
+    function exportAgentPrompt(name, defaultPrompts = {}, sidecarVersion = '') {
+      const pack = {
+        risuMultiagentPromptPackVersion: PROMPT_PACK_VERSION,
+        edition: 'full',
+        pluginVersion: PLUGIN_VERSION,
+        sidecarVersion,
+        exportedAt: new Date().toISOString(),
+        prompts: [promptOverrideEntry(name, defaultPrompts)],
+      };
+      downloadJson(`risu-multiagent-full-${name}-prompt-v${PLUGIN_VERSION}.json`, pack);
+      showMsg(`${promptAgentLabel(name)} 프롬프트 JSON export를 생성했습니다.`, true);
     }
 
     function getProviderValue(id, fallback) {

@@ -62,10 +62,10 @@ class BaseAgent(ABC):
         elif lang == "ja":
             lang_instruction = "\n\nCRITICAL: You MUST write your analysis notes and bullet points ONLY in Japanese (日本語)."
 
-        system_content = f"{self.build_system_prompt(pipeline_context)}\n\n{SOURCE_MATERIAL_RULES}{lang_instruction}"
+        system_content = f"{self._configured_system_prompt(pipeline_context)}\n\n{SOURCE_MATERIAL_RULES}{lang_instruction}"
         messages = [
             {"role": "system", "content": system_content},
-            {"role": "user",   "content": self.build_user_prompt(pipeline_context)},
+            {"role": "user",   "content": self._configured_user_prompt(pipeline_context)},
         ]
         return await self._call_llm(messages)
 
@@ -94,3 +94,31 @@ class BaseAgent(ABC):
             text,
             "</source>",
         ])
+
+    def _configured_system_prompt(self, pipeline_context: dict) -> str:
+        custom = str(self._cfg.get("system_prompt") or "").strip()
+        if not custom:
+            return self.build_system_prompt(pipeline_context)
+        return self._render_prompt_template(custom, pipeline_context)
+
+    def _configured_user_prompt(self, pipeline_context: dict) -> str:
+        custom = str(self._cfg.get("user_prompt_template") or "").strip()
+        if not custom:
+            return self.build_user_prompt(pipeline_context)
+        return self._render_prompt_template(custom, pipeline_context)
+
+    def _render_prompt_template(self, template: str, pipeline_context: dict) -> str:
+        values = {
+            "user_input": pipeline_context.get("user_input", ""),
+            "chat_history": self._format_history(pipeline_context),
+            "system_context": pipeline_context.get("system_context", ""),
+            "world_summary": pipeline_context.get("world_summary", ""),
+            "char_summary": pipeline_context.get("char_summary", ""),
+            "context_world": pipeline_context.get("context_world", ""),
+            "context_plot": pipeline_context.get("context_plot", ""),
+            "context_char": pipeline_context.get("context_char", ""),
+        }
+        rendered = str(template)
+        for key, value in values.items():
+            rendered = rendered.replace(f"{{{{{key}}}}}", str(value or ""))
+        return rendered

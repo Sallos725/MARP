@@ -45,6 +45,8 @@ class PublicConfigStatus(BaseModel):
 class AgentStatus(BaseModel):
     name: str
     label: str
+    enabled: bool = True
+    active: bool = True
     provider: str
     base_url: str
     model: str
@@ -60,6 +62,8 @@ class AgentStatus(BaseModel):
     extra_body_json_set: bool
     api_key_set: bool
     ready: bool
+    system_prompt_custom: bool = False
+    user_prompt_template_custom: bool = False
 
 
 class StatusResponse(BaseModel):
@@ -98,6 +102,7 @@ class ConfigModel(BaseModel):
     default_max_tokens: int | None = None
     default_extra_body_json: str = ""
 
+    worldbuilding_enabled: bool = True
     worldbuilding_provider: str = ""
     worldbuilding_base_url: str = ""
     worldbuilding_api_key: str = ""
@@ -105,7 +110,10 @@ class ConfigModel(BaseModel):
     worldbuilding_temperature: float | None = None
     worldbuilding_max_tokens: int | None = None
     worldbuilding_extra_body_json: str = ""
+    worldbuilding_system_prompt: str = ""
+    worldbuilding_user_prompt_template: str = ""
 
+    plot_enabled: bool = True
     plot_provider: str = ""
     plot_base_url: str = ""
     plot_api_key: str = ""
@@ -113,7 +121,10 @@ class ConfigModel(BaseModel):
     plot_temperature: float | None = None
     plot_max_tokens: int | None = None
     plot_extra_body_json: str = ""
+    plot_system_prompt: str = ""
+    plot_user_prompt_template: str = ""
 
+    character_enabled: bool = True
     character_provider: str = ""
     character_base_url: str = ""
     character_api_key: str = ""
@@ -121,6 +132,8 @@ class ConfigModel(BaseModel):
     character_temperature: float | None = None
     character_max_tokens: int | None = None
     character_extra_body_json: str = ""
+    character_system_prompt: str = ""
+    character_user_prompt_template: str = ""
 
     context_window: int = 10
     debug_mode: bool = False

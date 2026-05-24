@@ -13,6 +13,7 @@ from app.models import (
 )
 from app.llm_client import LlmConfigError, test_llm as run_llm_test
 from app.pipeline import run_analysis
+from app.prompt_defaults import default_prompt_pack
 
 
 @asynccontextmanager
@@ -24,7 +25,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="risu-multiagent",
     description="RisuAI용 멀티 에이전트 RP 분석 파이프라인 (beforeRequest 훅 기반)",
-    version="0.6.1",
+    version="0.8.0",
     lifespan=lifespan,
 )
 
@@ -71,13 +72,15 @@ async def status():
 
 @app.get("/test/llm", response_model=LlmTestResponse)
 async def test_llm(agent: str | None = None):
-    targets = config_store.AGENTS
+    cfg = config_store.load()
+    targets = config_store.active_agents(cfg)
     if agent:
-        targets = tuple(item for item in targets if item[0] == agent)
+        targets = tuple(item for item in config_store.AGENTS if item[0] == agent)
         if not targets:
             raise HTTPException(status_code=404, detail=f"알 수 없는 에이전트: {agent}")
+        if not config_store.agent_enabled(agent, cfg):
+            raise HTTPException(status_code=400, detail=f"비활성화된 에이전트: {agent}")
 
-    cfg = config_store.load()
     timeout = min(float(cfg.get("request_timeout", 60.0)), 30.0)
     results = []
 
@@ -95,6 +98,11 @@ async def test_llm(agent: str | None = None):
 @app.get("/config", response_model=ConfigModel)
 async def get_config():
     return ConfigModel(**config_store.load())
+
+
+@app.get("/prompts/defaults")
+async def get_default_prompts():
+    return default_prompt_pack()
 
 
 @app.put("/config", response_model=ConfigModel)

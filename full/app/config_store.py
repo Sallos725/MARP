@@ -20,6 +20,7 @@ DEFAULTS: dict = {
     "default_temperature":    0.7,
     "default_max_tokens":     None,
     "default_extra_body_json": "",
+    "worldbuilding_enabled": True,
     "worldbuilding_provider": "",
     "worldbuilding_base_url": "",
     "worldbuilding_api_key":  "",
@@ -27,6 +28,9 @@ DEFAULTS: dict = {
     "worldbuilding_temperature": None,
     "worldbuilding_max_tokens":  None,
     "worldbuilding_extra_body_json": "",
+    "worldbuilding_system_prompt": "",
+    "worldbuilding_user_prompt_template": "",
+    "plot_enabled": True,
     "plot_provider":          "",
     "plot_base_url":          "",
     "plot_api_key":           "",
@@ -34,6 +38,9 @@ DEFAULTS: dict = {
     "plot_temperature":       None,
     "plot_max_tokens":        None,
     "plot_extra_body_json":    "",
+    "plot_system_prompt":     "",
+    "plot_user_prompt_template": "",
+    "character_enabled": True,
     "character_provider":     "",
     "character_base_url":     "",
     "character_api_key":      "",
@@ -41,6 +48,8 @@ DEFAULTS: dict = {
     "character_temperature":  None,
     "character_max_tokens":   None,
     "character_extra_body_json": "",
+    "character_system_prompt": "",
+    "character_user_prompt_template": "",
     "context_window":         10,
     "debug_mode":             False,
     "request_timeout":        60.0,
@@ -62,6 +71,20 @@ PIPELINE_MODES = {"classic", "ensemble-director", "deep-ensemble"}
 def normalize_pipeline_mode(value: str | None) -> str:
     mode = str(value or "").strip().lower().replace("_", "-").replace(" ", "-")
     return mode if mode in PIPELINE_MODES else "classic"
+
+
+def agent_enabled(agent_name: str, cfg: dict | None = None) -> bool:
+    current = cfg or load()
+    return bool(current.get(f"{agent_name.lower()}_enabled", True))
+
+
+def active_agents(cfg: dict | None = None) -> tuple[tuple[str, str], ...]:
+    current = cfg or load()
+    return tuple(
+        (name, label)
+        for name, label in AGENTS
+        if agent_enabled(name, current)
+    )
 
 
 def load() -> dict:
@@ -109,6 +132,10 @@ def initialize_from_env() -> None:
             "worldbuilding_temperature": s.worldbuilding_temperature,
             "worldbuilding_max_tokens":  s.worldbuilding_max_tokens,
             "worldbuilding_extra_body_json": s.worldbuilding_extra_body_json,
+            "worldbuilding_enabled": getattr(s, "worldbuilding_enabled", True),
+            "worldbuilding_system_prompt": getattr(s, "worldbuilding_system_prompt", ""),
+            "worldbuilding_user_prompt_template": getattr(s, "worldbuilding_user_prompt_template", ""),
+            "plot_enabled": getattr(s, "plot_enabled", True),
             "plot_provider":          s.plot_provider,
             "plot_base_url":          s.plot_base_url,
             "plot_api_key":           s.plot_api_key,
@@ -116,6 +143,9 @@ def initialize_from_env() -> None:
             "plot_temperature":       s.plot_temperature,
             "plot_max_tokens":        s.plot_max_tokens,
             "plot_extra_body_json":    s.plot_extra_body_json,
+            "plot_system_prompt": getattr(s, "plot_system_prompt", ""),
+            "plot_user_prompt_template": getattr(s, "plot_user_prompt_template", ""),
+            "character_enabled": getattr(s, "character_enabled", True),
             "character_provider":     s.character_provider,
             "character_base_url":     s.character_base_url,
             "character_api_key":      s.character_api_key,
@@ -123,6 +153,8 @@ def initialize_from_env() -> None:
             "character_temperature":  s.character_temperature,
             "character_max_tokens":   s.character_max_tokens,
             "character_extra_body_json": s.character_extra_body_json,
+            "character_system_prompt": getattr(s, "character_system_prompt", ""),
+            "character_user_prompt_template": getattr(s, "character_user_prompt_template", ""),
             "context_window":         s.context_window,
             "debug_mode":             s.debug_mode,
             "request_timeout":        s.request_timeout,
@@ -149,6 +181,9 @@ def get_agent_config(agent_name: str) -> dict:
         "temperature": temperature if temperature is not None else cfg["default_temperature"],
         "max_tokens": max_tokens if max_tokens is not None else cfg["default_max_tokens"],
         "extra_body_json": extra_body_json or cfg["default_extra_body_json"],
+        "enabled": bool(cfg.get(f"{prefix}_enabled", True)),
+        "system_prompt": cfg.get(f"{prefix}_system_prompt") or "",
+        "user_prompt_template": cfg.get(f"{prefix}_user_prompt_template") or "",
     }
 
 
@@ -156,15 +191,19 @@ def public_status() -> dict:
     cfg = load()
     agents = []
 
+    active_names = {name for name, _ in active_agents(cfg)}
     for name, label in AGENTS:
         agent_cfg = get_agent_config(name)
         api_key = agent_cfg["api_key"]
         temperature = cfg.get(f"{name}_temperature")
         max_tokens = cfg.get(f"{name}_max_tokens")
         agent_extra_body_json = str(cfg.get(f"{name}_extra_body_json") or "").strip()
+        enabled = agent_enabled(name, cfg)
         agent_status = {
             "name": name,
             "label": label,
+            "enabled": enabled,
+            "active": name in active_names,
             "provider": agent_cfg["provider"],
             "base_url": agent_cfg["base_url"],
             "model": agent_cfg["model"],
@@ -180,9 +219,12 @@ def public_status() -> dict:
             "extra_body_json_set": bool(agent_cfg.get("extra_body_json")),
             "api_key_set": bool(api_key),
             "ready": bool(agent_cfg["base_url"] and api_key and agent_cfg["model"]),
+            "system_prompt_custom": bool(cfg.get(f"{name}_system_prompt")),
+            "user_prompt_template_custom": bool(cfg.get(f"{name}_user_prompt_template")),
         }
         agents.append(agent_status)
 
+    active_agent_statuses = [agent for agent in agents if agent["active"]]
     return {
         "pipeline_mode": normalize_pipeline_mode(cfg.get("pipeline_mode")),
         "default_provider": cfg["default_provider"],
@@ -200,5 +242,5 @@ def public_status() -> dict:
         "injection_format": str(cfg.get("injection_format", "classic")),
         "analysis_language": str(cfg.get("analysis_language", "auto")),
         "agents": agents,
-        "ready": all(agent["ready"] for agent in agents),
+        "ready": bool(active_agent_statuses) and all(agent["ready"] for agent in active_agent_statuses),
     }

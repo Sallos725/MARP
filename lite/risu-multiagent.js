@@ -1,7 +1,7 @@
 //@name risu_multiagent
 //@display-name MultiAgent RP Pipeline
 //@api 3.0
-//@version 1.0.9
+//@version 0.8.0
 //@arg agent_provider string Analysis agent provider label. e.g. openai
 //@arg agent_base_url string Analysis agent API base URL. e.g. https://api.openai.com/v1, https://api.anthropic.com/v1, or Vertex AI OpenAI-compatible endpoint
 //@arg agent_api_key string Analysis agent API key
@@ -38,6 +38,8 @@
     const CONFIG_VAULT_VERSION = 1;
     const LAST_RUN_KEY = 'risu_multiagent_lite_last_run_v1';
     const LAST_RUN_VERSION = 1;
+    const PLUGIN_VERSION = '0.8.0';
+    const PROMPT_PACK_VERSION = 1;
 
     // ── 설정 로드 ─────────────────────────────────────────────────────────────
 
@@ -94,6 +96,7 @@
         injectionPosition,
         injectionFormat,
         analysisLanguage,
+        agents: normalizeLiteAgentSettings(stored?.agents),
       };
     }
 
@@ -387,6 +390,7 @@
           role: 'user',
           content:
             `${sourceBlock('Worldbuilding Agent Notes', contextWorld)}\n\n` +
+            `${sourceBlock('Plot Agent Notes', contextPlot || '')}\n\n` +
             `${sourceBlock('Recent Conversation', history)}\n\n` +
             `${sourceBlock('Current User Input', userInput)}\n\n` +
             'Write the plot direction notes.',
@@ -394,7 +398,7 @@
       ];
     }
 
-    function buildCharPrompt(systemContent, contextWorld, history, userInput, targetLang) {
+    function buildCharPrompt(systemContent, contextWorld, contextPlot, history, userInput, targetLang) {
       const baseSystem =
             'You are the character consistency agent.\n' +
             'Based on the setting and previous worldbuilding notes, summarize the personalities and ' +
@@ -421,6 +425,96 @@
             'Write the character adjustment notes.',
         },
       ];
+    }
+
+
+    function buildWorldPromptForConfig(conf, systemContent, history, userInput, targetLang) {
+      return applyLitePromptOverride(
+        'worldbuilding',
+        buildWorldPrompt(systemContent, history, userInput, targetLang),
+        conf,
+        { system_context: systemContent, chat_history: history, user_input: userInput }
+      );
+    }
+
+    function buildPlotPromptForConfig(conf, contextWorld, history, userInput, targetLang) {
+      return applyLitePromptOverride(
+        'plot',
+        buildPlotPrompt(contextWorld, history, userInput, targetLang),
+        conf,
+        { context_world: contextWorld, chat_history: history, user_input: userInput }
+      );
+    }
+
+    function buildCharPromptForConfig(conf, systemContent, contextWorld, contextPlot, history, userInput, targetLang) {
+      return applyLitePromptOverride(
+        'character',
+        buildCharPrompt(systemContent, contextWorld, contextPlot, history, userInput, targetLang),
+        conf,
+        {
+          system_context: systemContent,
+          context_world: contextWorld,
+          context_plot: contextPlot,
+          chat_history: history,
+          user_input: userInput,
+        }
+      );
+    }
+
+    function applyLitePromptOverride(name, messages, conf, values) {
+      const agent = conf?.agents?.[name] || {};
+      const systemPrompt = String(agent.systemPrompt || '').trim();
+      const userPromptTemplate = String(agent.userPromptTemplate || '').trim();
+      if (!systemPrompt && !userPromptTemplate) return messages;
+      const next = messages.map(message => ({ ...message }));
+      if (systemPrompt) {
+        next[0].content = withSourceMaterialRules(renderLitePromptTemplate(systemPrompt, values));
+      }
+      if (userPromptTemplate) {
+        next[1].content = renderLitePromptTemplate(userPromptTemplate, values);
+      }
+      return next;
+    }
+
+    function withSourceMaterialRules(systemPrompt) {
+      const rendered = String(systemPrompt || '').trim();
+      if (/Input handling rules:/i.test(rendered)) return rendered;
+      return `${rendered}\n\n${SOURCE_MATERIAL_RULES}`;
+    }
+
+    function renderLitePromptTemplate(template, values) {
+      let rendered = String(template || '');
+      for (const [key, value] of Object.entries(values || {})) {
+        rendered = rendered.split(`{{${key}}}`).join(String(value || ''));
+      }
+      return rendered;
+    }
+
+    function liteDefaultPrompts() {
+      const placeholders = {
+        system_context: '{{system_context}}',
+        chat_history: '{{chat_history}}',
+        user_input: '{{user_input}}',
+        context_world: '{{context_world}}',
+        context_plot: '{{context_plot}}',
+      };
+      return {
+        worldbuilding: {
+          label: '세계관 에이전트',
+          systemPrompt: buildWorldPrompt(placeholders.system_context, placeholders.chat_history, placeholders.user_input, 'auto')[0].content,
+          userPromptTemplate: buildWorldPrompt(placeholders.system_context, placeholders.chat_history, placeholders.user_input, 'auto')[1].content,
+        },
+        plot: {
+          label: '플롯 에이전트',
+          systemPrompt: buildPlotPrompt(placeholders.context_world, placeholders.chat_history, placeholders.user_input, 'auto')[0].content,
+          userPromptTemplate: buildPlotPrompt(placeholders.context_world, placeholders.chat_history, placeholders.user_input, 'auto')[1].content,
+        },
+        character: {
+          label: '등장인물 에이전트',
+          systemPrompt: buildCharPrompt(placeholders.system_context, placeholders.context_world, placeholders.context_plot, placeholders.chat_history, placeholders.user_input, 'auto')[0].content,
+          userPromptTemplate: buildCharPrompt(placeholders.system_context, placeholders.context_world, placeholders.context_plot, placeholders.chat_history, placeholders.user_input, 'auto')[1].content,
+        },
+      };
     }
 
     function injectContext(messages, contextWorld, contextPlot, contextChar, position = 'system-end', format = 'classic') {
@@ -527,7 +621,12 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-seri
 h1{font-size:1.34rem;font-weight:720;letter-spacing:0;margin-bottom:4px}
 .subtitle{color:#98a2b3;font-size:.84rem}
 .header-actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
-.status-strip{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:16px}
+.status-strip{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;margin-bottom:16px}
+.agent-toggle{display:flex;align-items:center;justify-content:space-between;gap:10px;background:#15171b;border:1px solid #262a31;border-radius:8px;padding:10px 12px;margin-bottom:10px}
+.agent-toggle strong{font-size:.84rem}
+.prompt-actions{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0 10px}
+textarea.prompt-template{min-height:140px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.78rem}
+.prompt-preview{white-space:pre-wrap;overflow:auto;max-height:220px;background:#0f1115;border:1px solid #303640;border-radius:7px;padding:10px;color:#d9e1ec;font-size:.78rem;line-height:1.5}
 .metric{background:#191b20;border:1px solid #292d35;border-radius:8px;padding:12px;min-height:72px}
 .metric-label{font-size:.72rem;color:#8d96a5;margin-bottom:5px}
 .metric-value{font-size:.92rem;font-weight:680;overflow-wrap:anywhere}
@@ -583,6 +682,11 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
       <div class="metric-sub">Lite판은 RisuAI 플러그인 내부 실행</div>
     </div>
     <div class="metric">
+      <div class="metric-label">버전</div>
+      <div class="metric-value">Plugin v${escHtml(PLUGIN_VERSION)}</div>
+      <div class="metric-sub">Lite 단일 파일</div>
+    </div>
+    <div class="metric">
       <div class="metric-label">Provider</div>
       <div class="metric-value">${escHtml(conf.provider)}</div>
       <div class="metric-sub">${escHtml(conf.model)}</div>
@@ -615,6 +719,7 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
         <div class="k">Max Tokens</div><div class="v">${escHtml(conf.maxTokens ?? '제한 없음')}</div>
         <div class="k">추가 JSON</div><div class="v">${conf.extraBodyJson ? '적용됨' : '없음'}</div>
         <div class="k">Context</div><div class="v">${escHtml(conf.window)}개 메시지</div>
+        <div class="k">활성 에이전트</div><div class="v">${escHtml(enabledLiteAgentNames(conf).length)} / 3</div>
         <div class="k">Strict Mode</div><div class="v">${conf.strictMode ? '켜짐 (Block)' : '꺼짐 (Fail-Open)'}</div>
         <div class="k">주입 위치</div><div class="v">${escHtml(conf.injectionPosition)}</div>
         <div class="k">주입 포맷</div><div class="v">${escHtml(conf.injectionFormat)}</div>
@@ -629,13 +734,15 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
     <div class="card">
       <h2>동작 구조</h2>
       <div class="kv">
-        <div class="k">세계관</div><div class="v">보조 LLM 호출</div>
-        <div class="k">플롯</div><div class="v">보조 LLM 호출</div>
-        <div class="k">등장인물</div><div class="v">보조 LLM 호출</div>
+        <div class="k">세계관</div><div class="v">${liteAgentEnabled(conf, 'worldbuilding') ? 'ON' : 'OFF'} · 보조 LLM 호출</div>
+        <div class="k">플롯</div><div class="v">${liteAgentEnabled(conf, 'plot') ? 'ON' : 'OFF'} · 보조 LLM 호출</div>
+        <div class="k">등장인물</div><div class="v">${liteAgentEnabled(conf, 'character') ? 'ON' : 'OFF'} · 보조 LLM 호출</div>
         <div class="k">검수</div><div class="v">RisuAI 현재 메인 모델</div>
       </div>
     </div>
   </div>
+
+  ${litePromptManagement(conf)}
 
   ${lastRunCard(lastRun)}
 
@@ -779,6 +886,69 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
 </body></html>`;
     }
 
+
+    function litePromptManagement(conf) {
+      return `
+        <div class="card">
+          <h2>프롬프트 관리</h2>
+          <p>각 에이전트의 override 텍스트만 저장합니다. 기본값으로 되돌리기는 override 칸을 비워 내장 프롬프트를 다시 사용합니다.</p>
+          <div style="height:10px"></div>
+          <div class="header-actions" style="justify-content:flex-start">
+            <button id="prompt-export-all-btn" type="button">프롬프트 전체 export</button>
+            <button id="prompt-reset-all-btn" type="button" class="ghost">전체 기본값으로 되돌리기</button>
+          </div>
+        </div>
+        ${liteAgentPromptSettings(conf, 'worldbuilding')}
+        ${liteAgentPromptSettings(conf, 'plot')}
+        ${liteAgentPromptSettings(conf, 'character')}
+      `;
+    }
+
+    function liteAgentPromptSettings(conf, name) {
+      const defaults = liteDefaultPrompts()[name];
+      const agent = conf.agents?.[name] || {};
+      const custom = Boolean(agent.systemPrompt || agent.userPromptTemplate);
+      return `
+        <details>
+          <summary>
+            <span>${escHtml(defaults.label)}</span>
+            <span class="summary-note">${custom ? '커스텀 프롬프트 적용 중' : '기본 프롬프트 사용'}</span>
+          </summary>
+          <div class="details-body">
+            <div class="agent-toggle">
+              <div>
+                <strong>에이전트 실행</strong>
+                <div class="example-url" style="margin:6px 0 0">OFF면 이 에이전트 LLM 호출을 건너뜁니다.</div>
+              </div>
+              <label>
+                <input id="${name}_enabled" type="checkbox" ${checkedAttr(agent.enabled !== false)}>
+                ON
+              </label>
+            </div>
+            <div class="prompt-actions">
+              <button type="button" class="ghost" data-prompt-reset="${name}">기본값으로 되돌리기</button>
+              <button type="button" class="ghost" data-prompt-export="${name}">이 에이전트 프롬프트 export</button>
+            </div>
+            <div class="field">
+              <label for="${name}_system_prompt">System Prompt Override</label>
+              <textarea id="${name}_system_prompt" class="prompt-template" spellcheck="false" placeholder="비워두면 내장 system prompt 사용">${escHtml(agent.systemPrompt || '')}</textarea>
+            </div>
+            <div class="field">
+              <label for="${name}_user_prompt_template">User Prompt Template Override</label>
+              <textarea id="${name}_user_prompt_template" class="prompt-template" spellcheck="false" placeholder="비워두면 내장 user prompt template 사용">${escHtml(agent.userPromptTemplate || '')}</textarea>
+            </div>
+            <details>
+              <summary><span>내장 기본 프롬프트 보기</span><span class="summary-note">rollback 기준</span></summary>
+              <div class="details-body">
+                <div class="prompt-preview">[System]\n${escHtml(defaults.systemPrompt)}\n\n[User]\n${escHtml(defaults.userPromptTemplate)}</div>
+              </div>
+            </details>
+            <div class="example-url">템플릿 토큰: {{system_context}}, {{chat_history}}, {{user_input}}, {{context_world}}, {{context_plot}}</div>
+          </div>
+        </details>
+      `;
+    }
+
     function setupLiteHandlers(initialConf) {
       setupProviderControls();
       setupCredentialFiles();
@@ -816,6 +986,53 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
           showMsg(`백업 복구 실패: ${err.message}`, false);
         }
       });
+      document.getElementById('prompt-export-all-btn')?.addEventListener('click', () => {
+        exportLitePromptPack();
+      });
+      document.getElementById('prompt-reset-all-btn')?.addEventListener('click', () => {
+        resetAllLitePromptOverrides();
+        showMsg('모든 커스텀 프롬프트 override를 비웠습니다. 저장하면 기본값으로 되돌아갑니다.', true);
+      });
+      document.querySelectorAll('[data-prompt-reset]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          resetLitePromptOverrides(btn.dataset.promptReset);
+          showMsg('해당 에이전트 프롬프트 override를 비웠습니다. 저장하면 기본값으로 되돌아갑니다.', true);
+        });
+      });
+      document.querySelectorAll('[data-prompt-export]').forEach(btn => {
+        btn.addEventListener('click', () => exportLitePromptPack(btn.dataset.promptExport));
+      });
+      document.getElementById('save-btn')?.addEventListener('click', async () => {
+        try {
+          const next = collectLiteConfig(initialConf);
+          await saveLiteConfig(next);
+          await saveConfigVault('lite', next);
+          showMsg('저장 완료', true);
+        } catch (err) {
+          showMsg(`저장 오류: ${err.message}`, false);
+        }
+      });
+      document.getElementById('vault-save-btn')?.addEventListener('click', async () => {
+        try {
+          const next = collectLiteConfig(initialConf);
+          await saveConfigVault('lite', next);
+          showMsg('백업 저장 완료', true);
+          await openLiteDashboard();
+        } catch (err) {
+          showMsg(`백업 저장 실패: ${err.message}`, false);
+        }
+      });
+      document.getElementById('vault-restore-btn')?.addEventListener('click', async () => {
+        try {
+          const restored = await restoreConfigVault('lite');
+          await saveLiteConfig(restored);
+          showMsg('백업 복구 완료', true);
+          await openLiteDashboard();
+        } catch (err) {
+          showMsg(`백업 복구 실패: ${err.message}`, false);
+        }
+      });
+
       document.getElementById('close-btn')?.addEventListener('click', async () => {
         await Risuai.hideContainer();
       });
@@ -839,6 +1056,7 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
         injectionPosition: getInputValue('injection_position') || 'system-end',
         injectionFormat: getInputValue('injection_format') || 'classic',
         analysisLanguage: getInputValue('analysis_language') || 'auto',
+        agents: normalizeLiteAgentSettings(collectLiteAgentSettings()),
       };
     }
 
@@ -1226,6 +1444,7 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
         injectionPosition: String(config.injectionPosition || 'system-end'),
         injectionFormat: String(config.injectionFormat || 'classic'),
         analysisLanguage: String(config.analysisLanguage || 'auto'),
+        agents: normalizeLiteAgentSettings(config.agents),
       };
     }
 
@@ -1234,6 +1453,92 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
       const date = new Date(value);
       if (Number.isNaN(date.getTime())) return value;
       return date.toLocaleString();
+    }
+
+
+    function liteAgentNames() {
+      return ['worldbuilding', 'plot', 'character'];
+    }
+
+    function normalizeLiteAgentSettings(value) {
+      const input = isPlainObject(value) ? value : {};
+      return Object.fromEntries(liteAgentNames().map(name => {
+        const item = isPlainObject(input[name]) ? input[name] : {};
+        return [name, {
+          enabled: item.enabled !== false,
+          systemPrompt: String(item.systemPrompt || ''),
+          userPromptTemplate: String(item.userPromptTemplate || ''),
+        }];
+      }));
+    }
+
+    function collectLiteAgentSettings() {
+      return Object.fromEntries(liteAgentNames().map(name => [name, {
+        enabled: getCheckboxValue(`${name}_enabled`),
+        systemPrompt: getInputValue(`${name}_system_prompt`),
+        userPromptTemplate: getInputValue(`${name}_user_prompt_template`),
+      }]));
+    }
+
+    function liteAgentEnabled(conf, name) {
+      return conf?.agents?.[name]?.enabled !== false;
+    }
+
+    function enabledLiteAgentNames(conf) {
+      return liteAgentNames().filter(name => liteAgentEnabled(conf, name));
+    }
+
+    function resetLitePromptOverrides(name) {
+      if (!name) return;
+      setElementValue(`${name}_system_prompt`, '');
+      setElementValue(`${name}_user_prompt_template`, '');
+    }
+
+    function resetAllLitePromptOverrides() {
+      liteAgentNames().forEach(resetLitePromptOverrides);
+    }
+
+    function exportLitePromptPack(name = null) {
+      const defaults = liteDefaultPrompts();
+      const names = name ? [name] : liteAgentNames();
+      const prompts = names.map(agentName => ({
+        name: agentName,
+        label: defaults[agentName]?.label || agentName,
+        enabled: getCheckboxValue(`${agentName}_enabled`),
+        system_prompt_override: getInputValue(`${agentName}_system_prompt`),
+        user_prompt_template_override: getInputValue(`${agentName}_user_prompt_template`),
+        uses_default_system_prompt: !getInputValue(`${agentName}_system_prompt`),
+        uses_default_user_prompt_template: !getInputValue(`${agentName}_user_prompt_template`),
+        default_system_prompt: defaults[agentName]?.systemPrompt || '',
+        default_user_prompt_template: defaults[agentName]?.userPromptTemplate || '',
+      }));
+      const pack = {
+        risuMultiagentPromptPackVersion: PROMPT_PACK_VERSION,
+        edition: 'lite',
+        pluginVersion: PLUGIN_VERSION,
+        exportedAt: new Date().toISOString(),
+        prompts,
+      };
+      const suffix = name ? `${name}-prompt` : 'prompts';
+      downloadJson(`risu-multiagent-lite-${suffix}-v${PLUGIN_VERSION}.json`, pack);
+      showMsg('프롬프트 JSON export를 생성했습니다.', true);
+    }
+
+    function downloadJson(filename, data) {
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }
+
+    function setElementValue(id, value) {
+      const el = document.getElementById(id);
+      if (el) el.value = value;
     }
 
     function getInputValue(id) {
@@ -1812,6 +2117,16 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
       return '';
     }
 
+    function markAgentSkipped(run, name) {
+      run.agents[name] = {
+        ok: true,
+        skipped: true,
+        durationMs: 0,
+        chars: 0,
+      };
+      return '';
+    }
+
     async function runAgentWithDiagnostics(run, name, action, strictMode) {
       const started = Date.now();
       try {
@@ -1914,28 +2229,44 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
         });
 
         // 1. 세계관 에이전트
-        const contextWorld = await runAgentWithDiagnostics(
-          run,
-          'worldbuilding',
-          () => callAgent(conf, buildWorldPrompt(systemContent, history, userInput, conf.analysisLanguage)),
-          conf.strictMode
-        );
+        const activeAgentNames = enabledLiteAgentNames(conf);
+        if (!activeAgentNames.length) {
+          console.log('MultiAgent: all Lite agents are disabled — pipeline skipped');
+          await saveLastRunDiagnostics(finishRunDiagnostics(run, runStartedAtMs, {
+            status: 'skipped',
+            reason: 'all agents disabled',
+          }));
+          return messages;
+        }
 
-        // 2 & 3. 플롯 & 등장인물 에이전트 (병렬 실행!)
-        const [contextPlot, contextChar] = await Promise.all([
-          runAgentWithDiagnostics(
-            run,
-            'plot',
-            () => callAgent(conf, buildPlotPrompt(contextWorld, history, userInput, conf.analysisLanguage)),
-            conf.strictMode
-          ),
-          runAgentWithDiagnostics(
-            run,
-            'character',
-            () => callAgent(conf, buildCharPrompt(systemContent, contextWorld, history, userInput, conf.analysisLanguage)),
-            conf.strictMode
-          ),
-        ]);
+        const contextWorld = liteAgentEnabled(conf, 'worldbuilding')
+          ? await runAgentWithDiagnostics(
+              run,
+              'worldbuilding',
+              () => callAgent(conf, buildWorldPromptForConfig(conf, systemContent, history, userInput, conf.analysisLanguage)),
+              conf.strictMode
+            )
+          : markAgentSkipped(run, 'worldbuilding');
+
+        const plotPromise = liteAgentEnabled(conf, 'plot')
+          ? runAgentWithDiagnostics(
+              run,
+              'plot',
+              () => callAgent(conf, buildPlotPromptForConfig(conf, contextWorld, history, userInput, conf.analysisLanguage)),
+              conf.strictMode
+            )
+          : Promise.resolve(markAgentSkipped(run, 'plot'));
+
+        const charPromise = liteAgentEnabled(conf, 'character')
+          ? runAgentWithDiagnostics(
+              run,
+              'character',
+              () => callAgent(conf, buildCharPromptForConfig(conf, systemContent, contextWorld, '', history, userInput, conf.analysisLanguage)),
+              conf.strictMode
+            )
+          : Promise.resolve(markAgentSkipped(run, 'character'));
+
+        const [contextPlot, contextChar] = await Promise.all([plotPromise, charPromise]);
 
         const nextMessages = injectContext(messages, contextWorld, contextPlot, contextChar, conf.injectionPosition, conf.injectionFormat);
         run.injected = true;
