@@ -1,7 +1,9 @@
 //@name risu_multiagent
 //@display-name MultiAgent RP Pipeline
 //@api 3.0
-//@version 0.8.1
+//@version 0.8.2
+//@update-url https://raw.githubusercontent.com/Sallos725/MARP/main/lite/risu-multiagent.js
+//@link https://github.com/Sallos725/MARP GitHub
 //@arg agent_provider string Analysis agent provider label. e.g. openai
 //@arg agent_base_url string Analysis agent API base URL. e.g. https://api.openai.com/v1, https://api.anthropic.com/v1, or Vertex AI OpenAI-compatible endpoint
 //@arg agent_api_key string Analysis agent API key
@@ -38,8 +40,9 @@
     const CONFIG_VAULT_VERSION = 1;
     const LAST_RUN_KEY = 'risu_multiagent_lite_last_run_v1';
     const LAST_RUN_VERSION = 1;
-    const PLUGIN_VERSION = '0.8.1';
+    const PLUGIN_VERSION = '0.8.2';
     const PROMPT_PACK_VERSION = 1;
+    const PRESET_PACK_VERSION = 1;
 
     // ── 설정 로드 ─────────────────────────────────────────────────────────────
 
@@ -890,10 +893,13 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
       return `
         <div class="card">
           <h2>프롬프트 관리</h2>
-          <p>각 에이전트의 override 텍스트만 저장합니다. export/import JSON으로 공유할 수 있고, 기본값으로 되돌리기는 override 칸을 비워 내장 프롬프트를 다시 사용합니다.</p>
+          <p>기본 프롬프트는 플러그인에 내장되어 있어 언제든 되돌릴 수 있습니다. 프리셋은 모바일에서도 가볍게 쓰도록 현재 모델/온도와 에이전트별 override만 담습니다.</p>
           <div style="height:10px"></div>
           <div class="header-actions" style="justify-content:flex-start">
             <input id="prompt-import-input" type="file" accept=".json,application/json" hidden>
+            <input id="preset-import-input" type="file" accept=".json,application/json" hidden>
+            <button id="preset-export-all-btn" type="button">프리셋 export</button>
+            <button id="preset-import-all-btn" type="button" class="ghost">프리셋 import</button>
             <button id="prompt-export-all-btn" type="button">프롬프트 전체 export</button>
             <button id="prompt-import-all-btn" type="button" class="ghost">프롬프트 import</button>
             <button id="prompt-reset-all-btn" type="button" class="ghost">전체 기본값으로 되돌리기</button>
@@ -995,6 +1001,17 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
         triggerLitePromptImport();
       });
       document.getElementById('prompt-import-input')?.addEventListener('change', handleLitePromptImport);
+      document.getElementById('preset-export-all-btn')?.addEventListener('click', () => {
+        try {
+          exportLitePresetPack();
+        } catch (err) {
+          showMsg(`프리셋 export 실패: ${err.message}`, false);
+        }
+      });
+      document.getElementById('preset-import-all-btn')?.addEventListener('click', () => {
+        document.getElementById('preset-import-input')?.click();
+      });
+      document.getElementById('preset-import-input')?.addEventListener('change', handleLitePresetImport);
       document.querySelectorAll('[data-prompt-import]').forEach(btn => {
         btn.addEventListener('click', () => triggerLitePromptImport(btn.dataset.promptImport));
       });
@@ -1527,8 +1544,7 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
       return prompts;
     }
 
-    function applyLitePromptPack(pack, filterName = null) {
-      const prompts = normalizeLitePromptPack(pack);
+    function applyLitePromptEntries(prompts, filterName = null) {
       let applied = 0;
       for (const entry of prompts) {
         const name = entry?.name;
@@ -1555,6 +1571,10 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
       return applied;
     }
 
+    function applyLitePromptPack(pack, filterName = null) {
+      return applyLitePromptEntries(normalizeLitePromptPack(pack), filterName);
+    }
+
     function triggerLitePromptImport(filterName = null) {
       litePromptImportFilter = filterName;
       document.getElementById('prompt-import-input')?.click();
@@ -1579,6 +1599,125 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
       } finally {
         if (input) input.value = '';
       }
+    }
+
+
+    function firstPresentString(entry, keys) {
+      for (const key of keys) {
+        if (entry && Object.prototype.hasOwnProperty.call(entry, key) && entry[key] !== undefined && entry[key] !== null) {
+          return { present: true, value: String(entry[key]) };
+        }
+      }
+      return { present: false, value: '' };
+    }
+
+    function firstPresentNumber(entry, keys, label) {
+      for (const key of keys) {
+        if (entry && Object.prototype.hasOwnProperty.call(entry, key)) {
+          const value = entry[key];
+          if (value === '' || value === null || value === undefined) return { present: true, value: null };
+          const parsed = Number(value);
+          if (!Number.isFinite(parsed)) throw new Error(`${label} 값이 숫자가 아닙니다: ${value}`);
+          return { present: true, value: parsed };
+        }
+      }
+      return { present: false, value: null };
+    }
+
+    function normalizeLitePresetPack(raw) {
+      if (!raw || typeof raw !== 'object') throw new Error('JSON 객체가 아닙니다.');
+      const version = raw.risuMultiagentPresetPackVersion;
+      if (version != null && version !== PRESET_PACK_VERSION) {
+        throw new Error(`지원하지 않는 preset 버전입니다: ${version}`);
+      }
+      const global = isPlainObject(raw.global) ? raw.global : (isPlainObject(raw.defaults) ? raw.defaults : {});
+      const globalModel = firstPresentString(global, ['model', 'default_model']);
+      const rawModel = firstPresentString(raw, ['model', 'default_model']);
+      const globalTemperature = firstPresentNumber(global, ['temperature', 'default_temperature'], 'temperature');
+      const rawTemperature = firstPresentNumber(raw, ['temperature', 'default_temperature'], 'temperature');
+      const agents = Array.isArray(raw.agents) ? raw.agents : (Array.isArray(raw.prompts) ? raw.prompts : []);
+      if (!globalModel.present && !rawModel.present && !globalTemperature.present && !rawTemperature.present && !agents.length) {
+        throw new Error('preset에 적용할 모델, 온도, 프롬프트 항목이 없습니다.');
+      }
+      return {
+        model: globalModel.present ? globalModel.value : (rawModel.present ? rawModel.value : null),
+        temperature: globalTemperature.present ? globalTemperature.value : (rawTemperature.present ? rawTemperature.value : null),
+        agents,
+      };
+    }
+
+    function applyLitePresetPack(pack) {
+      const preset = normalizeLitePresetPack(pack);
+      const modelApplied = preset.model !== null;
+      const temperatureApplied = preset.temperature !== null;
+      if (modelApplied) setElementValue('agent_model', preset.model);
+      if (temperatureApplied) setElementValue('agent_temperature', String(preset.temperature));
+
+      let appliedAgents = 0;
+      let agentError = null;
+      if (preset.agents.length) {
+        try {
+          appliedAgents = applyLitePromptEntries(preset.agents);
+        } catch (err) {
+          agentError = err;
+        }
+      }
+      if (agentError && !modelApplied && !temperatureApplied) throw agentError;
+      return { appliedAgents, modelApplied, temperatureApplied };
+    }
+
+    async function handleLitePresetImport(event) {
+      const input = event?.target;
+      const file = input?.files?.[0];
+      if (!file) return;
+      try {
+        const pack = JSON.parse(await file.text());
+        const result = applyLitePresetPack(pack);
+        const editionNote = pack.edition && pack.edition !== 'lite'
+          ? ` (${pack.edition} edition export)`
+          : '';
+        const parts = [];
+        if (result.modelApplied) parts.push('모델');
+        if (result.temperatureApplied) parts.push('온도');
+        if (result.appliedAgents) parts.push(`프롬프트 ${result.appliedAgents}건`);
+        showMsg(`프리셋을 불러왔습니다${editionNote}: ${parts.join(', ') || '적용 항목 없음'}. 저장하면 적용됩니다.`, true);
+      } catch (err) {
+        showMsg(`프리셋 import 실패: ${err.message}`, false);
+      } finally {
+        if (input) input.value = '';
+      }
+    }
+
+    function litePresetEntry(agentName) {
+      const defaults = liteDefaultPrompts();
+      const systemOverride = getInputValue(`${agentName}_system_prompt`);
+      const userOverride = getInputValue(`${agentName}_user_prompt_template`);
+      return {
+        name: agentName,
+        label: defaults[agentName]?.label || agentName,
+        enabled: getCheckboxValue(`${agentName}_enabled`),
+        system_prompt_override: systemOverride,
+        user_prompt_template_override: userOverride,
+        uses_default_system_prompt: !systemOverride,
+        uses_default_user_prompt_template: !userOverride,
+      };
+    }
+
+    function exportLitePresetPack() {
+      const pack = {
+        risuMultiagentPresetPackVersion: PRESET_PACK_VERSION,
+        type: 'prompt-model-temperature',
+        edition: 'lite',
+        pluginVersion: PLUGIN_VERSION,
+        exportedAt: new Date().toISOString(),
+        global: {
+          model: getInputValue('agent_model') || 'gpt-4o-mini',
+          temperature: requiredFloat('agent_temperature', 0.7),
+        },
+        agents: liteAgentNames().map(litePresetEntry),
+      };
+      downloadJson(`risu-multiagent-lite-preset-v${PLUGIN_VERSION}.json`, pack);
+      showMsg('모델/온도/프롬프트 프리셋 JSON export를 생성했습니다.', true);
     }
 
     function exportLitePromptPack(name = null) {

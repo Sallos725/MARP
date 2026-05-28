@@ -1,7 +1,9 @@
 //@name risu_multiagent_full
 //@display-name MultiAgent RP — Full판
 //@api 3.0
-//@version 0.8.1
+//@version 0.8.2
+//@update-url https://raw.githubusercontent.com/Sallos725/MARP/main/full/plugin/risu-multiagent-full.js
+//@link https://github.com/Sallos725/MARP GitHub
 //@arg server_url string Full판 서버 URL (e.g. http://localhost:6009 or https://example.com/multi-agent)
 //@arg main_model_only string Run MultiAgent only for RisuAI main model requests; bypass auxiliary/submodel/memory/emotion/translation requests (default: 1)
 //@arg bypass_hypamemory string Skip MultiAgent analysis for RisuAI HypaMemory/memory requests (default: 1)
@@ -27,8 +29,9 @@
 
 (async () => {
   try {
-    const PLUGIN_VERSION = '0.8.1';
+    const PLUGIN_VERSION = '0.8.2';
     const PROMPT_PACK_VERSION = 1;
+    const PRESET_PACK_VERSION = 1;
     const PLUGIN_SETTINGS_KEY = 'risu_multiagent_full_plugin_settings_v1';
     const SIDECAR_CONFIG_BACKUP_KEY = 'risu_multiagent_full_sidecar_config_backup_v1';
     const STORAGE_VERSION = 1;
@@ -683,10 +686,13 @@ textarea.prompt-template{min-height:140px;font-family:ui-monospace,SFMono-Regula
 
     <div class="card">
       <h2>프롬프트 관리</h2>
-      <p>각 에이전트의 override 텍스트만 저장합니다. export/import JSON으로 공유할 수 있고, 기본값으로 되돌리기는 override 칸을 비워 내장 프롬프트를 다시 사용합니다.</p>
+      <p>기본 프롬프트는 사이드카에 내장되어 있어 언제든 되돌릴 수 있습니다. 프리셋은 기본 모델/온도와 에이전트별 모델/온도 override, 프롬프트 override만 담습니다.</p>
       <div style="height:10px"></div>
       <div class="header-actions" style="justify-content:flex-start">
         <input id="prompt-import-input" type="file" accept=".json,application/json" hidden>
+        <input id="preset-import-input" type="file" accept=".json,application/json" hidden>
+        <button id="preset-export-all-btn" type="button">프리셋 export</button>
+        <button id="preset-import-all-btn" type="button" class="ghost">프리셋 import</button>
         <button id="prompt-export-all-btn" type="button">프롬프트 전체 export</button>
         <button id="prompt-import-all-btn" type="button" class="ghost">프롬프트 import</button>
         <button id="prompt-reset-all-btn" type="button" class="ghost">전체 기본값으로 되돌리기</button>
@@ -1152,6 +1158,17 @@ textarea.prompt-template{min-height:140px;font-family:ui-monospace,SFMono-Regula
         triggerPromptImport();
       });
       document.getElementById('prompt-import-input')?.addEventListener('change', handlePromptImport);
+      document.getElementById('preset-export-all-btn')?.addEventListener('click', () => {
+        try {
+          exportPresetPack(defaultPrompts, data.status?.version || '');
+        } catch (err) {
+          showMsg(`프리셋 export 실패: ${err.message}`, false);
+        }
+      });
+      document.getElementById('preset-import-all-btn')?.addEventListener('click', () => {
+        document.getElementById('preset-import-input')?.click();
+      });
+      document.getElementById('preset-import-input')?.addEventListener('change', handlePresetImport);
       document.querySelectorAll('[data-prompt-import]').forEach(btn => {
         btn.addEventListener('click', () => triggerPromptImport(btn.dataset.promptImport));
       });
@@ -1307,8 +1324,7 @@ textarea.prompt-template{min-height:140px;font-family:ui-monospace,SFMono-Regula
       return prompts;
     }
 
-    function applyPromptPack(pack, filterName = null) {
-      const prompts = normalizePromptPack(pack);
+    function applyPromptEntries(prompts, filterName = null) {
       let applied = 0;
       for (const entry of prompts) {
         const name = entry?.name;
@@ -1335,6 +1351,10 @@ textarea.prompt-template{min-height:140px;font-family:ui-monospace,SFMono-Regula
       return applied;
     }
 
+    function applyPromptPack(pack, filterName = null) {
+      return applyPromptEntries(normalizePromptPack(pack), filterName);
+    }
+
     function triggerPromptImport(filterName = null) {
       promptImportFilter = filterName;
       document.getElementById('prompt-import-input')?.click();
@@ -1359,6 +1379,143 @@ textarea.prompt-template{min-height:140px;font-family:ui-monospace,SFMono-Regula
       } finally {
         if (input) input.value = '';
       }
+    }
+
+
+    function firstPresentString(entry, keys) {
+      for (const key of keys) {
+        if (entry && Object.prototype.hasOwnProperty.call(entry, key) && entry[key] !== undefined && entry[key] !== null) {
+          return { present: true, value: String(entry[key]) };
+        }
+      }
+      return { present: false, value: '' };
+    }
+
+    function firstPresentNumber(entry, keys, label) {
+      for (const key of keys) {
+        if (entry && Object.prototype.hasOwnProperty.call(entry, key)) {
+          const value = entry[key];
+          if (value === '' || value === null || value === undefined) return { present: true, value: null };
+          const parsed = Number(value);
+          if (!Number.isFinite(parsed)) throw new Error(`${label} 값이 숫자가 아닙니다: ${value}`);
+          return { present: true, value: parsed };
+        }
+      }
+      return { present: false, value: null };
+    }
+
+    function normalizePresetPack(raw) {
+      if (!raw || typeof raw !== 'object') throw new Error('JSON 객체가 아닙니다.');
+      const version = raw.risuMultiagentPresetPackVersion;
+      if (version != null && version !== PRESET_PACK_VERSION) {
+        throw new Error(`지원하지 않는 preset 버전입니다: ${version}`);
+      }
+      const defaults = isPlainObject(raw.defaults) ? raw.defaults : (isPlainObject(raw.global) ? raw.global : {});
+      const defaultModel = firstPresentString(defaults, ['model', 'default_model']);
+      const rawModel = firstPresentString(raw, ['model', 'default_model']);
+      const defaultTemperature = firstPresentNumber(defaults, ['temperature', 'default_temperature'], 'temperature');
+      const rawTemperature = firstPresentNumber(raw, ['temperature', 'default_temperature'], 'temperature');
+      const agents = Array.isArray(raw.agents) ? raw.agents : (Array.isArray(raw.prompts) ? raw.prompts : []);
+      if (!defaultModel.present && !rawModel.present && !defaultTemperature.present && !rawTemperature.present && !agents.length) {
+        throw new Error('preset에 적용할 모델, 온도, 프롬프트 항목이 없습니다.');
+      }
+      return {
+        defaultModel: defaultModel.present ? defaultModel.value : (rawModel.present ? rawModel.value : null),
+        defaultTemperature: defaultTemperature.present ? defaultTemperature.value : (rawTemperature.present ? rawTemperature.value : null),
+        agents,
+      };
+    }
+
+    function applyPresetPack(pack) {
+      const preset = normalizePresetPack(pack);
+      const modelApplied = preset.defaultModel !== null;
+      const temperatureApplied = preset.defaultTemperature !== null;
+      if (modelApplied) setElementValue('default_model', preset.defaultModel);
+      if (temperatureApplied) setElementValue('default_temperature', String(preset.defaultTemperature));
+
+      let appliedAgents = 0;
+      for (const entry of preset.agents) {
+        const name = entry?.name;
+        if (!name || !promptAgentNames().includes(name)) continue;
+        if (entry.enabled !== undefined) setCheckboxValue(`${name}_enabled`, entry.enabled !== false);
+        const modelOverride = firstPresentString(entry, ['model_override', 'modelOverride']);
+        const temperatureOverride = firstPresentNumber(entry, ['temperature_override', 'temperatureOverride'], `${promptAgentLabel(name)} temperature`);
+        if (modelOverride.present) setElementValue(`${name}_model`, modelOverride.value);
+        if (temperatureOverride.present) setElementValue(`${name}_temperature`, temperatureOverride.value === null ? '' : String(temperatureOverride.value));
+        setElementValue(`${name}_system_prompt`, promptPackString(entry, [
+          'system_prompt_override',
+          'systemPrompt',
+          'system_prompt',
+        ]));
+        setElementValue(`${name}_user_prompt_template`, promptPackString(entry, [
+          'user_prompt_template_override',
+          'userPromptTemplate',
+          'user_prompt_template',
+        ]));
+        appliedAgents += 1;
+      }
+      if (!modelApplied && !temperatureApplied && !appliedAgents) {
+        throw new Error('적용할 preset 항목이 없습니다.');
+      }
+      return { appliedAgents, modelApplied, temperatureApplied };
+    }
+
+    async function handlePresetImport(event) {
+      const input = event?.target;
+      const file = input?.files?.[0];
+      if (!file) return;
+      try {
+        const pack = JSON.parse(await file.text());
+        const result = applyPresetPack(pack);
+        const editionNote = pack.edition && pack.edition !== 'full'
+          ? ` (${pack.edition} edition export)`
+          : '';
+        const parts = [];
+        if (result.modelApplied) parts.push('기본 모델');
+        if (result.temperatureApplied) parts.push('기본 온도');
+        if (result.appliedAgents) parts.push(`에이전트 ${result.appliedAgents}건`);
+        showMsg(`프리셋을 불러왔습니다${editionNote}: ${parts.join(', ')}. 저장하면 적용됩니다.`, true);
+      } catch (err) {
+        showMsg(`프리셋 import 실패: ${err.message}`, false);
+      } finally {
+        if (input) input.value = '';
+      }
+    }
+
+    function optionalPresetFloat(id) {
+      const value = getInputValue(id);
+      if (!value) return null;
+      const parsed = Number(value);
+      if (!Number.isFinite(parsed)) throw new Error(`${id} 값이 숫자가 아닙니다: ${value}`);
+      return parsed;
+    }
+
+    function promptPresetEntry(name, defaultPrompts = {}) {
+      return {
+        ...promptOverrideEntry(name, defaultPrompts),
+        model_override: getInputValue(`${name}_model`),
+        temperature_override: optionalPresetFloat(`${name}_temperature`),
+        uses_default_model: !getInputValue(`${name}_model`),
+        uses_default_temperature: !getInputValue(`${name}_temperature`),
+      };
+    }
+
+    function exportPresetPack(defaultPrompts = {}, sidecarVersion = '') {
+      const pack = {
+        risuMultiagentPresetPackVersion: PRESET_PACK_VERSION,
+        type: 'prompt-model-temperature',
+        edition: 'full',
+        pluginVersion: PLUGIN_VERSION,
+        sidecarVersion,
+        exportedAt: new Date().toISOString(),
+        defaults: {
+          model: getInputValue('default_model') || 'gpt-4o-mini',
+          temperature: requiredFloat('default_temperature', 0.7),
+        },
+        agents: promptAgentNames().map(name => promptPresetEntry(name, defaultPrompts)),
+      };
+      downloadJson(`risu-multiagent-full-preset-v${PLUGIN_VERSION}.json`, pack);
+      showMsg('모델/온도/프롬프트 프리셋 JSON export를 생성했습니다.', true);
     }
 
     function promptOverrideEntry(name, defaultPrompts = {}) {
