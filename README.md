@@ -46,7 +46,15 @@
 
 두 판은 독립적이다. **둘 다 깔지 말 것** — 한쪽만 골라 쓰면 된다.
 
-현재 버전: **Lite/Full 플러그인 v0.8.2**, Full 사이드카 **v0.8.1**.
+현재 버전: **Lite/Full 플러그인 v0.8.3**, Full 사이드카 **v0.8.1**.
+
+---
+
+## v0.8.3 주요 기능
+
+- **프리셋 범위 확장**: 프리셋에 provider, URL, 모델, 온도, 추가 JSON, 프롬프트 override를 함께 담는다. API key와 Vertex 서비스 계정 같은 credential은 제외한다.
+- **Full판 에이전트별 설정 포함**: Full판은 에이전트별 provider/URL/model/temperature/extra body override까지 프리셋에 포함한다.
+- **Lite판 모바일 부담 유지**: Lite판은 별도 프리셋 목록이나 무거운 저장소 없이 파일 import/export만 사용한다.
 
 ---
 

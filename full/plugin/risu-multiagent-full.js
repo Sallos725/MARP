@@ -1,7 +1,7 @@
 //@name risu_multiagent_full
 //@display-name MultiAgent RP — Full판
 //@api 3.0
-//@version 0.8.2
+//@version 0.8.3
 //@update-url https://raw.githubusercontent.com/Sallos725/MARP/main/full/plugin/risu-multiagent-full.js
 //@link https://github.com/Sallos725/MARP GitHub
 //@arg server_url string Full판 서버 URL (e.g. http://localhost:6009 or https://example.com/multi-agent)
@@ -29,7 +29,7 @@
 
 (async () => {
   try {
-    const PLUGIN_VERSION = '0.8.2';
+    const PLUGIN_VERSION = '0.8.3';
     const PROMPT_PACK_VERSION = 1;
     const PRESET_PACK_VERSION = 1;
     const PLUGIN_SETTINGS_KEY = 'risu_multiagent_full_plugin_settings_v1';
@@ -686,7 +686,7 @@ textarea.prompt-template{min-height:140px;font-family:ui-monospace,SFMono-Regula
 
     <div class="card">
       <h2>프롬프트 관리</h2>
-      <p>기본 프롬프트는 사이드카에 내장되어 있어 언제든 되돌릴 수 있습니다. 프리셋은 기본 모델/온도와 에이전트별 모델/온도 override, 프롬프트 override만 담습니다.</p>
+      <p>기본 프롬프트는 사이드카에 내장되어 있어 언제든 되돌릴 수 있습니다. 프리셋은 provider, URL, 모델, 온도, 추가 JSON, 프롬프트 override를 담고 API key는 제외합니다.</p>
       <div style="height:10px"></div>
       <div class="header-actions" style="justify-content:flex-start">
         <input id="prompt-import-input" type="file" accept=".json,application/json" hidden>
@@ -1411,37 +1411,62 @@ textarea.prompt-template{min-height:140px;font-family:ui-monospace,SFMono-Regula
         throw new Error(`지원하지 않는 preset 버전입니다: ${version}`);
       }
       const defaults = isPlainObject(raw.defaults) ? raw.defaults : (isPlainObject(raw.global) ? raw.global : {});
+      const defaultProvider = firstPresentString(defaults, ['provider', 'default_provider']);
+      const rawProvider = firstPresentString(raw, ['provider', 'default_provider']);
+      const defaultBaseUrl = firstPresentString(defaults, ['baseUrl', 'base_url', 'default_base_url']);
+      const rawBaseUrl = firstPresentString(raw, ['baseUrl', 'base_url', 'default_base_url']);
       const defaultModel = firstPresentString(defaults, ['model', 'default_model']);
       const rawModel = firstPresentString(raw, ['model', 'default_model']);
       const defaultTemperature = firstPresentNumber(defaults, ['temperature', 'default_temperature'], 'temperature');
       const rawTemperature = firstPresentNumber(raw, ['temperature', 'default_temperature'], 'temperature');
+      const defaultExtraBodyJson = firstPresentString(defaults, ['extraBodyJson', 'extra_body_json', 'default_extra_body_json']);
+      const rawExtraBodyJson = firstPresentString(raw, ['extraBodyJson', 'extra_body_json', 'default_extra_body_json']);
       const agents = Array.isArray(raw.agents) ? raw.agents : (Array.isArray(raw.prompts) ? raw.prompts : []);
-      if (!defaultModel.present && !rawModel.present && !defaultTemperature.present && !rawTemperature.present && !agents.length) {
-        throw new Error('preset에 적용할 모델, 온도, 프롬프트 항목이 없습니다.');
+      if (!defaultProvider.present && !rawProvider.present && !defaultBaseUrl.present && !rawBaseUrl.present && !defaultModel.present && !rawModel.present && !defaultTemperature.present && !rawTemperature.present && !defaultExtraBodyJson.present && !rawExtraBodyJson.present && !agents.length) {
+        throw new Error('preset에 적용할 provider, URL, 모델, 온도, 추가 JSON, 프롬프트 항목이 없습니다.');
       }
       return {
+        defaultProvider: defaultProvider.present ? defaultProvider.value : (rawProvider.present ? rawProvider.value : null),
+        defaultBaseUrl: defaultBaseUrl.present ? defaultBaseUrl.value : (rawBaseUrl.present ? rawBaseUrl.value : null),
         defaultModel: defaultModel.present ? defaultModel.value : (rawModel.present ? rawModel.value : null),
         defaultTemperature: defaultTemperature.present ? defaultTemperature.value : (rawTemperature.present ? rawTemperature.value : null),
+        defaultExtraBodyJson: defaultExtraBodyJson.present ? defaultExtraBodyJson.value : (rawExtraBodyJson.present ? rawExtraBodyJson.value : null),
         agents,
       };
     }
 
     function applyPresetPack(pack) {
       const preset = normalizePresetPack(pack);
+      const providerApplied = preset.defaultProvider !== null;
+      const baseUrlApplied = preset.defaultBaseUrl !== null;
       const modelApplied = preset.defaultModel !== null;
       const temperatureApplied = preset.defaultTemperature !== null;
+      const extraBodyApplied = preset.defaultExtraBodyJson !== null;
+      if (providerApplied) setProviderValue('default_provider', preset.defaultProvider);
+      if (baseUrlApplied) setElementValue('default_base_url', preset.defaultBaseUrl);
       if (modelApplied) setElementValue('default_model', preset.defaultModel);
       if (temperatureApplied) setElementValue('default_temperature', String(preset.defaultTemperature));
+      if (extraBodyApplied) setElementValue('default_extra_body_json', preset.defaultExtraBodyJson);
+      if (providerApplied || baseUrlApplied) updateEndpointExample('default_base_url');
+      if (extraBodyApplied) syncGatewayCheckboxesFromBody('default_extra_body_json', 'gateway_caching_auto', 'gateway_zdr');
 
       let appliedAgents = 0;
       for (const entry of preset.agents) {
         const name = entry?.name;
         if (!name || !promptAgentNames().includes(name)) continue;
         if (entry.enabled !== undefined) setCheckboxValue(`${name}_enabled`, entry.enabled !== false);
-        const modelOverride = firstPresentString(entry, ['model_override', 'modelOverride']);
-        const temperatureOverride = firstPresentNumber(entry, ['temperature_override', 'temperatureOverride'], `${promptAgentLabel(name)} temperature`);
+        const providerOverride = firstPresentString(entry, ['provider_override', 'providerOverride', 'provider']);
+        const baseUrlOverride = firstPresentString(entry, ['base_url_override', 'baseUrlOverride', 'baseUrl', 'base_url']);
+        const modelOverride = firstPresentString(entry, ['model_override', 'modelOverride', 'model']);
+        const temperatureOverride = firstPresentNumber(entry, ['temperature_override', 'temperatureOverride', 'temperature'], `${promptAgentLabel(name)} temperature`);
+        const extraBodyOverride = firstPresentString(entry, ['extra_body_json_override', 'extraBodyJsonOverride', 'extraBodyJson', 'extra_body_json']);
+        if (providerOverride.present) setProviderValue(`${name}_provider`, providerOverride.value);
+        if (baseUrlOverride.present) setElementValue(`${name}_base_url`, baseUrlOverride.value);
         if (modelOverride.present) setElementValue(`${name}_model`, modelOverride.value);
         if (temperatureOverride.present) setElementValue(`${name}_temperature`, temperatureOverride.value === null ? '' : String(temperatureOverride.value));
+        if (extraBodyOverride.present) setElementValue(`${name}_extra_body_json`, extraBodyOverride.value);
+        if (providerOverride.present || baseUrlOverride.present) updateEndpointExample(`${name}_base_url`);
+        if (extraBodyOverride.present) syncGatewayCheckboxesFromBody(`${name}_extra_body_json`, `${name}_gateway_caching_auto`, `${name}_gateway_zdr`);
         setElementValue(`${name}_system_prompt`, promptPackString(entry, [
           'system_prompt_override',
           'systemPrompt',
@@ -1454,10 +1479,10 @@ textarea.prompt-template{min-height:140px;font-family:ui-monospace,SFMono-Regula
         ]));
         appliedAgents += 1;
       }
-      if (!modelApplied && !temperatureApplied && !appliedAgents) {
+      if (!providerApplied && !baseUrlApplied && !modelApplied && !temperatureApplied && !extraBodyApplied && !appliedAgents) {
         throw new Error('적용할 preset 항목이 없습니다.');
       }
-      return { appliedAgents, modelApplied, temperatureApplied };
+      return { appliedAgents, providerApplied, baseUrlApplied, modelApplied, temperatureApplied, extraBodyApplied };
     }
 
     async function handlePresetImport(event) {
@@ -1471,8 +1496,11 @@ textarea.prompt-template{min-height:140px;font-family:ui-monospace,SFMono-Regula
           ? ` (${pack.edition} edition export)`
           : '';
         const parts = [];
+        if (result.providerApplied) parts.push('기본 provider');
+        if (result.baseUrlApplied) parts.push('기본 URL');
         if (result.modelApplied) parts.push('기본 모델');
         if (result.temperatureApplied) parts.push('기본 온도');
+        if (result.extraBodyApplied) parts.push('기본 추가 JSON');
         if (result.appliedAgents) parts.push(`에이전트 ${result.appliedAgents}건`);
         showMsg(`프리셋을 불러왔습니다${editionNote}: ${parts.join(', ')}. 저장하면 적용됩니다.`, true);
       } catch (err) {
@@ -1493,29 +1521,38 @@ textarea.prompt-template{min-height:140px;font-family:ui-monospace,SFMono-Regula
     function promptPresetEntry(name, defaultPrompts = {}) {
       return {
         ...promptOverrideEntry(name, defaultPrompts),
+        provider_override: getProviderValue(`${name}_provider`, ''),
+        base_url_override: getInputValue(`${name}_base_url`),
         model_override: getInputValue(`${name}_model`),
         temperature_override: optionalPresetFloat(`${name}_temperature`),
+        extra_body_json_override: normalizeExtraBodyJson(getInputValue(`${name}_extra_body_json`)),
+        uses_default_provider: !getProviderValue(`${name}_provider`, ''),
+        uses_default_base_url: !getInputValue(`${name}_base_url`),
         uses_default_model: !getInputValue(`${name}_model`),
         uses_default_temperature: !getInputValue(`${name}_temperature`),
+        uses_default_extra_body_json: !getInputValue(`${name}_extra_body_json`),
       };
     }
 
     function exportPresetPack(defaultPrompts = {}, sidecarVersion = '') {
       const pack = {
         risuMultiagentPresetPackVersion: PRESET_PACK_VERSION,
-        type: 'prompt-model-temperature',
+        type: 'provider-url-extra-body-prompt-model-temperature',
         edition: 'full',
         pluginVersion: PLUGIN_VERSION,
         sidecarVersion,
         exportedAt: new Date().toISOString(),
         defaults: {
+          provider: getProviderValue('default_provider', 'openai'),
+          baseUrl: normalizeUrl(getInputValue('default_base_url') || 'https://api.openai.com/v1'),
           model: getInputValue('default_model') || 'gpt-4o-mini',
           temperature: requiredFloat('default_temperature', 0.7),
+          extraBodyJson: normalizeExtraBodyJson(getInputValue('default_extra_body_json')),
         },
         agents: promptAgentNames().map(name => promptPresetEntry(name, defaultPrompts)),
       };
       downloadJson(`risu-multiagent-full-preset-v${PLUGIN_VERSION}.json`, pack);
-      showMsg('모델/온도/프롬프트 프리셋 JSON export를 생성했습니다.', true);
+      showMsg('provider/URL/모델/온도/추가 JSON/프롬프트 프리셋 JSON export를 생성했습니다.', true);
     }
 
     function promptOverrideEntry(name, defaultPrompts = {}) {
@@ -1577,6 +1614,24 @@ textarea.prompt-template{min-height:140px;font-family:ui-monospace,SFMono-Regula
       const selected = document.getElementById(`${id}_select`)?.value || '';
       if (selected === 'custom') return getInputValue(`${id}_custom`) || 'custom';
       return selected || fallback;
+    }
+
+    function setProviderValue(id, value) {
+      const raw = String(value || '').trim();
+      const normalized = normalizeProviderValue(raw);
+      const known = providerOptions().some(option => option.value === normalized);
+      const select = document.getElementById(`${id}_select`);
+      const custom = document.getElementById(`${id}_custom`);
+      const canUseDefault = Boolean(select && Array.from(select.options).some(option => option.value === ''));
+      if (select) {
+        select.value = !raw && canUseDefault ? '' : (known ? normalized : 'custom');
+      }
+      if (custom) custom.value = raw && !known ? raw : '';
+      const wrapper = document.querySelector(`[data-provider="${id}"]`);
+      wrapper?.classList.toggle('provider-custom-active', Boolean(raw && !known));
+      const credentialId = id.replace(/_provider$/, '_api_key');
+      const credential = document.querySelector(`[data-credential="${credentialId}"]`);
+      credential?.classList.toggle('credential-vertex-active', normalized === 'vertex-ai');
     }
 
     function getCredentialValue(id) {

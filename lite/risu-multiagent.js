@@ -1,7 +1,7 @@
 //@name risu_multiagent
 //@display-name MultiAgent RP Pipeline
 //@api 3.0
-//@version 0.8.2
+//@version 0.8.3
 //@update-url https://raw.githubusercontent.com/Sallos725/MARP/main/lite/risu-multiagent.js
 //@link https://github.com/Sallos725/MARP GitHub
 //@arg agent_provider string Analysis agent provider label. e.g. openai
@@ -40,7 +40,7 @@
     const CONFIG_VAULT_VERSION = 1;
     const LAST_RUN_KEY = 'risu_multiagent_lite_last_run_v1';
     const LAST_RUN_VERSION = 1;
-    const PLUGIN_VERSION = '0.8.2';
+    const PLUGIN_VERSION = '0.8.3';
     const PROMPT_PACK_VERSION = 1;
     const PRESET_PACK_VERSION = 1;
 
@@ -893,7 +893,7 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
       return `
         <div class="card">
           <h2>프롬프트 관리</h2>
-          <p>기본 프롬프트는 플러그인에 내장되어 있어 언제든 되돌릴 수 있습니다. 프리셋은 모바일에서도 가볍게 쓰도록 현재 모델/온도와 에이전트별 override만 담습니다.</p>
+          <p>기본 프롬프트는 플러그인에 내장되어 있어 언제든 되돌릴 수 있습니다. 프리셋은 provider, URL, 모델, 온도, 추가 JSON, 에이전트별 override를 담고 API key는 제외합니다.</p>
           <div style="height:10px"></div>
           <div class="header-actions" style="justify-content:flex-start">
             <input id="prompt-import-input" type="file" accept=".json,application/json" hidden>
@@ -1631,27 +1631,44 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
         throw new Error(`지원하지 않는 preset 버전입니다: ${version}`);
       }
       const global = isPlainObject(raw.global) ? raw.global : (isPlainObject(raw.defaults) ? raw.defaults : {});
+      const globalProvider = firstPresentString(global, ['provider', 'default_provider']);
+      const rawProvider = firstPresentString(raw, ['provider', 'default_provider']);
+      const globalBaseUrl = firstPresentString(global, ['baseUrl', 'base_url', 'default_base_url']);
+      const rawBaseUrl = firstPresentString(raw, ['baseUrl', 'base_url', 'default_base_url']);
       const globalModel = firstPresentString(global, ['model', 'default_model']);
       const rawModel = firstPresentString(raw, ['model', 'default_model']);
       const globalTemperature = firstPresentNumber(global, ['temperature', 'default_temperature'], 'temperature');
       const rawTemperature = firstPresentNumber(raw, ['temperature', 'default_temperature'], 'temperature');
+      const globalExtraBodyJson = firstPresentString(global, ['extraBodyJson', 'extra_body_json', 'default_extra_body_json']);
+      const rawExtraBodyJson = firstPresentString(raw, ['extraBodyJson', 'extra_body_json', 'default_extra_body_json']);
       const agents = Array.isArray(raw.agents) ? raw.agents : (Array.isArray(raw.prompts) ? raw.prompts : []);
-      if (!globalModel.present && !rawModel.present && !globalTemperature.present && !rawTemperature.present && !agents.length) {
-        throw new Error('preset에 적용할 모델, 온도, 프롬프트 항목이 없습니다.');
+      if (!globalProvider.present && !rawProvider.present && !globalBaseUrl.present && !rawBaseUrl.present && !globalModel.present && !rawModel.present && !globalTemperature.present && !rawTemperature.present && !globalExtraBodyJson.present && !rawExtraBodyJson.present && !agents.length) {
+        throw new Error('preset에 적용할 provider, URL, 모델, 온도, 추가 JSON, 프롬프트 항목이 없습니다.');
       }
       return {
+        provider: globalProvider.present ? globalProvider.value : (rawProvider.present ? rawProvider.value : null),
+        baseUrl: globalBaseUrl.present ? globalBaseUrl.value : (rawBaseUrl.present ? rawBaseUrl.value : null),
         model: globalModel.present ? globalModel.value : (rawModel.present ? rawModel.value : null),
         temperature: globalTemperature.present ? globalTemperature.value : (rawTemperature.present ? rawTemperature.value : null),
+        extraBodyJson: globalExtraBodyJson.present ? globalExtraBodyJson.value : (rawExtraBodyJson.present ? rawExtraBodyJson.value : null),
         agents,
       };
     }
 
     function applyLitePresetPack(pack) {
       const preset = normalizeLitePresetPack(pack);
+      const providerApplied = preset.provider !== null;
+      const baseUrlApplied = preset.baseUrl !== null;
       const modelApplied = preset.model !== null;
       const temperatureApplied = preset.temperature !== null;
+      const extraBodyApplied = preset.extraBodyJson !== null;
+      if (providerApplied) setProviderValue('agent_provider', preset.provider);
+      if (baseUrlApplied) setElementValue('agent_base_url', preset.baseUrl);
       if (modelApplied) setElementValue('agent_model', preset.model);
       if (temperatureApplied) setElementValue('agent_temperature', String(preset.temperature));
+      if (extraBodyApplied) setElementValue('agent_extra_body_json', preset.extraBodyJson);
+      if (providerApplied || baseUrlApplied) updateEndpointExample('agent_base_url');
+      if (extraBodyApplied) syncGatewayCheckboxesFromBody('agent_extra_body_json', 'gateway_caching_auto', 'gateway_zdr');
 
       let appliedAgents = 0;
       let agentError = null;
@@ -1662,8 +1679,8 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
           agentError = err;
         }
       }
-      if (agentError && !modelApplied && !temperatureApplied) throw agentError;
-      return { appliedAgents, modelApplied, temperatureApplied };
+      if (agentError && !providerApplied && !baseUrlApplied && !modelApplied && !temperatureApplied && !extraBodyApplied) throw agentError;
+      return { appliedAgents, providerApplied, baseUrlApplied, modelApplied, temperatureApplied, extraBodyApplied };
     }
 
     async function handleLitePresetImport(event) {
@@ -1677,8 +1694,11 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
           ? ` (${pack.edition} edition export)`
           : '';
         const parts = [];
+        if (result.providerApplied) parts.push('provider');
+        if (result.baseUrlApplied) parts.push('URL');
         if (result.modelApplied) parts.push('모델');
         if (result.temperatureApplied) parts.push('온도');
+        if (result.extraBodyApplied) parts.push('추가 JSON');
         if (result.appliedAgents) parts.push(`프롬프트 ${result.appliedAgents}건`);
         showMsg(`프리셋을 불러왔습니다${editionNote}: ${parts.join(', ') || '적용 항목 없음'}. 저장하면 적용됩니다.`, true);
       } catch (err) {
@@ -1706,18 +1726,21 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
     function exportLitePresetPack() {
       const pack = {
         risuMultiagentPresetPackVersion: PRESET_PACK_VERSION,
-        type: 'prompt-model-temperature',
+        type: 'provider-url-extra-body-prompt-model-temperature',
         edition: 'lite',
         pluginVersion: PLUGIN_VERSION,
         exportedAt: new Date().toISOString(),
         global: {
+          provider: getProviderValue('agent_provider', 'openai'),
+          baseUrl: normalizeUrl(getInputValue('agent_base_url') || 'https://api.openai.com/v1'),
           model: getInputValue('agent_model') || 'gpt-4o-mini',
           temperature: requiredFloat('agent_temperature', 0.7),
+          extraBodyJson: normalizeExtraBodyJson(getInputValue('agent_extra_body_json')),
         },
         agents: liteAgentNames().map(litePresetEntry),
       };
       downloadJson(`risu-multiagent-lite-preset-v${PLUGIN_VERSION}.json`, pack);
-      showMsg('모델/온도/프롬프트 프리셋 JSON export를 생성했습니다.', true);
+      showMsg('provider/URL/모델/온도/추가 JSON/프롬프트 프리셋 JSON export를 생성했습니다.', true);
     }
 
     function exportLitePromptPack(name = null) {
@@ -1771,6 +1794,20 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
       const selected = document.getElementById(`${id}_select`)?.value || '';
       if (selected === 'custom') return getInputValue(`${id}_custom`) || 'custom';
       return selected || fallback;
+    }
+
+    function setProviderValue(id, value) {
+      const raw = String(value || '').trim();
+      const normalized = normalizeProviderValue(raw);
+      const known = providerOptions().some(option => option.value === normalized);
+      const select = document.getElementById(`${id}_select`);
+      const custom = document.getElementById(`${id}_custom`);
+      if (select) select.value = known ? normalized : 'custom';
+      if (custom) custom.value = known ? '' : raw;
+      const wrapper = document.querySelector(`[data-provider="${id}"]`);
+      wrapper?.classList.toggle('provider-custom-active', !known);
+      const credential = document.querySelector('[data-credential="agent_api_key"]');
+      credential?.classList.toggle('credential-vertex-active', normalized === 'vertex-ai');
     }
 
     function getCredentialValue(id) {
