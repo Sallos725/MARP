@@ -146,12 +146,29 @@ Vercel AI Gateway용 **automatic caching**과 **Zero Data Retention** 체크박�
 
 ### 사이드카 기동 (Docker)
 
+GitHub Container Registry에 올라온 이미지를 쓰면 로컬에서 직접 빌드하지 않아도 된다.
+기본 이미지 이름은 `ghcr.io/sallos725/risu-multiagent-full`이다.
+
 ```bash
 cd full
 cp .env.example .env
 # .env 편집 — 최소 DEFAULT_PROVIDER, DEFAULT_BASE_URL,
 # DEFAULT_API_KEY, DEFAULT_MODEL 채우면 동작
+docker compose pull
 docker compose up -d
+```
+
+특정 버전으로 고정하고 싶으면 `MULTIAGENT_VERSION`을 지정한다.
+
+```bash
+MULTIAGENT_VERSION=vX.Y.Z docker compose pull
+MULTIAGENT_VERSION=vX.Y.Z docker compose up -d
+```
+
+소스에서 직접 빌드하고 싶으면 아래처럼 실행한다.
+
+```bash
+docker compose up -d --build
 ```
 
 기본 포트는 `6009`. `curl http://localhost:6009/health`로 확인.

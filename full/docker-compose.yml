@@ -1,6 +1,9 @@
 services:
   risu-multiagent:
-    build: .
+    image: ${MULTIAGENT_IMAGE:-ghcr.io/sallos725/risu-multiagent-full:${MULTIAGENT_VERSION:-latest}}
+    pull_policy: missing
+    build:
+      context: .
     ports:
       - "6009:6009"
     env_file:
