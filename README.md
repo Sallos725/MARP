@@ -148,6 +148,7 @@ Vercel AI Gateway용 **automatic caching**과 **Zero Data Retention** 체크박�
 
 GitHub Container Registry에 올라온 이미지를 쓰면 로컬에서 직접 빌드하지 않아도 된다.
 기본 이미지 이름은 `ghcr.io/sallos725/risu-multiagent-full`이다.
+이미지는 `linux/amd64`와 `linux/arm64`를 함께 지원한다.
 
 ```bash
 cd full
