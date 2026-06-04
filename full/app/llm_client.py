@@ -1,4 +1,5 @@
 import json
+import re
 from hashlib import sha256
 from time import perf_counter
 from time import time
@@ -11,6 +12,31 @@ VERTEX_SCOPE = "https://www.googleapis.com/auth/cloud-platform"
 DEFAULT_ANTHROPIC_MAX_TOKENS = 1024
 
 _vertex_token_cache: dict[str, tuple[str, float]] = {}
+_THINKING_BLOCK_PATTERNS = (
+    re.compile(
+        r"<｜begin▁of▁(?:thinking|thought|reasoning)｜>.*?(?:<｜end▁of▁(?:thinking|thought|reasoning)｜>|$)",
+        re.IGNORECASE | re.DOTALL,
+    ),
+    re.compile(
+        r"<\|begin[_▁]of[_▁](?:thinking|thought|reasoning)\|>.*?(?:<\|end[_▁]of[_▁](?:thinking|thought|reasoning)\|>|$)",
+        re.IGNORECASE | re.DOTALL,
+    ),
+    re.compile(
+        r"<\s*(?:think|thinking|reasoning)\s*>.*?<\s*/\s*(?:think|thinking|reasoning)\s*>",
+        re.IGNORECASE | re.DOTALL,
+    ),
+    re.compile(
+        r"<\s*(?:think|thinking|reasoning)\s*>.*$",
+        re.IGNORECASE | re.DOTALL,
+    ),
+)
+_STRAY_THINKING_TAG_PATTERN = re.compile(
+    r"<\s*/\s*(?:think|thinking|reasoning)\s*>"
+    r"|<｜end▁of▁(?:thinking|thought|reasoning)｜>"
+    r"|<\|end[_▁]of[_▁](?:thinking|thought|reasoning)\|>",
+    re.IGNORECASE,
+)
+_EXCESS_BLANK_LINE_PATTERN = re.compile(r"\n{3,}")
 
 
 class LlmConfigError(Exception):
@@ -40,10 +66,21 @@ def provider_label(provider: str) -> str:
 async def call_llm(agent_cfg: dict, messages: list[dict], timeout: float) -> str:
     provider = provider_label(agent_cfg.get("provider", ""))
     if provider == "anthropic":
-        return await _call_anthropic(agent_cfg, messages, timeout)
-    if provider == "vertex-ai":
-        return await _call_vertex_openai(agent_cfg, messages, timeout)
-    return await _call_openai_compatible(agent_cfg, messages, timeout)
+        text = await _call_anthropic(agent_cfg, messages, timeout)
+    elif provider == "vertex-ai":
+        text = await _call_vertex_openai(agent_cfg, messages, timeout)
+    else:
+        text = await _call_openai_compatible(agent_cfg, messages, timeout)
+    return sanitize_agent_output(text)
+
+
+def sanitize_agent_output(value: str | None) -> str:
+    text = str(value or "")
+    for pattern in _THINKING_BLOCK_PATTERNS:
+        text = pattern.sub("", text)
+    text = _STRAY_THINKING_TAG_PATTERN.sub("", text)
+    text = _EXCESS_BLANK_LINE_PATTERN.sub("\n\n", text)
+    return text.strip()
 
 
 async def test_llm(agent_cfg: dict, timeout: float) -> dict:

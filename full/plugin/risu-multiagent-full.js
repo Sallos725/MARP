@@ -132,20 +132,24 @@
         const hasErrors = data.errors && Object.keys(data.errors).length > 0;
         const errMessages = hasErrors ? Object.entries(data.errors).map(([k, v]) => `${k}: ${v}`).join(', ') : '';
 
+        const contextWorld = cleanAgentOutput(data.context_world);
+        const contextPlot = cleanAgentOutput(data.context_plot);
+        const contextChar = cleanAgentOutput(data.context_char);
+
         await recordLastRun({
           ...runBase,
           success: !hasErrors,
           status_code: res.status,
           duration_ms: Date.now() - startedAt,
-          world_chars: stringLength(data.context_world),
-          plot_chars: stringLength(data.context_plot),
-          char_chars: stringLength(data.context_char),
+          world_chars: stringLength(contextWorld),
+          plot_chars: stringLength(contextPlot),
+          char_chars: stringLength(contextChar),
           latency_ms: data.latency_ms,
           error: errMessages,
           debug: {
-            context_world: data.context_world,
-            context_plot: data.context_plot,
-            context_char: data.context_char,
+            context_world: contextWorld,
+            context_plot: contextPlot,
+            context_char: contextChar,
           },
         });
 
@@ -154,7 +158,7 @@
           throw new Error(`MultiAgent 에이전트 실패 (Strict): ${errMessages}`);
         }
 
-        return injectContext(messages, data.context_world, data.context_plot, data.context_char, bypass.injectionPosition, bypass.injectionFormat);
+        return injectContext(messages, contextWorld, contextPlot, contextChar, bypass.injectionPosition, bypass.injectionFormat);
 
       } catch (err) {
         await recordLastRun({
@@ -221,6 +225,9 @@
 
     function injectContext(messages, contextWorld, contextPlot, contextChar, position = 'system-end', format = 'classic') {
       if (!Array.isArray(messages)) return messages;
+      const safeContextWorld = cleanAgentOutput(contextWorld);
+      const safeContextPlot = cleanAgentOutput(contextPlot);
+      const safeContextChar = cleanAgentOutput(contextChar);
 
       // 1. 포맷 조립
       let body = '';
@@ -228,13 +235,13 @@
         body = [
           '<MultiAgentRpContext>',
           '  <WorldbuildingAgent>',
-          contextWorld ? contextWorld.split('\n').map(l => '    ' + l).join('\n') : '    (none)',
+          safeContextWorld ? safeContextWorld.split('\n').map(l => '    ' + l).join('\n') : '    (none)',
           '  </WorldbuildingAgent>',
           '  <PlotAgent>',
-          contextPlot ? contextPlot.split('\n').map(l => '    ' + l).join('\n') : '    (none)',
+          safeContextPlot ? safeContextPlot.split('\n').map(l => '    ' + l).join('\n') : '    (none)',
           '  </PlotAgent>',
           '  <CharacterAgent>',
-          contextChar ? contextChar.split('\n').map(l => '    ' + l).join('\n') : '    (none)',
+          safeContextChar ? safeContextChar.split('\n').map(l => '    ' + l).join('\n') : '    (none)',
           '  </CharacterAgent>',
           '  <ReviewInstructions>',
           '    Use these notes quietly as background context. Preserve established world details, narrative continuity, character voice, and motivations while allowing natural development.',
@@ -246,9 +253,9 @@
         body = [
           '| 에이전트 | 분석 지침 및 가이드라인 |',
           '|---|---|',
-          `| **세계관 (Worldbuilding)** | ${cleanVal(contextWorld)} |`,
-          `| **플롯 (Plot)** | ${cleanVal(contextPlot)} |`,
-          `| **등장인물 (Character)** | ${cleanVal(contextChar)} |`,
+          `| **세계관 (Worldbuilding)** | ${cleanVal(safeContextWorld)} |`,
+          `| **플롯 (Plot)** | ${cleanVal(safeContextPlot)} |`,
+          `| **등장인물 (Character)** | ${cleanVal(safeContextChar)} |`,
           '| **주의사항** | 조용히 이 지시를 배경 맥락으로 사용할 것. 기존 설정과 성격 일치 유지. |'
         ].join('\n');
       } else {
@@ -258,13 +265,13 @@
           '[MultiAgent RP Analysis Context]',
           '',
           '[Worldbuilding Agent]',
-          contextWorld || '(none)',
+          safeContextWorld || '(none)',
           '',
           '[Plot Agent]',
-          contextPlot || '(none)',
+          safeContextPlot || '(none)',
           '',
           '[Character Agent]',
-          contextChar || '(none)',
+          safeContextChar || '(none)',
           '',
           '[Review Instructions]',
           'Use these notes quietly as background context. Preserve established world details, narrative continuity, character voice, and motivations while allowing natural development.',
@@ -2230,6 +2237,19 @@ textarea.prompt-template{min-height:140px;font-family:ui-monospace,SFMono-Regula
       if (Array.isArray(value)) return value.some(containsLbProcess);
       if (typeof value === 'object') return Object.values(value).some(containsLbProcess);
       return /<\/?\s*lb-process\b/i.test(String(value));
+    }
+
+    function cleanAgentOutput(value) {
+      let text = String(value ?? '');
+      text = text
+        .replace(/<｜begin▁of▁(?:thinking|thought|reasoning)｜>[\s\S]*?(?:<｜end▁of▁(?:thinking|thought|reasoning)｜>|$)/gi, '')
+        .replace(/<\|begin[_▁]of[_▁](?:thinking|thought|reasoning)\|>[\s\S]*?(?:<\|end[_▁]of[_▁](?:thinking|thought|reasoning)\|>|$)/gi, '')
+        .replace(/<\s*(?:think|thinking|reasoning)\s*>[\s\S]*?<\s*\/\s*(?:think|thinking|reasoning)\s*>/gi, '')
+        .replace(/<\s*(?:think|thinking|reasoning)\s*>[\s\S]*$/gi, '')
+        .replace(/<\s*\/\s*(?:think|thinking|reasoning)\s*>/gi, '')
+        .replace(/<｜end▁of▁(?:thinking|thought|reasoning)｜>/gi, '')
+        .replace(/<\|end[_▁]of[_▁](?:thinking|thought|reasoning)\|>/gi, '');
+      return text.replace(/\n{3,}/g, '\n\n').trim();
     }
 
     function getBypassReason(messages, type, settings) {

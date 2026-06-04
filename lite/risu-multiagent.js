@@ -225,7 +225,7 @@
     function extractOpenAICompatibleText(data, providerName) {
       const choice = data?.choices?.[0];
       const content = choice?.message?.content ?? choice?.text ?? data?.output_text;
-      if (typeof content === 'string') return content;
+      if (typeof content === 'string') return cleanAgentOutput(content);
       if (Array.isArray(content)) {
         const text = content
           .map(part => {
@@ -237,7 +237,7 @@
           .filter(Boolean)
           .join('\n')
           .trim();
-        if (text) return text;
+        if (text) return cleanAgentOutput(text);
       }
       const finishReason = choice?.finish_reason ? ` finish_reason=${choice.finish_reason}` : '';
       throw new Error(`${providerName} 응답에서 message.content를 찾을 수 없습니다.${finishReason}`);
@@ -249,7 +249,20 @@
         .map(block => block.text || '')
         .filter(Boolean);
       if (!parts.length) throw new Error('Anthropic 응답에서 text content를 찾을 수 없습니다.');
-      return parts.join('\n').trim();
+      return cleanAgentOutput(parts.join('\n'));
+    }
+
+    function cleanAgentOutput(value) {
+      let text = String(value ?? '');
+      text = text
+        .replace(/<｜begin▁of▁(?:thinking|thought|reasoning)｜>[\s\S]*?(?:<｜end▁of▁(?:thinking|thought|reasoning)｜>|$)/gi, '')
+        .replace(/<\|begin[_▁]of[_▁](?:thinking|thought|reasoning)\|>[\s\S]*?(?:<\|end[_▁]of[_▁](?:thinking|thought|reasoning)\|>|$)/gi, '')
+        .replace(/<\s*(?:think|thinking|reasoning)\s*>[\s\S]*?<\s*\/\s*(?:think|thinking|reasoning)\s*>/gi, '')
+        .replace(/<\s*(?:think|thinking|reasoning)\s*>[\s\S]*$/gi, '')
+        .replace(/<\s*\/\s*(?:think|thinking|reasoning)\s*>/gi, '')
+        .replace(/<｜end▁of▁(?:thinking|thought|reasoning)｜>/gi, '')
+        .replace(/<\|end[_▁]of[_▁](?:thinking|thought|reasoning)\|>/gi, '');
+      return text.replace(/\n{3,}/g, '\n\n').trim();
     }
 
     // ── 메시지 유틸 ───────────────────────────────────────────────────────────
@@ -525,6 +538,9 @@
 
     function injectContext(messages, contextWorld, contextPlot, contextChar, position = 'system-end', format = 'classic') {
       if (!Array.isArray(messages)) return messages;
+      const safeContextWorld = cleanAgentOutput(contextWorld);
+      const safeContextPlot = cleanAgentOutput(contextPlot);
+      const safeContextChar = cleanAgentOutput(contextChar);
 
       // 1. 포맷 조립
       let body = '';
@@ -532,13 +548,13 @@
         body = [
           '<MultiAgentRpContext>',
           '  <WorldbuildingAgent>',
-          contextWorld ? contextWorld.split('\n').map(l => '    ' + l).join('\n') : '    (none)',
+          safeContextWorld ? safeContextWorld.split('\n').map(l => '    ' + l).join('\n') : '    (none)',
           '  </WorldbuildingAgent>',
           '  <PlotAgent>',
-          contextPlot ? contextPlot.split('\n').map(l => '    ' + l).join('\n') : '    (none)',
+          safeContextPlot ? safeContextPlot.split('\n').map(l => '    ' + l).join('\n') : '    (none)',
           '  </PlotAgent>',
           '  <CharacterAgent>',
-          contextChar ? contextChar.split('\n').map(l => '    ' + l).join('\n') : '    (none)',
+          safeContextChar ? safeContextChar.split('\n').map(l => '    ' + l).join('\n') : '    (none)',
           '  </CharacterAgent>',
           '  <ReviewInstructions>',
           '    Use these notes quietly as background context. Preserve established world details, narrative continuity, character voice, and motivations while allowing natural development.',
@@ -550,9 +566,9 @@
         body = [
           '| 에이전트 | 분석 지침 및 가이드라인 |',
           '|---|---|',
-          `| **세계관 (Worldbuilding)** | ${cleanVal(contextWorld)} |`,
-          `| **플롯 (Plot)** | ${cleanVal(contextPlot)} |`,
-          `| **등장인물 (Character)** | ${cleanVal(contextChar)} |`,
+          `| **세계관 (Worldbuilding)** | ${cleanVal(safeContextWorld)} |`,
+          `| **플롯 (Plot)** | ${cleanVal(safeContextPlot)} |`,
+          `| **등장인물 (Character)** | ${cleanVal(safeContextChar)} |`,
           '| **주의사항** | 조용히 이 지시를 배경 맥락으로 사용할 것. 기존 설정과 성격 일치 유지. |'
         ].join('\n');
       } else {
@@ -562,13 +578,13 @@
           '[MultiAgent RP Analysis Context]',
           '',
           '[Worldbuilding Agent]',
-          contextWorld || '(none)',
+          safeContextWorld || '(none)',
           '',
           '[Plot Agent]',
-          contextPlot || '(none)',
+          safeContextPlot || '(none)',
           '',
           '[Character Agent]',
-          contextChar || '(none)',
+          safeContextChar || '(none)',
           '',
           '[Review Instructions]',
           'Use these notes quietly as background context. Preserve established world details, narrative continuity, character voice, and motivations while allowing natural development.',
@@ -2583,7 +2599,7 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
     async function runAgentWithDiagnostics(run, name, action, strictMode) {
       const started = Date.now();
       try {
-        const output = await action();
+        const output = cleanAgentOutput(await action());
         run.agents[name] = {
           ok: true,
           durationMs: Date.now() - started,

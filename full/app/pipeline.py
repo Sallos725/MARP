@@ -1,6 +1,7 @@
 import asyncio
 from time import perf_counter
 from app.agents import WorldbuildingAgent, PlotAgent, CharacterAgent
+from app.llm_client import sanitize_agent_output
 from app.models import AnalyzeRequest, AnalyzeResponse
 from app import config_store
 
@@ -34,7 +35,7 @@ async def run_analysis(request: AnalyzeRequest) -> AnalyzeResponse:
     async def safe_run(agent_instance, name: str) -> str:
         start_time = perf_counter()
         try:
-            res = await agent_instance.run(pipeline_context)
+            res = sanitize_agent_output(await agent_instance.run(pipeline_context))
             latency_ms[name] = int((perf_counter() - start_time) * 1000)
             return res or ""
         except Exception as e:
