@@ -1,7 +1,7 @@
 //@name risu_multiagent
 //@display-name MultiAgent RP Pipeline
 //@api 3.0
-//@version 0.8.3
+//@version 0.8.4
 //@update-url https://raw.githubusercontent.com/Sallos725/MARP/main/lite/risu-multiagent.js
 //@link https://github.com/Sallos725/MARP GitHub
 //@arg agent_provider string Analysis agent provider label. e.g. openai
@@ -40,7 +40,7 @@
     const CONFIG_VAULT_VERSION = 1;
     const LAST_RUN_KEY = 'risu_multiagent_lite_last_run_v1';
     const LAST_RUN_VERSION = 1;
-    const PLUGIN_VERSION = '0.8.3';
+    const PLUGIN_VERSION = '0.8.4';
     const PROMPT_PACK_VERSION = 1;
     const PRESET_PACK_VERSION = 1;
     const PRESET_LIBRARY_KEY = 'risu_multiagent_lite_preset_library_v1';

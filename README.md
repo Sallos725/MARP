@@ -46,7 +46,15 @@
 
 두 판은 독립적이다. **둘 다 깔지 말 것** — 한쪽만 골라 쓰면 된다.
 
-현재 버전: **Lite/Full 플러그인 v0.8.3**, Full 사이드카 **v0.8.1**.
+현재 버전: **Lite/Full 플러그인 v0.8.4**, Full 사이드카 **v0.8.4**.
+
+---
+
+## v0.8.4 주요 기능
+
+- **thinking/reasoning 블록 제거**: DeepSeek/Qwen 계열처럼 `<｜begin▁of▁thinking｜>` 또는 `<think>` 형식의 추론 블록을 `MultiAgent RP Analysis Context`에 주입하지 않도록 제거한다.
+- **Lite/Full 이중 방어**: Lite는 provider 응답 추출 직후와 최종 주입 직전에 정리하고, Full은 사이드카 응답과 브라우저 플러그인 주입 경계에서 모두 정리한다.
+- **월드빌더 급발진 완화**: 세계관 에이전트의 내부 추론이 Marp 월드빌더나 메인 모델 컨텍스트로 새어 들어가 continuation 대상으로 취급되는 문제를 줄인다.
 
 ---
 
