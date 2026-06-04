@@ -43,6 +43,10 @@
     const PLUGIN_VERSION = '0.8.3';
     const PROMPT_PACK_VERSION = 1;
     const PRESET_PACK_VERSION = 1;
+    const PRESET_LIBRARY_KEY = 'risu_multiagent_lite_preset_library_v1';
+    const PRESET_LIBRARY_ITEM_PREFIX = 'risu_multiagent_lite_preset_v1:';
+    const PRESET_LIBRARY_VERSION = 1;
+    const PRESET_LIBRARY_LIMIT = 30;
 
     // ── 설정 로드 ─────────────────────────────────────────────────────────────
 
@@ -595,25 +599,47 @@
     // ── 설정 GUI ──────────────────────────────────────────────────────────────
 
     async function openLiteDashboard() {
+      document.body.innerHTML = '';
       const conf = await getConfig();
       const vaultInfo = await getConfigVaultInfo();
       const lastRun = await getLastRunDiagnostics();
-      document.body.innerHTML = buildLiteUI(conf, vaultInfo, lastRun);
-      setupLiteHandlers(conf);
+      const presetLibrary = await getLitePresetLibrary();
+      document.body.innerHTML = buildLiteUI(conf, vaultInfo, lastRun, presetLibrary);
+      setupLiteHandlers(conf, presetLibrary);
       await Risuai.showContainer('fullscreen');
     }
 
     const menuIcon = '🔱';
 
-    Risuai.registerSetting('MultiAgent Lite판 상태', openLiteDashboard, menuIcon, 'html');
-    await Risuai.registerButton({
+    const liteUiParts = [];
+    const liteSettingPart = await Risuai.registerSetting('MultiAgent Lite판 상태', openLiteDashboard, menuIcon, 'html');
+    const liteButtonPart = await Risuai.registerButton({
       name: 'MultiAgent Lite',
       icon: menuIcon,
       iconType: 'html',
       location: 'hamburger',
     }, openLiteDashboard);
+    if (liteSettingPart?.id) liteUiParts.push(liteSettingPart.id);
+    if (liteButtonPart?.id) liteUiParts.push(liteButtonPart.id);
 
-    function buildLiteUI(conf, vaultInfo, lastRun) {
+    if (typeof Risuai.onUnload === 'function') {
+      await Risuai.onUnload(async () => {
+        vertexTokenCache = null;
+        document.body.innerHTML = '';
+        try {
+          await Risuai.hideContainer();
+        } catch (_) {}
+        if (typeof Risuai.unregisterUIPart === 'function') {
+          for (const id of liteUiParts) {
+            try {
+              await Risuai.unregisterUIPart(id);
+            } catch (_) {}
+          }
+        }
+      });
+    }
+
+    function buildLiteUI(conf, vaultInfo, lastRun, presetLibrary) {
       return `<!DOCTYPE html><html><head><meta charset="utf-8">
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
@@ -627,6 +653,8 @@ h1{font-size:1.34rem;font-weight:720;letter-spacing:0;margin-bottom:4px}
 .agent-toggle{display:flex;align-items:center;justify-content:space-between;gap:10px;background:#15171b;border:1px solid #262a31;border-radius:8px;padding:10px 12px;margin-bottom:10px}
 .agent-toggle strong{font-size:.84rem}
 .prompt-actions{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0 10px}
+.preset-library{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px;align-items:end;margin:10px 0}
+.preset-library-actions{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 10px}
 textarea.prompt-template{min-height:140px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.78rem}
 .prompt-preview{white-space:pre-wrap;overflow:auto;max-height:220px;background:#0f1115;border:1px solid #303640;border-radius:7px;padding:10px;color:#d9e1ec;font-size:.78rem;line-height:1.5}
 .metric{background:#191b20;border:1px solid #292d35;border-radius:8px;padding:12px;min-height:72px}
@@ -663,7 +691,7 @@ input[type=checkbox]{width:auto;margin-right:7px}
 .actions-inner{max-width:920px;margin:0 auto;display:flex;gap:8px;justify-content:flex-end}
 button{padding:9px 14px;border-radius:7px;border:1px solid #343944;background:#20242b;color:#eef2f7;cursor:pointer;font-size:.86rem;font-weight:650}
 button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#2f6fed;color:#fff}button.primary:hover{background:#275fce}button.ghost{background:#15171b;color:#a8b0bd}
-@media (max-width: 760px){.top{display:block}.header-actions{justify-content:flex-start;margin-top:12px}.status-strip,.grid,.row2{grid-template-columns:1fr}}
+@media (max-width: 760px){.top{display:block}.header-actions{justify-content:flex-start;margin-top:12px}.status-strip,.grid,.row2,.preset-library{grid-template-columns:1fr}}
 </style></head><body>
 <div class="wrap">
   <div class="top">
@@ -744,7 +772,7 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
     </div>
   </div>
 
-  ${litePromptManagement(conf)}
+  ${litePromptManagement(conf, presetLibrary)}
 
   ${lastRunCard(lastRun)}
 
@@ -889,12 +917,30 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
     }
 
 
-    function litePromptManagement(conf) {
+    function litePromptManagement(conf, presetLibrary = null) {
+      const normalizedLibrary = normalizeLitePresetLibrary(presetLibrary);
+      const presetOptions = litePresetLibraryOptions(normalizedLibrary);
+      const presetCount = normalizedLibrary.presets.length;
       return `
         <div class="card">
           <h2>프롬프트 관리</h2>
-          <p>기본 프롬프트는 플러그인에 내장되어 있어 언제든 되돌릴 수 있습니다. 프리셋은 provider, URL, 모델, 온도, 추가 JSON, 에이전트별 override를 담고 API key는 제외합니다.</p>
-          <div style="height:10px"></div>
+          <p>기본 프롬프트는 플러그인에 내장되어 있어 언제든 되돌릴 수 있습니다. 저장된 프리셋은 RisuAI pluginStorage에 보관되며 provider, URL, 모델, 온도, 추가 JSON, 에이전트별 override를 담고 API key는 제외합니다.</p>
+          <div class="preset-library">
+            <div class="field">
+              <label for="preset-name-input">프리셋 이름</label>
+              <input id="preset-name-input" type="text" maxlength="80" placeholder="예: 로컬 RP / Gemini 저온">
+            </div>
+            <div class="field">
+              <label for="preset-library-select">저장된 프리셋 (${presetCount})</label>
+              <select id="preset-library-select">${presetOptions}</select>
+            </div>
+          </div>
+          <div class="preset-library-actions">
+            <button id="preset-save-library-btn" type="button" class="primary">현재 조합 저장/갱신</button>
+            <button id="preset-apply-library-btn" type="button">선택 적용</button>
+            <button id="preset-delete-library-btn" type="button" class="ghost">선택 삭제</button>
+          </div>
+          <div class="example-url">선택 적용은 화면 값만 바꿉니다. 실제 반영은 아래 저장 버튼을 눌러 확정하세요.</div>
           <div class="header-actions" style="justify-content:flex-start">
             <input id="prompt-import-input" type="file" accept=".json,application/json" hidden>
             <input id="preset-import-input" type="file" accept=".json,application/json" hidden>
@@ -957,7 +1003,7 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
       `;
     }
 
-    function setupLiteHandlers(initialConf) {
+    function setupLiteHandlers(initialConf, presetLibrary = null) {
       setupProviderControls();
       setupCredentialFiles();
       setupEndpointExamples();
@@ -1012,6 +1058,41 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
         document.getElementById('preset-import-input')?.click();
       });
       document.getElementById('preset-import-input')?.addEventListener('change', handleLitePresetImport);
+      document.getElementById('preset-save-library-btn')?.addEventListener('click', async () => {
+        try {
+          const selectedId = getInputValue('preset-library-select');
+          const selected = findLitePreset(presetLibrary, selectedId);
+          const name = cleanLitePresetName(getInputValue('preset-name-input') || selected?.name || defaultLitePresetName());
+          const pack = buildLitePresetPack();
+          await saveLitePresetLibraryPreset(name, pack, selectedId);
+          await openLiteDashboard();
+          showMsg(`프리셋 '${name}'을 pluginStorage에 저장했습니다.`, true);
+        } catch (err) {
+          showMsg(`프리셋 저장 실패: ${err.message}`, false);
+        }
+      });
+      document.getElementById('preset-apply-library-btn')?.addEventListener('click', async () => {
+        try {
+          const selected = findLitePreset(presetLibrary, getInputValue('preset-library-select'));
+          if (!selected) throw new Error('적용할 프리셋을 선택하세요.');
+          const pack = await getLitePresetPack(selected.id);
+          const result = applyLitePresetPack(pack);
+          showMsg(`프리셋 '${selected.name}'을 화면에 적용했습니다: ${litePresetResultParts(result).join(', ') || '적용 항목 없음'}. 저장하면 확정됩니다.`, true);
+        } catch (err) {
+          showMsg(`프리셋 적용 실패: ${err.message}`, false);
+        }
+      });
+      document.getElementById('preset-delete-library-btn')?.addEventListener('click', async () => {
+        try {
+          const selected = findLitePreset(presetLibrary, getInputValue('preset-library-select'));
+          if (!selected) throw new Error('삭제할 프리셋을 선택하세요.');
+          await deleteLitePresetLibraryPreset(selected.id);
+          await openLiteDashboard();
+          showMsg(`프리셋 '${selected.name}'을 삭제했습니다.`, true);
+        } catch (err) {
+          showMsg(`프리셋 삭제 실패: ${err.message}`, false);
+        }
+      });
       document.querySelectorAll('[data-prompt-import]').forEach(btn => {
         btn.addEventListener('click', () => triggerLitePromptImport(btn.dataset.promptImport));
       });
@@ -1028,38 +1109,8 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
       document.querySelectorAll('[data-prompt-export]').forEach(btn => {
         btn.addEventListener('click', () => exportLitePromptPack(btn.dataset.promptExport));
       });
-      document.getElementById('save-btn')?.addEventListener('click', async () => {
-        try {
-          const next = collectLiteConfig(initialConf);
-          await saveLiteConfig(next);
-          await saveConfigVault('lite', next);
-          showMsg('저장 완료', true);
-        } catch (err) {
-          showMsg(`저장 오류: ${err.message}`, false);
-        }
-      });
-      document.getElementById('vault-save-btn')?.addEventListener('click', async () => {
-        try {
-          const next = collectLiteConfig(initialConf);
-          await saveConfigVault('lite', next);
-          showMsg('백업 저장 완료', true);
-          await openLiteDashboard();
-        } catch (err) {
-          showMsg(`백업 저장 실패: ${err.message}`, false);
-        }
-      });
-      document.getElementById('vault-restore-btn')?.addEventListener('click', async () => {
-        try {
-          const restored = await restoreConfigVault('lite');
-          await saveLiteConfig(restored);
-          showMsg('백업 복구 완료', true);
-          await openLiteDashboard();
-        } catch (err) {
-          showMsg(`백업 복구 실패: ${err.message}`, false);
-        }
-      });
-
       document.getElementById('close-btn')?.addEventListener('click', async () => {
+        document.body.innerHTML = '';
         await Risuai.hideContainer();
       });
     }
@@ -1399,6 +1450,129 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
       }
     }
 
+    async function getLitePresetLibrary() {
+      try {
+        const raw = await Risuai.pluginStorage.getItem(PRESET_LIBRARY_KEY);
+        const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+        const library = normalizeLitePresetLibrary(parsed, true);
+        const embedded = library.presets.filter(item => isPlainObject(item.pack));
+        if (embedded.length) {
+          for (const item of embedded) {
+            await saveLitePresetPack(item.id, item.pack);
+          }
+          const indexOnly = normalizeLitePresetLibrary(library, false);
+          await saveLitePresetLibrary(indexOnly);
+          return indexOnly;
+        }
+        return normalizeLitePresetLibrary(parsed, false);
+      } catch (_) {
+        return normalizeLitePresetLibrary(null, false);
+      }
+    }
+
+    async function saveLitePresetLibrary(library) {
+      await Risuai.pluginStorage.setItem(PRESET_LIBRARY_KEY, normalizeLitePresetLibrary(library, false));
+    }
+
+    async function saveLitePresetLibraryPreset(name, pack, presetId = '') {
+      const library = await getLitePresetLibrary();
+      const now = new Date().toISOString();
+      const cleanName = cleanLitePresetName(name || defaultLitePresetName());
+      const existingIndex = presetId
+        ? library.presets.findIndex(item => item.id === presetId)
+        : -1;
+      const entry = {
+        id: existingIndex >= 0 ? library.presets[existingIndex].id : newLitePresetId(),
+        name: cleanName,
+        savedAt: now,
+      };
+      await saveLitePresetPack(entry.id, pack);
+      const nextPresets = existingIndex >= 0
+        ? [entry, ...library.presets.filter((_, index) => index !== existingIndex)]
+        : [entry, ...library.presets];
+      await saveLitePresetLibrary({
+        version: PRESET_LIBRARY_VERSION,
+        presets: nextPresets.slice(0, PRESET_LIBRARY_LIMIT),
+      });
+      return entry;
+    }
+
+    async function getLitePresetPack(presetId) {
+      const id = String(presetId || '');
+      if (!id) throw new Error('프리셋 ID가 비어 있습니다.');
+      const raw = await Risuai.pluginStorage.getItem(litePresetItemKey(id));
+      const pack = typeof raw === 'string' ? JSON.parse(raw) : raw;
+      if (!isPlainObject(pack)) throw new Error('프리셋 본문을 찾을 수 없습니다.');
+      return pack;
+    }
+
+    async function saveLitePresetPack(presetId, pack) {
+      await Risuai.pluginStorage.setItem(litePresetItemKey(presetId), pack);
+    }
+
+    async function deleteLitePresetLibraryPreset(presetId) {
+      const library = await getLitePresetLibrary();
+      const next = library.presets.filter(item => item.id !== presetId);
+      if (typeof Risuai.pluginStorage.removeItem === 'function') {
+        await Risuai.pluginStorage.removeItem(litePresetItemKey(presetId));
+      }
+      await saveLitePresetLibrary({ version: PRESET_LIBRARY_VERSION, presets: next });
+    }
+
+    function normalizeLitePresetLibrary(raw, includePack = false) {
+      const source = isPlainObject(raw) ? raw : {};
+      const presets = Array.isArray(source.presets) ? source.presets : [];
+      const cleanPresets = [];
+      for (const item of presets) {
+        if (!isPlainObject(item)) continue;
+        const pack = isPlainObject(item.pack) ? item.pack : null;
+        const id = truncateText(String(item.id || newLitePresetId()), 96);
+        const entry = {
+          id,
+          name: cleanLitePresetName(item.name || pack?.name || defaultLitePresetName()),
+          savedAt: String(item.savedAt || item.saved_at || ''),
+        };
+        if (includePack && pack) entry.pack = pack;
+        cleanPresets.push(entry);
+      }
+      return {
+        version: PRESET_LIBRARY_VERSION,
+        presets: cleanPresets.slice(0, PRESET_LIBRARY_LIMIT),
+      };
+    }
+
+    function litePresetLibraryOptions(library) {
+      const presets = normalizeLitePresetLibrary(library, false).presets;
+      if (!presets.length) return '<option value="">저장된 프리셋 없음</option>';
+      return ['<option value="">프리셋 선택...</option>', ...presets.map(item => {
+        const suffix = item.savedAt ? ` · ${formatDateTime(item.savedAt)}` : '';
+        return `<option value="${escHtml(item.id)}">${escHtml(item.name + suffix)}</option>`;
+      })].join('');
+    }
+
+    function findLitePreset(library, presetId) {
+      const id = String(presetId || '');
+      if (!id) return null;
+      return normalizeLitePresetLibrary(library, false).presets.find(item => item.id === id) || null;
+    }
+
+    function litePresetItemKey(presetId) {
+      return `${PRESET_LIBRARY_ITEM_PREFIX}${presetId}`;
+    }
+
+    function newLitePresetId() {
+      return `preset-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+    }
+
+    function defaultLitePresetName() {
+      return `프리셋 ${formatDateTime(new Date().toISOString())}`;
+    }
+
+    function cleanLitePresetName(name) {
+      const text = String(name || '').replace(/\s+/g, ' ').trim();
+      return truncateText(text || defaultLitePresetName(), 80);
+    }
+
     async function getLastRunDiagnostics() {
       try {
         const raw = await Risuai.pluginStorage.getItem(LAST_RUN_KEY);
@@ -1723,8 +1897,8 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
       };
     }
 
-    function exportLitePresetPack() {
-      const pack = {
+    function buildLitePresetPack() {
+      return {
         risuMultiagentPresetPackVersion: PRESET_PACK_VERSION,
         type: 'provider-url-extra-body-prompt-model-temperature',
         edition: 'lite',
@@ -1739,6 +1913,21 @@ button:hover{background:#2a3039}button.primary{background:#2f6fed;border-color:#
         },
         agents: liteAgentNames().map(litePresetEntry),
       };
+    }
+
+    function litePresetResultParts(result) {
+      const parts = [];
+      if (result.providerApplied) parts.push('provider');
+      if (result.baseUrlApplied) parts.push('URL');
+      if (result.modelApplied) parts.push('모델');
+      if (result.temperatureApplied) parts.push('온도');
+      if (result.extraBodyApplied) parts.push('추가 JSON');
+      if (result.appliedAgents) parts.push(`프롬프트 ${result.appliedAgents}건`);
+      return parts;
+    }
+
+    function exportLitePresetPack() {
+      const pack = buildLitePresetPack();
       downloadJson(`risu-multiagent-lite-preset-v${PLUGIN_VERSION}.json`, pack);
       showMsg('provider/URL/모델/온도/추가 JSON/프롬프트 프리셋 JSON export를 생성했습니다.', true);
     }

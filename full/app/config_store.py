@@ -5,10 +5,15 @@ JSON 파일 기반 설정 저장소.
 
 import json
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 from threading import Lock
+from uuid import uuid4
 
 CONFIG_PATH = Path(os.getenv("CONFIG_PATH", "data/config.json"))
+PRESET_PATH = Path(os.getenv("PRESET_PATH", str(CONFIG_PATH.with_name("presets.json"))))
+PRESET_LIBRARY_VERSION = 1
+PRESET_LIBRARY_LIMIT = 100
 _lock = Lock()
 
 DEFAULTS: dict = {
@@ -107,6 +112,119 @@ def save(data: dict) -> None:
             json.dumps(merged, indent=2, ensure_ascii=False),
             encoding="utf-8",
         )
+
+
+def load_presets(include_pack: bool = True) -> dict:
+    if not PRESET_PATH.exists():
+        return {"version": PRESET_LIBRARY_VERSION, "presets": []}
+    try:
+        with _lock:
+            text = PRESET_PATH.read_text(encoding="utf-8")
+        return normalize_preset_library(json.loads(text), include_pack=include_pack)
+    except (json.JSONDecodeError, OSError, TypeError, ValueError):
+        return {"version": PRESET_LIBRARY_VERSION, "presets": []}
+
+
+def load_preset_index() -> dict:
+    return load_presets(include_pack=False)
+
+
+def get_preset(preset_id: str) -> dict | None:
+    target_id = str(preset_id or "").strip()
+    if not target_id:
+        return None
+    for item in load_presets(include_pack=True)["presets"]:
+        if item["id"] == target_id:
+            return item
+    return None
+
+
+def save_presets(library: dict) -> None:
+    normalized = normalize_preset_library(library, include_pack=True)
+    PRESET_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with _lock:
+        PRESET_PATH.write_text(
+            json.dumps(normalized, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+
+
+def upsert_preset(name: str, pack: dict, preset_id: str | None = None) -> dict:
+    if not isinstance(pack, dict):
+        raise ValueError("preset pack must be a JSON object")
+
+    library = load_presets(include_pack=True)
+    clean_name = clean_preset_name(name)
+    now = now_iso()
+    target_id = str(preset_id or "").strip()
+    existing_index = next(
+        (index for index, item in enumerate(library["presets"]) if item["id"] == target_id),
+        -1,
+    )
+    entry = {
+        "id": library["presets"][existing_index]["id"] if existing_index >= 0 else f"preset-{uuid4().hex}",
+        "name": clean_name,
+        "saved_at": now,
+        "pack": pack,
+    }
+    next_presets = [entry] + [
+        item for index, item in enumerate(library["presets"])
+        if index != existing_index
+    ]
+    next_library = {
+        "version": PRESET_LIBRARY_VERSION,
+        "presets": next_presets[:PRESET_LIBRARY_LIMIT],
+    }
+    save_presets(next_library)
+    return normalize_preset_library(next_library, include_pack=False)
+
+
+def delete_preset(preset_id: str) -> dict | None:
+    target_id = str(preset_id or "").strip()
+    library = load_presets(include_pack=True)
+    next_presets = [item for item in library["presets"] if item["id"] != target_id]
+    if len(next_presets) == len(library["presets"]):
+        return None
+    next_library = {"version": PRESET_LIBRARY_VERSION, "presets": next_presets}
+    save_presets(next_library)
+    return normalize_preset_library(next_library, include_pack=False)
+
+
+def normalize_preset_library(raw: object | None, include_pack: bool = True) -> dict:
+    source = raw if isinstance(raw, dict) else {}
+    raw_presets = source.get("presets") if isinstance(source.get("presets"), list) else []
+    presets = []
+    for item in raw_presets:
+        if not isinstance(item, dict):
+            continue
+        pack = item.get("pack") if isinstance(item.get("pack"), dict) else {}
+        if include_pack and not pack:
+            continue
+        entry = {
+            "id": truncate_text(str(item.get("id") or f"preset-{uuid4().hex}"), 96),
+            "name": clean_preset_name(item.get("name") or pack.get("name") or "Preset"),
+            "saved_at": str(item.get("saved_at") or item.get("savedAt") or now_iso()),
+        }
+        if include_pack:
+            entry["pack"] = pack
+        presets.append(entry)
+    return {
+        "version": PRESET_LIBRARY_VERSION,
+        "presets": presets[:PRESET_LIBRARY_LIMIT],
+    }
+
+
+def clean_preset_name(name: object) -> str:
+    text = " ".join(str(name or "").split())
+    return truncate_text(text or "Preset", 80)
+
+
+def truncate_text(value: str, limit: int) -> str:
+    return value if len(value) <= limit else value[:max(0, limit - 3)] + "..."
+
+
+def now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 
 def initialize_from_env() -> None:

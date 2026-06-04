@@ -10,6 +10,9 @@ from app.models import (
     ConfigModel,
     StatusResponse,
     LlmTestResponse,
+    PresetEntry,
+    PresetLibraryResponse,
+    PresetSaveRequest,
 )
 from app.llm_client import LlmConfigError, test_llm as run_llm_test
 from app.pipeline import run_analysis
@@ -32,7 +35,7 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_methods=["GET", "POST", "PUT"],
+    allow_methods=["GET", "POST", "PUT", "DELETE"],
     allow_headers=["*"],
 )
 
@@ -103,6 +106,35 @@ async def get_config():
 @app.get("/prompts/defaults")
 async def get_default_prompts():
     return default_prompt_pack()
+
+
+@app.get("/presets", response_model=PresetLibraryResponse)
+async def get_presets():
+    return config_store.load_preset_index()
+
+
+@app.get("/presets/{preset_id}", response_model=PresetEntry)
+async def get_preset(preset_id: str):
+    result = config_store.get_preset(preset_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="프리셋을 찾을 수 없습니다.")
+    return result
+
+
+@app.post("/presets", response_model=PresetLibraryResponse)
+async def save_preset(body: PresetSaveRequest):
+    try:
+        return config_store.upsert_preset(body.name, body.pack, body.id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.delete("/presets/{preset_id}", response_model=PresetLibraryResponse)
+async def delete_preset(preset_id: str):
+    result = config_store.delete_preset(preset_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="프리셋을 찾을 수 없습니다.")
+    return result
 
 
 @app.put("/config", response_model=ConfigModel)

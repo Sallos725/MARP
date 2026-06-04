@@ -295,6 +295,7 @@
     // ── 설정 GUI ──────────────────────────────────────────────────────────────
 
     async function openDashboard() {
+      document.body.innerHTML = '';
       const serverUrl = await getServerUrl();
       const data = await loadDashboardData(serverUrl);
 
@@ -305,13 +306,33 @@
 
     const menuIcon = '🔱';
 
-    Risuai.registerSetting('MultiAgent Full판 상태', openDashboard, menuIcon, 'html');
-    await Risuai.registerButton({
+    const fullUiParts = [];
+    const fullSettingPart = await Risuai.registerSetting('MultiAgent Full판 상태', openDashboard, menuIcon, 'html');
+    const fullButtonPart = await Risuai.registerButton({
       name: 'MultiAgent Full',
       icon: menuIcon,
       iconType: 'html',
       location: 'hamburger',
     }, openDashboard);
+    if (fullSettingPart?.id) fullUiParts.push(fullSettingPart.id);
+    if (fullButtonPart?.id) fullUiParts.push(fullButtonPart.id);
+
+    if (typeof Risuai.onUnload === 'function') {
+      await Risuai.onUnload(async () => {
+        lastRunState = null;
+        document.body.innerHTML = '';
+        try {
+          await Risuai.hideContainer();
+        } catch (_) {}
+        if (typeof Risuai.unregisterUIPart === 'function') {
+          for (const id of fullUiParts) {
+            try {
+              await Risuai.unregisterUIPart(id);
+            } catch (_) {}
+          }
+        }
+      });
+    }
 
     async function loadDashboardData(serverUrl) {
       const data = {
@@ -321,8 +342,10 @@
         bypass: await getBypassSettings(),
         configBackup: await getSidecarConfigBackupInfo(),
         defaultPrompts: null,
+        presets: { version: 1, presets: [] },
         connected: false,
         statusError: '',
+        presetError: '',
       };
 
       try {
@@ -359,6 +382,17 @@
         data.defaultPrompts = null;
       }
 
+      try {
+        const presetsRes = await Risuai.nativeFetch(`${serverUrl}/presets`, { method: 'GET' });
+        if (presetsRes.ok) {
+          data.presets = await presetsRes.json();
+        } else {
+          data.presetError = `프리셋 조회 실패: HTTP ${presetsRes.status}`;
+        }
+      } catch (err) {
+        data.presetError = `프리셋 조회 실패: ${err.message}`;
+      }
+
       return data;
     }
 
@@ -380,6 +414,8 @@
       const bypass = data.bypass || { mainModelOnly: true, bypassHypaMemory: true, bypassTranslate: true, bypassLbProcess: true };
       const configBackup = data.configBackup || { exists: false, savedAt: '' };
       const defaultPrompts = data.defaultPrompts || {};
+      const presetLibrary = normalizeDashboardPresetLibrary(data.presets);
+      const presetError = data.presetError || '';
 
       const v = (key, fallback = '') => {
         const val = cfg[key];
@@ -568,12 +604,14 @@ button.ghost{background:#15171b;color:#a8b0bd}
 .agent-toggle{display:flex;align-items:center;justify-content:space-between;gap:10px;background:#15171b;border:1px solid #262a31;border-radius:8px;padding:10px 12px;margin-bottom:10px}
 .agent-toggle strong{font-size:.84rem}
 .prompt-actions{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0 10px}
+.preset-library{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px;align-items:end;margin:10px 0}
+.preset-library-actions{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 10px}
 textarea.prompt-template{min-height:140px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.78rem}
 .prompt-preview{white-space:pre-wrap;overflow:auto;max-height:220px;background:#0f1115;border:1px solid #303640;border-radius:7px;padding:10px;color:#d9e1ec;font-size:.78rem;line-height:1.5}
 @media (max-width: 860px){
   .top{display:block}
   .header-actions{justify-content:flex-start;margin-top:12px}
-  .status-strip,.grid,.agent-grid,.test-grid{grid-template-columns:1fr}
+  .status-strip,.grid,.agent-grid,.test-grid,.preset-library{grid-template-columns:1fr}
   .row2{grid-template-columns:1fr}
 }
 </style></head><body>
@@ -686,8 +724,24 @@ textarea.prompt-template{min-height:140px;font-family:ui-monospace,SFMono-Regula
 
     <div class="card">
       <h2>프롬프트 관리</h2>
-      <p>기본 프롬프트는 사이드카에 내장되어 있어 언제든 되돌릴 수 있습니다. 프리셋은 provider, URL, 모델, 온도, 추가 JSON, 프롬프트 override를 담고 API key는 제외합니다.</p>
-      <div style="height:10px"></div>
+      <p>기본 프롬프트는 사이드카에 내장되어 있어 언제든 되돌릴 수 있습니다. 저장된 프리셋은 사이드카 데이터 파일에 보관되며 provider, URL, 모델, 온도, 추가 JSON, 프롬프트 override를 담고 API key는 제외합니다.</p>
+      ${presetError ? `<div class="error-text" style="margin-top:8px;font-size:.8rem">${escHtml(presetError)}</div>` : ''}
+      <div class="preset-library">
+        <div class="field">
+          <label for="preset-name-input">프리셋 이름</label>
+          <input id="preset-name-input" type="text" maxlength="80" placeholder="예: Claude 장문 / OpenAI 저온">
+        </div>
+        <div class="field">
+          <label for="preset-library-select">저장된 사이드카 프리셋 (${presetLibrary.presets.length})</label>
+          <select id="preset-library-select">${presetLibraryOptions(presetLibrary)}</select>
+        </div>
+      </div>
+      <div class="preset-library-actions">
+        <button id="preset-save-library-btn" type="button" class="primary">현재 조합 저장/갱신</button>
+        <button id="preset-apply-library-btn" type="button">선택 적용</button>
+        <button id="preset-delete-library-btn" type="button" class="ghost">선택 삭제</button>
+      </div>
+      <div class="example-url">선택 적용은 화면 값만 바꿉니다. 실제 반영은 아래 저장 버튼을 눌러 사이드카 설정에 확정하세요.</div>
       <div class="header-actions" style="justify-content:flex-start">
         <input id="prompt-import-input" type="file" accept=".json,application/json" hidden>
         <input id="preset-import-input" type="file" accept=".json,application/json" hidden>
@@ -1151,8 +1205,10 @@ textarea.prompt-template{min-height:140px;font-family:ui-monospace,SFMono-Regula
       document.getElementById('all-test-btn')?.addEventListener('click', () => testAll(serverUrl));
 
       const defaultPrompts = data.defaultPrompts || {};
+      const presetLibrary = normalizeDashboardPresetLibrary(data.presets);
+      const sidecarVersion = data.status?.version || '';
       document.getElementById('prompt-export-all-btn')?.addEventListener('click', () => {
-        exportPromptPack(defaultPrompts, data.status?.version || '');
+        exportPromptPack(defaultPrompts, sidecarVersion);
       });
       document.getElementById('prompt-import-all-btn')?.addEventListener('click', () => {
         triggerPromptImport();
@@ -1160,7 +1216,7 @@ textarea.prompt-template{min-height:140px;font-family:ui-monospace,SFMono-Regula
       document.getElementById('prompt-import-input')?.addEventListener('change', handlePromptImport);
       document.getElementById('preset-export-all-btn')?.addEventListener('click', () => {
         try {
-          exportPresetPack(defaultPrompts, data.status?.version || '');
+          exportPresetPack(defaultPrompts, sidecarVersion);
         } catch (err) {
           showMsg(`프리셋 export 실패: ${err.message}`, false);
         }
@@ -1169,6 +1225,44 @@ textarea.prompt-template{min-height:140px;font-family:ui-monospace,SFMono-Regula
         document.getElementById('preset-import-input')?.click();
       });
       document.getElementById('preset-import-input')?.addEventListener('change', handlePresetImport);
+      document.getElementById('preset-save-library-btn')?.addEventListener('click', async () => {
+        try {
+          const currentServerUrl = normalizeUrl(getInputValue('server_url') || serverUrl);
+          const selectedId = getInputValue('preset-library-select');
+          const selected = findDashboardPreset(presetLibrary, selectedId);
+          const name = cleanPresetLibraryName(getInputValue('preset-name-input') || selected?.name || defaultPresetLibraryName());
+          const pack = buildPresetPack(defaultPrompts, sidecarVersion);
+          await savePresetToSidecar(currentServerUrl, selectedId, name, pack);
+          await openDashboard();
+          showMsg(`프리셋 '${name}'을 사이드카에 저장했습니다.`, true);
+        } catch (err) {
+          showMsg(`프리셋 저장 실패: ${err.message}`, false);
+        }
+      });
+      document.getElementById('preset-apply-library-btn')?.addEventListener('click', async () => {
+        try {
+          const currentServerUrl = normalizeUrl(getInputValue('server_url') || serverUrl);
+          const selected = findDashboardPreset(presetLibrary, getInputValue('preset-library-select'));
+          if (!selected) throw new Error('적용할 프리셋을 선택하세요.');
+          const pack = selected.pack || await loadPresetFromSidecar(currentServerUrl, selected.id);
+          const result = applyPresetPack(pack);
+          showMsg(`프리셋 '${selected.name}'을 화면에 적용했습니다: ${presetResultParts(result).join(', ') || '적용 항목 없음'}. 저장하면 확정됩니다.`, true);
+        } catch (err) {
+          showMsg(`프리셋 적용 실패: ${err.message}`, false);
+        }
+      });
+      document.getElementById('preset-delete-library-btn')?.addEventListener('click', async () => {
+        try {
+          const currentServerUrl = normalizeUrl(getInputValue('server_url') || serverUrl);
+          const selected = findDashboardPreset(presetLibrary, getInputValue('preset-library-select'));
+          if (!selected) throw new Error('삭제할 프리셋을 선택하세요.');
+          await deletePresetFromSidecar(currentServerUrl, selected.id);
+          await openDashboard();
+          showMsg(`프리셋 '${selected.name}'을 삭제했습니다.`, true);
+        } catch (err) {
+          showMsg(`프리셋 삭제 실패: ${err.message}`, false);
+        }
+      });
       document.querySelectorAll('[data-prompt-import]').forEach(btn => {
         btn.addEventListener('click', () => triggerPromptImport(btn.dataset.promptImport));
       });
@@ -1184,7 +1278,7 @@ textarea.prompt-template{min-height:140px;font-family:ui-monospace,SFMono-Regula
       });
       document.querySelectorAll('[data-prompt-export]').forEach(btn => {
         btn.addEventListener('click', () => {
-          exportAgentPrompt(btn.dataset.promptExport, defaultPrompts, data.status?.version || '');
+          exportAgentPrompt(btn.dataset.promptExport, defaultPrompts, sidecarVersion);
         });
       });
 
@@ -1214,6 +1308,7 @@ textarea.prompt-template{min-height:140px;font-family:ui-monospace,SFMono-Regula
       });
 
       document.getElementById('close-btn')?.addEventListener('click', async () => {
+        document.body.innerHTML = '';
         await Risuai.hideContainer();
       });
     }
@@ -1510,6 +1605,83 @@ textarea.prompt-template{min-height:140px;font-family:ui-monospace,SFMono-Regula
       }
     }
 
+    function normalizeDashboardPresetLibrary(raw) {
+      const source = isPlainObject(raw) ? raw : {};
+      const rawPresets = Array.isArray(source.presets) ? source.presets : [];
+      const presets = [];
+      for (const item of rawPresets) {
+        if (!isPlainObject(item)) continue;
+        const pack = isPlainObject(item.pack) ? item.pack : null;
+        const entry = {
+          id: truncatePresetLibraryText(String(item.id || ''), 96),
+          name: cleanPresetLibraryName(item.name || pack?.name || defaultPresetLibraryName()),
+          savedAt: String(item.savedAt || item.saved_at || ''),
+        };
+        if (pack) entry.pack = pack;
+        presets.push(entry);
+      }
+      return { version: 1, presets };
+    }
+
+    function presetLibraryOptions(library) {
+      const presets = normalizeDashboardPresetLibrary(library).presets;
+      if (!presets.length) return '<option value="">저장된 프리셋 없음</option>';
+      return ['<option value="">프리셋 선택...</option>', ...presets.map(item => {
+        const suffix = item.savedAt ? ` · ${formatDateTime(item.savedAt)}` : '';
+        return `<option value="${escHtml(item.id)}">${escHtml(item.name + suffix)}</option>`;
+      })].join('');
+    }
+
+    function findDashboardPreset(library, presetId) {
+      const id = String(presetId || '');
+      if (!id) return null;
+      return normalizeDashboardPresetLibrary(library).presets.find(item => item.id === id) || null;
+    }
+
+    async function loadPresetFromSidecar(serverUrl, presetId) {
+      const res = await Risuai.nativeFetch(`${serverUrl}/presets/${encodeURIComponent(presetId)}`, {
+        method: 'GET',
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      if (!isPlainObject(data?.pack)) throw new Error('프리셋 본문이 비어 있습니다.');
+      return data.pack;
+    }
+
+    async function savePresetToSidecar(serverUrl, presetId, name, pack) {
+      const body = { name, pack };
+      if (presetId) body.id = presetId;
+      const res = await Risuai.nativeFetch(`${serverUrl}/presets`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res.json().catch(() => ({ version: 1, presets: [] }));
+    }
+
+    async function deletePresetFromSidecar(serverUrl, presetId) {
+      const res = await Risuai.nativeFetch(`${serverUrl}/presets/${encodeURIComponent(presetId)}`, {
+        method: 'DELETE',
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res.json().catch(() => ({ version: 1, presets: [] }));
+    }
+
+    function defaultPresetLibraryName() {
+      return `프리셋 ${formatDateTime(new Date().toISOString())}`;
+    }
+
+    function cleanPresetLibraryName(name) {
+      const text = String(name || '').replace(/\s+/g, ' ').trim();
+      return truncatePresetLibraryText(text || defaultPresetLibraryName(), 80);
+    }
+
+    function truncatePresetLibraryText(value, limit) {
+      const text = String(value || '');
+      return text.length > limit ? `${text.slice(0, Math.max(0, limit - 3))}...` : text;
+    }
+
     function optionalPresetFloat(id) {
       const value = getInputValue(id);
       if (!value) return null;
@@ -1534,8 +1706,8 @@ textarea.prompt-template{min-height:140px;font-family:ui-monospace,SFMono-Regula
       };
     }
 
-    function exportPresetPack(defaultPrompts = {}, sidecarVersion = '') {
-      const pack = {
+    function buildPresetPack(defaultPrompts = {}, sidecarVersion = '') {
+      return {
         risuMultiagentPresetPackVersion: PRESET_PACK_VERSION,
         type: 'provider-url-extra-body-prompt-model-temperature',
         edition: 'full',
@@ -1551,6 +1723,21 @@ textarea.prompt-template{min-height:140px;font-family:ui-monospace,SFMono-Regula
         },
         agents: promptAgentNames().map(name => promptPresetEntry(name, defaultPrompts)),
       };
+    }
+
+    function presetResultParts(result) {
+      const parts = [];
+      if (result.providerApplied) parts.push('기본 provider');
+      if (result.baseUrlApplied) parts.push('기본 URL');
+      if (result.modelApplied) parts.push('기본 모델');
+      if (result.temperatureApplied) parts.push('기본 온도');
+      if (result.extraBodyApplied) parts.push('기본 추가 JSON');
+      if (result.appliedAgents) parts.push(`에이전트 ${result.appliedAgents}건`);
+      return parts;
+    }
+
+    function exportPresetPack(defaultPrompts = {}, sidecarVersion = '') {
+      const pack = buildPresetPack(defaultPrompts, sidecarVersion);
       downloadJson(`risu-multiagent-full-preset-v${PLUGIN_VERSION}.json`, pack);
       showMsg('provider/URL/모델/온도/추가 JSON/프롬프트 프리셋 JSON export를 생성했습니다.', true);
     }

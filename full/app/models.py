@@ -92,6 +92,27 @@ class LlmTestResponse(BaseModel):
     results: list[LlmTestResult]
 
 
+class PresetListEntry(BaseModel):
+    id: str
+    name: str
+    saved_at: str
+
+
+class PresetEntry(PresetListEntry):
+    pack: dict = Field(default_factory=dict)
+
+
+class PresetLibraryResponse(BaseModel):
+    version: int = 1
+    presets: list[PresetListEntry] = Field(default_factory=list)
+
+
+class PresetSaveRequest(BaseModel):
+    id: str | None = None
+    name: str
+    pack: dict = Field(default_factory=dict)
+
+
 class ConfigModel(BaseModel):
     pipeline_mode: str = "classic"
     default_provider: str = "openai-compatible"
