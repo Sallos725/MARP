@@ -38,7 +38,10 @@ func prompts(name string, a Config, values map[string]string, lang string) []Mes
 			user = "<source label=\"Setting\">\n{{system_context}}\n</source>\n\n" + user
 		}
 	}
-	system = renderTemplate(system, values) + sourceRules
+	system = renderTemplate(system, values)
+	if !strings.Contains(system, sourceRules) {
+		system += sourceRules
+	}
 	if l, ok := map[string]string{"ko": "Korean", "en": "English", "ja": "Japanese"}[lang]; ok {
 		system += "\nWrite all analysis notes in " + l + "."
 	}
@@ -46,6 +49,17 @@ func prompts(name string, a Config, values map[string]string, lang string) []Mes
 }
 func (e *Engine) Analyze(parent context.Context, req AnalyzeRequest) (AnalyzeResponse, error) {
 	cfg := e.store.Snapshot()
+	if req.PDFMode != nil {
+		switch *req.PDFMode {
+		case "off", "quality", "standard", "max":
+			cfg["default_pdf_mode"] = *req.PDFMode
+			for _, n := range AgentNames {
+				cfg[n+"_pdf_mode"] = ""
+			}
+		default:
+			return AnalyzeResponse{}, errors.New("invalid pdf_mode")
+		}
+	}
 	ctx, cancel := context.WithTimeout(parent, time.Duration(number(cfg["analysis_timeout"], 120)*float64(time.Second)))
 	defer cancel()
 	select {

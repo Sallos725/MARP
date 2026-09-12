@@ -21,7 +21,7 @@ func testStore(t *testing.T) *Store {
 func TestLegacyAPI(t *testing.T) {
 	s := &Server{Store: testStore(t)}
 	h := s.Handler()
-	for _, path := range []string{"/health", "/config", "/presets", "/prompts/defaults"} {
+	for _, path := range []string{"/health", "/config", "/presets"} {
 		r := httptest.NewRecorder()
 		h.ServeHTTP(r, httptest.NewRequest("GET", path, nil))
 		if r.Code != 200 {
@@ -83,5 +83,26 @@ func TestValidationAndNoSecrets(t *testing.T) {
 	h.ServeHTTP(r, httptest.NewRequest("POST", "/analyze", bytes.NewBufferString(`{}`)))
 	if r.Code != 422 {
 		t.Fatal(r.Code)
+	}
+}
+
+func TestNewContractAndValidation(t *testing.T) {
+	h := (&Server{Store: testStore(t)}).Handler()
+	for _, body := range []string{`null`, `{"context_window":0.5}`, `{"max_concurrent_analyses":0.5}`, `{"plot_max_tokens":"bad"}`} {
+		r := httptest.NewRecorder()
+		h.ServeHTTP(r, httptest.NewRequest("PUT", "/config", bytes.NewBufferString(body)))
+		if r.Code != 422 {
+			t.Fatalf("%s: %d", body, r.Code)
+		}
+	}
+	r := httptest.NewRecorder()
+	h.ServeHTTP(r, httptest.NewRequest("GET", "/prompts/defaults", nil))
+	if !bytes.Contains(r.Body.Bytes(), []byte("Separate established facts")) {
+		t.Fatal("missing improved default")
+	}
+	r = httptest.NewRecorder()
+	h.ServeHTTP(r, httptest.NewRequest("GET", "/openapi.json", nil))
+	if !bytes.Contains(r.Body.Bytes(), []byte("/runtime-config")) {
+		t.Fatal("missing runtime API schema")
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"strings"
 )
@@ -21,6 +22,7 @@ type AnalyzeRequest struct {
 	CharSummary      string    `json:"char_summary"`
 	ContextWindow    *int      `json:"context_window,omitempty"`
 	AnalysisLanguage string    `json:"analysis_language"`
+	PDFMode          *string   `json:"pdf_mode,omitempty"`
 }
 type AnalyzeResponse struct {
 	World       string            `json:"context_world"`
@@ -60,6 +62,9 @@ func readBody(w http.ResponseWriter, r *http.Request, v any) bool {
 	return true
 }
 func validateConfig(raw Config) error {
+	if raw == nil {
+		return fmt.Errorf("config must be an object")
+	}
 	defaults := Defaults()
 	for k, v := range raw {
 		def, ok := defaults[k]
@@ -75,6 +80,12 @@ func validateConfig(raw Config) error {
 			if _, ok := v.(bool); !ok {
 				return fmt.Errorf("%s must be boolean", k)
 			}
+		case nil:
+			if v != nil {
+				if n, ok := v.(float64); !ok || math.IsNaN(n) || math.IsInf(n, 0) {
+					return fmt.Errorf("%s must be numeric or null", k)
+				}
+			}
 		case float64:
 			if _, ok := v.(float64); !ok {
 				return fmt.Errorf("%s must be numeric", k)
@@ -86,7 +97,18 @@ func validateConfig(raw Config) error {
 			return fmt.Errorf("%s must be positive", k)
 		}
 	}
+	for _, k := range []string{"context_window", "max_concurrent_analyses"} {
+		if v, ok := raw[k]; ok && math.Trunc(number(v, 0)) != number(v, 0) {
+			return fmt.Errorf("%s must be an integer", k)
+		}
+	}
+	if v, ok := raw["max_concurrent_analyses"]; ok && number(v, 0) > 64 {
+		return fmt.Errorf("max_concurrent_analyses must not exceed 64")
+	}
 	for k, v := range raw {
+		if strings.HasSuffix(k, "max_tokens") && v != nil && (number(v, 0) <= 0 || math.Trunc(number(v, 0)) != number(v, 0)) {
+			return fmt.Errorf("%s must be a positive integer or null", k)
+		}
 		if strings.HasSuffix(k, "pdf_mode") {
 			switch v {
 			case "", "off", "quality", "standard", "max":
@@ -121,7 +143,7 @@ func (s *Server) Handler() http.Handler {
 		respond(w, 200, Config{"context_window": c["context_window"], "request_timeout": c["request_timeout"], "analysis_timeout": c["analysis_timeout"], "revision": revision(c)})
 	})
 	mux.HandleFunc("GET /status", func(w http.ResponseWriter, r *http.Request) { respond(w, 200, status(s.Store.Snapshot())) })
-	mux.HandleFunc("GET /prompts/defaults", func(w http.ResponseWriter, r *http.Request) { respond(w, 200, legacy["/prompts/defaults"]) })
+	mux.HandleFunc("GET /prompts/defaults", func(w http.ResponseWriter, r *http.Request) { respond(w, 200, defaultPromptPack()) })
 	mux.HandleFunc("GET /presets", func(w http.ResponseWriter, r *http.Request) { respond(w, 200, s.Store.Presets(false)) })
 	mux.HandleFunc("GET /presets/{id}", func(w http.ResponseWriter, r *http.Request) {
 		for _, p := range s.Store.Presets(true).Presets {
@@ -175,11 +197,23 @@ func (s *Server) Handler() http.Handler {
 			fail(w, 422, []any{map[string]any{"loc": []string{"body", "user_input"}, "msg": "Field required", "type": "missing"}})
 			return
 		}
+		if strings.TrimSpace(string(raw["user_input"])) == "null" {
+			fail(w, 422, []any{map[string]any{"loc": []string{"body", "user_input"}, "msg": "Input should be a valid string", "type": "string_type"}})
+			return
+		}
 		b, _ := json.Marshal(raw)
 		var req AnalyzeRequest
 		if err := json.Unmarshal(b, &req); err != nil {
 			fail(w, 422, err.Error())
 			return
+		}
+		if req.PDFMode != nil {
+			switch *req.PDFMode {
+			case "off", "quality", "standard", "max":
+			default:
+				fail(w, 422, "invalid pdf_mode")
+				return
+			}
 		}
 		if s.Analyze == nil {
 			fail(w, 503, "Analysis engine not initialized")
@@ -218,6 +252,31 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /openapi.json", func(w http.ResponseWriter, r *http.Request) {
 		doc := clone(legacy["/openapi.json"].(map[string]any))
 		doc["info"].(map[string]any)["version"] = Version
+		schemas := object(object(doc["components"])["schemas"])
+		for name, value := range schemas {
+			if name == "ConfigModel" {
+				props := object(object(value)["properties"])
+				for k, v := range Defaults() {
+					if _, ok := props[k]; ok {
+						continue
+					}
+					kind := "string"
+					if _, ok := v.(float64); ok {
+						kind = "number"
+					}
+					props[k] = map[string]any{"type": kind, "default": v}
+				}
+			}
+		}
+		for _, name := range []string{"AnalyzeRequest"} {
+			if schema := object(schemas[name]); schema != nil {
+				object(schema["properties"])["pdf_mode"] = map[string]any{"type": "string", "enum": []string{"off", "quality", "standard", "max"}, "description": "Optional explicit test override; normal calls use stored settings"}
+			}
+		}
+		if schema := object(schemas["AnalyzeResponse"]); schema != nil {
+			object(schema["properties"])["diagnostics"] = map[string]any{"type": "object", "additionalProperties": true}
+		}
+		object(doc["paths"])["/runtime-config"] = map[string]any{"get": map[string]any{"summary": "Lightweight runtime settings", "responses": map[string]any{"200": map[string]any{"description": "context_window, request_timeout, analysis_timeout and revision"}}}}
 		respond(w, 200, doc)
 	})
 	mux.HandleFunc("GET /docs", func(w http.ResponseWriter, r *http.Request) {

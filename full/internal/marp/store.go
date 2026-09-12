@@ -149,6 +149,9 @@ func OpenStore(path, presetPath string) (*Store, error) {
 		s.presets.Presets = []Preset{}
 	}
 	s.presets.Version = 1
+	if err := validateConfig(s.config); err != nil {
+		return nil, err
+	}
 	return s, nil
 }
 func writeJSON(path string, v any) error {
@@ -181,6 +184,9 @@ func (s *Store) Save(c Config) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	c = normalize(c)
+	if err := validateConfig(c); err != nil {
+		return err
+	}
 	if err := writeJSON(s.path, c); err != nil {
 		return err
 	}
