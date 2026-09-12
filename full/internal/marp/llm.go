@@ -250,7 +250,25 @@ func (e *Engine) Call(ctx context.Context, a Config, messages []Message) (LLMRes
 	if err != nil {
 		return LLMResult{}, err
 	}
-	return e.post(ctx, url, h, body)
+	originalHeaders := h.Clone()
+	pdfURL, pdfBody, diag, pdfErr := pdfPayload(ctx, a, messages, h)
+	if pdfErr != nil {
+		diag["applied"] = false
+		diag["reason"] = pdfErr.Error()
+	}
+	if pdfErr == nil && pdfBody != nil {
+		result, err := e.post(ctx, pdfURL, h, pdfBody)
+		if !pdfUnsupported(err) {
+			result.PDF = diag
+			return result, err
+		}
+		diag["applied"] = false
+		diag["reason"] = "provider-unsupported"
+		diag["text_retry"] = true
+	}
+	result, err := e.post(ctx, url, originalHeaders, body)
+	result.PDF = diag
+	return result, err
 }
 func (e *Engine) Check(ctx context.Context, a Config) (int, error) {
 	h, err := e.auth(ctx, a)
