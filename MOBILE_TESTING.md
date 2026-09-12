@@ -1,0 +1,35 @@
+# MARP v0.9.0 기기·공급자 확인 절차
+
+자동 검사는 합성 대화와 가짜 LLM을 사용합니다. 실제 API 키를 CI에 넣지 않습니다.
+
+## 자동 검사 범위
+
+- Node: 구조화 메시지/첨부/캐시 metadata, 소유 마커 재주입, 최신 assistant, 보조 요청 우회, 설정 이전·상속·0 값, credential 제외 export.
+- 모의 호스트: Response와 data 응답, 구버전 /status, 빈 결과·부분 실패, 지연 응답, 해제 중 훅 등록과 결과 폐기.
+- Go: v0.8.4 API 기본 필드, 원자 저장, 프리셋, 설정 검증, 에이전트 병렬 실행, 취소·대기열, Vertex 서명/토큰 동시 재사용, PDF 복귀. race 포함.
+- JS/Go PDF: 독립 pypdf로 한글·일본어·이모지·역할·순서·줄바꿈 추출. 한도, 기존 PDF 감지, 공급자별 요청, PDF 미지원 응답 구분.
+- Playwright Chromium/WebKit: 390×844, 탭 간 편집 보존, 20회 분석 및 PDF 반복, Worker·Object URL·abort 리스너 해제. Chromium은 CPU 4배 제한과 명시적 GC 사용.
+- Docker amd64/arm64 빌드, ZIP 구조·CRC·체크섬, 다운로드한 릴리즈 실행 파일 설치 검사.
+
+쉘 표시 p95는 20회 열기 기준이며 네트워크 완료를 기다리지 않습니다. PDF 메인 스레드 장기 작업은 Long Tasks API가 있는 Chromium에서 측정합니다. WebKit의 해당 API·힙 수치는 측정하지 않았습니다.
+
+비용 측정은 모의 호스트에서 실행한 MARP만 대상으로 합니다. PDF Pod 자체의 UI·변환 비용은 포함하지 않았습니다.
+
+## 모바일 Safari / Android Chrome
+
+실제 기기에서는 아래 항목이 릴리즈 시점에 미확인입니다. 기기/OS/브라우저/RisuAI/PDF Pod 버전과 공급자·모델을 함께 기록합니다.
+
+1. v0.8.4 설정이 있는 상태에서 JS를 교체하고 설정·프리셋·0 온도·agent override가 유지되는지 확인합니다.
+2. PDF Pod 없이 Full/Lite를 실행하고, 다음으로 PDF Pod v0.17.10 자식 플러그인으로 실행합니다. API auto, OpenAI→Gemini none을 사용합니다.
+3. 메인 한 턴, 이어쓰기, 재생성, 첨부 이미지, 캐시 metadata, HypaMemory·번역·lb-process 우회를 확인합니다.
+4. PDF off/quality/standard/max를 같은 합성 자료로 비교합니다. 한글·일본어·이모지·긴 줄을 포함합니다. 확정 사실과 추측이 구분되는지 확인합니다.
+5. 진단 탭의 텍스트/PDF 테스트를 각각 실행하고 실제 usage·지연·결과를 기록합니다. 버튼을 누를 때만 비교용 추가 LLM 호출이 발생합니다.
+6. 잘못된 모델, 전체 OFF, 빈 응답, 네트워크 차단, 시간 제한, 재로드를 확인합니다. Lenient는 성공 결과만, Strict는 주입 중단을 표시해야 합니다. PDF Pod에서 메인 요청 차단을 기대하지 않습니다.
+7. 20회 실행하고 설정 화면을 반복해 열고 닫습니다. Worker/Blob URL 누적, idle 요청·저장, 화면 멈춤을 확인합니다. Worker 차단 CSP에서도 텍스트 복귀 또는 분할 생성이 동작해야 합니다.
+8. 새 브라우저+구버전 서버, 구버전 브라우저+Go 서버를 확인합니다. 새 기능은 양쪽 업데이트 후 사용합니다.
+
+## 공급자별 실사용 미확인
+
+OpenAI/Custom 파일 지원, Google/Vertex/Anthropic 모델별 PDF 품질·청구 토큰·이미지 처리 방식·프록시 옵션을 실제 유료 호출로 확인하지 않았습니다. Unicode 추출 성공은 모든 모델의 시각 렌더링이나 절감 효과를 보장하지 않습니다. 글꼴을 내장하지 않는 텍스트 PDF의 대체 글꼴 차이도 확인해야 합니다.
+
+결과가 나쁘면 PDF off로 복구하고 진단 reason/text_retry/usage를 기록합니다. API 키나 서비스 계정 JSON은 보고서에 포함하지 않습니다.

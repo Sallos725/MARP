@@ -1,0 +1,70 @@
+{
+  "browser": {
+    "date": "2026-09-12T04:41:50.462Z",
+    "browsers": [
+      {
+        "name": "chromium",
+        "edition": "lite",
+        "shell_p95_ms": 5.200000047683716,
+        "pdf_long_tasks": [],
+        "retained_heap_bytes": 90188,
+        "workers": 0,
+        "object_urls": 0,
+        "idle_requests": 0,
+        "idle_storage_writes": 0
+      },
+      {
+        "name": "chromium",
+        "edition": "full",
+        "shell_p95_ms": 2.700000047683716,
+        "pdf_long_tasks": [],
+        "retained_heap_bytes": 51832,
+        "workers": 0,
+        "object_urls": 0,
+        "idle_requests": 0,
+        "idle_storage_writes": 0
+      },
+      {
+        "name": "webkit",
+        "edition": "lite",
+        "shell_p95_ms": 1.9999999999999964,
+        "pdf_long_tasks": [],
+        "retained_heap_bytes": null,
+        "workers": 0,
+        "object_urls": 0,
+        "idle_requests": 0,
+        "idle_storage_writes": 0
+      },
+      {
+        "name": "webkit",
+        "edition": "full",
+        "shell_p95_ms": 1.0000000000000036,
+        "pdf_long_tasks": [],
+        "retained_heap_bytes": null,
+        "workers": 0,
+        "object_urls": 0,
+        "idle_requests": 0,
+        "idle_storage_writes": 0
+      }
+    ]
+  },
+  "server": {
+    "go": {
+      "startup_ms": 14.86,
+      "idle_rss_bytes": 8884224
+    },
+    "python_v0.8.4": {
+      "startup_ms": 286.33,
+      "idle_rss_bytes": 52158464
+    }
+  },
+  "bundle_bytes": {
+    "lite": 48862,
+    "full": 32355
+  },
+  "baseline_bundle_bytes": {
+    "lite": 125540,
+    "full": 120131
+  },
+  "scope": "Synthetic mock host, Linux x86_64; not physical mobile or paid provider tests"
+}
