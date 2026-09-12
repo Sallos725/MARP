@@ -43,6 +43,21 @@ try{for(const[name,type]of [['chromium',chromium],['webkit',webkit]]){
  assert.equal(await page.evaluate(()=>testState.workers),0);assert.equal(await page.evaluate(()=>testState.hooks),0);
  assert.deepEqual(errors,[]);
  metrics.browsers.push({name,edition:full?'full':'lite',shell_p95_ms:timings[18],pdf_long_tasks:longTasks,retained_heap_bytes:cdp?heapAfter-heapBefore:null,workers:0,object_urls:0,idle_requests:0,idle_storage_writes:0});
+ // Exercise the actual minified release entry after the source harness checks.
+ await page.evaluate(()=>{window.Risuai=host;host.registerSetting=async(label,open)=>{window.packagedOpen=open;return {id:'packaged-setting'}}});
+ await page.addScriptTag({path:full?'full/plugin/risu-multiagent-full.js':'lite/risu-multiagent.js'});
+ await page.waitForFunction(()=>typeof window.packagedOpen==='function');
+ await page.evaluate(async()=>{
+  await packagedOpen();document.querySelector('[data-close]').click();
+  delayResponse=0;
+  const out=await run([{role:'system',content:'Unicode 한글 日本語 😀 setting. '.repeat(100)},{role:'user',content:'Packaged plugin test'}]);
+  if(out.length!==3)throw Error('packaged plugin did not inject');
+  await unload();
+ });
+ assert.equal(await page.evaluate(()=>testState.hooks),0);
+ assert.equal(await page.evaluate(()=>testState.workers),0);
+ assert.equal(await page.evaluate(()=>testState.urls),0);
+ assert.deepEqual(errors,[]);
  console.log(name,full?'full':'lite',metrics.browsers.at(-1));await page.close();
  }}finally{await browser.close()}
  }}finally{server.close()}
