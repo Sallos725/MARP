@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 
 function utilities(file, names) {
-  const source = fs.readFileSync(file, 'utf8'), context = vm.createContext({});
+  const source = JSON.parse(fs.readFileSync('tests/fixtures/v0.8.4-helpers.json', 'utf8'))[file], context = vm.createContext({});
   for (const name of names) {
     const match = source.match(new RegExp('^    function ' + name + '\\([\\s\\S]*?\\n    }', 'm'));
     assert.ok(match, name);

@@ -28,6 +28,7 @@ try{for(const[name,type]of [['chromium',chromium],['webkit',webkit]]){
  const heapBefore=cdp?(await cdp.send('Runtime.getHeapUsage')).usedSize:0;
  const longTasks=await page.evaluate(async()=>{
   const tasks=[];let observer;if(typeof PerformanceObserver!=='undefined'&&PerformanceObserver.supportedEntryTypes.includes('longtask')){observer=new PerformanceObserver(list=>tasks.push(...list.getEntries().map(e=>e.duration)));observer.observe({type:'longtask',buffered:false})}
+  for(let i=0;i<20;i++)await run([{role:'system',content:'A fictional observatory with established facts. '.repeat(100)},{role:'user',content:'Continue the current turn.'}]);
   for(let i=0;i<20;i++)await marpHarness.makePDF('한글 日本語 😀\\n'.repeat(5000));
   await new Promise(r=>setTimeout(r,30));observer?.disconnect();return tasks;
  });

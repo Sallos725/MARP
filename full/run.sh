@@ -1,30 +1,19 @@
-#!/usr/bin/env bash
-set -euo pipefail
-
-cd "$(dirname "$0")"
-
-PYTHON_BIN="${PYTHON_BIN:-python3}"
-VENV_DIR="${VENV_DIR:-.venv}"
-HOST="${HOST:-0.0.0.0}"
-PORT="${PORT:-6009}"
-CONFIG_PATH="${CONFIG_PATH:-$PWD/data/config.json}"
-
-if [ ! -f ".env" ] && [ -f ".env.example" ]; then
-  cp ".env.example" ".env"
-  echo "Created full/.env from .env.example. Edit it with your provider settings before production use."
+#!/usr/bin/env sh
+set -eu
+cd "$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+if [ -x ./marp ]; then
+  exec ./marp
 fi
-
-if [ ! -d "$VENV_DIR" ]; then
-  "$PYTHON_BIN" -m venv "$VENV_DIR"
+case "$(uname -s)/$(uname -m)" in
+  Linux/x86_64) packaged="./bin/marp-v0.9.0-linux-amd64" ;;
+  Linux/aarch64|Linux/arm64) packaged="./bin/marp-v0.9.0-linux-arm64" ;;
+  *) packaged="" ;;
+esac
+if [ -n "$packaged" ] && [ -f "$packaged" ]; then
+  chmod +x "$packaged"
+  exec "$packaged"
 fi
-
-# shellcheck disable=SC1091
-source "$VENV_DIR/bin/activate"
-
-python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
-
-mkdir -p "$(dirname "$CONFIG_PATH")"
-export CONFIG_PATH
-
-exec python -m uvicorn app.main:app --host "$HOST" --port "$PORT"
+export GOTOOLCHAIN=go1.27.1
+export CGO_ENABLED=0
+go build -buildvcs=false -trimpath -ldflags="-s -w" -o ./marp ./cmd/marp
+exec ./marp

@@ -1,0 +1,5 @@
+.env
+data/
+marp
+bin/
+plugin/

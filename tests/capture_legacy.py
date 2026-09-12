@@ -2,7 +2,10 @@
 import json
 import os
 import tempfile
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent / 'legacy-python'))
 
 with tempfile.TemporaryDirectory(prefix="marp-contract-") as data:
     os.environ["CONFIG_PATH"] = f"{data}/config.json"

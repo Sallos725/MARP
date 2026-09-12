@@ -82,7 +82,7 @@ def categorize(paths: list[str]) -> list[tuple[str, str, list[str]]]:
         ),
         (
             "설치/실행 설정",
-            "Docker, 환경변수 예시, Python 의존성 같은 실행 준비물이 바뀌었습니다.",
+            "Docker, 환경변수 예시, Go 실행 파일과 모듈 같은 실행 준비물이 바뀌었습니다.",
             [],
         ),
         (
@@ -110,7 +110,7 @@ def categorize(paths: list[str]) -> list[tuple[str, str, list[str]]]:
             add(0, path)
         elif path.startswith("full/plugin/"):
             add(1, path)
-        elif path.startswith("full/app/"):
+        elif path.startswith(("full/app/", "full/internal/", "full/cmd/")):
             add(2, path)
         elif path in {
             "full/Dockerfile",
@@ -155,7 +155,7 @@ def build_notes() -> str:
     manual = optional_manual_notes(tag)
 
     lines: list[str] = [
-        f"# risu-multiagent {tag}",
+        f"# MARP {tag}",
         "",
     ]
 
