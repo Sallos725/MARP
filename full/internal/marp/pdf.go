@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net/url"
 	"regexp"
 	"strings"
@@ -65,7 +66,7 @@ func TextPDF(ctx context.Context, text string) ([]byte, error) {
 		var b strings.Builder
 		b.WriteString("BT /F1 6 Tf 7 TL 20 820 Td\n")
 		for _, line := range encoded[start:end] {
-			fmt.Fprintf(&b, "<%s> Tj T*\n", line)
+			fmt.Fprintf(&b, "%.6f Tz <%s> Tj T*\n", math.Min(100, 555/(math.Max(1, float64(len(line))/4)*3.6)*100), line)
 		}
 		b.WriteString("ET")
 		objects = append(objects, fmt.Sprintf("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R >> >> /Contents %d 0 R >>", id+1), stream(b.String()))

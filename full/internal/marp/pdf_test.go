@@ -65,3 +65,10 @@ func TestPDFSafety(t *testing.T) {
 		t.Fatal(u, e)
 	}
 }
+
+func TestAnthropicOptions(t *testing.T) {
+	_, body, err := payload(Config{"provider": "anthropic", "base_url": "https://api.anthropic.com/v1", "model": "mock", "extra_body_json": `{"top_p":0.4,"system":"replace"}`}, []Message{{"system", "rules"}, {"user", "source"}})
+	if err != nil || body["top_p"] != float64(0.4) || body["system"] != "rules" {
+		t.Fatalf("%v %v", body, err)
+	}
+}

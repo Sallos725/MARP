@@ -60,6 +60,7 @@ export function openDashboard(api){
    const list=await api.presets.list();if(!alive||seq!==epoch)return;
    for(const p of list){const row=document.createElement('div');row.className='marp-actions';text(p.name,row);action('불러오기',async()=>{draft=importPack(draft,await api.presets.get(p.id));message('불러왔습니다. 설정 저장 후 적용됩니다.')},row);action('삭제',async()=>{await api.presets.remove(p.id);await render(tab)},row);panel.append(row)}
   }else{
+   if(api.full)text('Full 테스트는 서버에 저장된 설정으로 실행합니다.');
    text('실제 사용량은 공급자 응답의 usage, 토큰 추정치는 estimated_source_tokens로 구분합니다. 아래 테스트 버튼을 누를 때만 합성 자료로 추가 LLM 호출이 발생합니다.');
    const actions=document.createElement('div');actions.className='marp-actions';panel.append(actions);
    action('텍스트 분석 테스트',async()=>showResult(await api.test(draft,false)),actions);

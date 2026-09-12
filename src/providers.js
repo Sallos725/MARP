@@ -32,11 +32,11 @@ export async function headers(host,a,signal) {
  const v=await guarded(cached.pending,signal);return {...h,Authorization:'Bearer '+v.token};
 }
 export function extraBody(a){if(!a.extra_body_json)return {};const v=JSON.parse(a.extra_body_json);if(!v||Array.isArray(v)||typeof v!=='object')throw Error('추가 JSON은 객체여야 합니다');return v}
-export function merge(base,extra){const out={...base};for(const[k,v]of Object.entries(extra)){if(['__proto__','constructor','prototype','messages','contents','systemInstruction'].includes(k))continue;out[k]=v&&typeof v==='object'&&!Array.isArray(v)&&out[k]&&typeof out[k]==='object'?merge(out[k],v):v}return out}
+export function merge(base,extra){const out={...base};for(const[k,v]of Object.entries(extra)){if(['__proto__','constructor','prototype','messages','contents','system','systemInstruction'].includes(k))continue;out[k]=v&&typeof v==='object'&&!Array.isArray(v)&&out[k]&&typeof out[k]==='object'?merge(out[k],v):v}return out}
 export function textRequest(a,messages) {
  const url=String(a.base_url).replace(/\/+$/,'');if(!url||!a.model)throw Error('API URL과 모델을 설정해 주세요');
  let body={model:a.model,messages,temperature:a.temperature,stream:false};if(a.max_tokens!=null)body.max_tokens=a.max_tokens;
- if(anthropic(a)){body.messages=messages.filter(m=>m.role!=='system');body.system=messages.filter(m=>m.role==='system').map(m=>m.content).join('\n\n');body.max_tokens??=1024;return {url:url+'/messages',body}}
+ if(anthropic(a)){body.messages=messages.filter(m=>m.role!=='system');body.system=messages.filter(m=>m.role==='system').map(m=>m.content).join('\n\n');body.max_tokens??=1024;body=merge(body,extraBody(a));body.stream=false;return {url:url+'/messages',body}}
  body=merge(body,extraBody(a));body.stream=false;return {url:url+'/chat/completions',body};
 }
 export function nativeURL(a){

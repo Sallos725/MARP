@@ -6,7 +6,7 @@ const owned=/<!--MARP:v1:begin-->[\s\S]*?<!--MARP:v1:end-->/g;
 export function contentText(value) {
  if(typeof value==='string') return value;
  if(!Array.isArray(value)) return '';
- return value.map(p=>typeof p==='string'?p:(!p?.thought&&(!p.type||p.type==='text'||p.type==='output_text')?p.text||'':'')).filter(Boolean).join('\n');
+ return value.map(p=>typeof p==='string'?p:(!p?.thought&&(!p.type||p.type==='text'||p.type==='output_text'||p.type==='input_text')?p.text||'':'')).filter(Boolean).join('\n');
 }
 export function withoutOwn(messages) {
  let changed=false;
@@ -16,7 +16,7 @@ export function withoutOwn(messages) {
   const clean=s=>s.replace(owned,'');
   let c=m.content;
   if(typeof c==='string') c=clean(c);
-  else if(Array.isArray(c)) c=c.map(p=>typeof p==='string'?clean(p):(p?.type==='text'&&typeof p.text==='string'?({...p,text:clean(p.text)}):p));
+  else if(Array.isArray(c)) c=c.map(p=>typeof p==='string'?clean(p):(p&&(!p.type||['text','input_text','output_text'].includes(p.type))&&typeof p.text==='string'?({...p,text:clean(p.text)}):p));
   const differs=typeof c==='string'?c!==m.content:Array.isArray(c)&&c.some((p,i)=>p!==m.content[i]&&(typeof p==='string'||p.text!==m.content[i]?.text));
   if(!differs){out.push(m);continue}
   changed=true;
@@ -79,7 +79,7 @@ export async function responseJSON(response){
  if(!response)throw new Error('빈 HTTP 응답');
  let data;if(typeof response.json==='function'){try{data=await response.json()}catch{data=null}}
  else{data=response.data;if(typeof data==='string'){try{data=JSON.parse(data)}catch{data=null}}}
- const status=response.status??200;
+ const status=Number(response.status??200);
  if(response.ok===false||status>=400){const e=new Error(String(data?.error?.message||data?.detail||'HTTP '+status).slice(0,300));e.status=status;throw e}
  if(!data||typeof data!=='object')throw new Error('JSON 응답이 아닙니다');
  return data;

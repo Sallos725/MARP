@@ -155,7 +155,7 @@ func (e *Engine) auth(ctx context.Context, a Config) (http.Header, error) {
 func merge(base, extra map[string]any) map[string]any {
 	out := clone(base)
 	for k, v := range extra {
-		if k == "messages" || k == "contents" || k == "systemInstruction" {
+		if k == "messages" || k == "contents" || k == "systemInstruction" || k == "system" {
 			continue
 		}
 		if m := object(v); m != nil && object(out[k]) != nil {
@@ -190,6 +190,14 @@ func payload(a Config, messages []Message) (string, map[string]any, error) {
 		if body["max_tokens"] == nil {
 			body["max_tokens"] = 1024
 		}
+		if raw := strings.TrimSpace(str(a["extra_body_json"])); raw != "" {
+			var extra map[string]any
+			if json.Unmarshal([]byte(raw), &extra) != nil || extra == nil {
+				return "", nil, errors.New("Extra JSON body must be an object")
+			}
+			body = merge(body, extra)
+		}
+		body["stream"] = false
 		return url + "/messages", body, nil
 	}
 	if raw := strings.TrimSpace(str(a["extra_body_json"])); raw != "" {
