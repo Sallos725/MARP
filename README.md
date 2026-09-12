@@ -56,6 +56,8 @@ Full ZIP에는 Linux amd64·arm64 실행 파일이 포함됩니다. `sh ./run.sh
 
 ## PDF와 PDF Pod
 
+MARP Lite에서 내장 PDF를 사용한다면 PDF Pod의 해당 자식 플러그인 PDF 수준은 off로 두세요. PDF Pod가 텍스트 복귀 요청까지 다시 압축하지 않도록 보조 요청의 압축 주체를 하나만 선택합니다. Full의 서버 LLM 요청은 PDF Pod를 통과하지 않습니다.
+
 [PDF Pod 소스](https://pkg.panpka.xyz/pdf-pod.js) v0.17.10의 요청 감지·기존 PDF 보호·자식 훅 동작을 기준으로 호환성을 맞췄습니다. 향후 PDF Pod 업데이트에는 변경된 동작을 확인해야 합니다.
 
 **PDF Pod 병용 설정: API 감지 `auto`, OpenAI → Gemini 변환 `none`.** 이미 PDF가 포함된 요청을 다시 변환하지 않는 설정입니다. PDF Pod의 메인 대화 압축과 MARP의 보조 분석 압축은 각각 적용 범위가 다릅니다. MARP는 PDF Pod 내부 설정을 변경하지 않습니다.

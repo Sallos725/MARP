@@ -41,7 +41,7 @@ export function openDashboard(api){
    const g=group();for(const[k,label]of [['context_window','최근 대화 수'],['request_timeout','에이전트 제한 (초)'],['analysis_timeout','전체 제한 (초)'],['analysis_language','분석 언어'],['injection_position','주입 위치'],['injection_format','주입 형식']])field(k,label,g);
    for(const[k,label]of [['main_model_only','메인 모델에서만 실행'],['bypass_hypamemory','메모리 요청 건너뛰기'],['bypass_translate','번역 요청 건너뛰기'],['bypass_lb_process','lb-process 요청 건너뛰기'],['strict_mode','실패하면 분석 주입 중단 (Strict)']])field(k,label,g,{check:true});
    text('Lenient는 성공한 분석만 사용합니다. 모두 OFF이거나 결과가 비어 있으면 주입하지 않습니다. PDF Pod는 훅 예외를 흡수할 수 있어 Strict의 메인 호출 차단은 보장되지 않습니다.');
-   text('PDF Pod 병용: API 감지 auto · OpenAI → Gemini 변환 none. MARP 내장 PDF는 보조 분석 요청에 적용되며, PDF Pod의 메인 대화 압축 설정과 별개입니다.');
+   text('PDF Pod 병용: API 감지 auto · OpenAI → Gemini 변환 none. Lite 내장 PDF를 켜면 PDF Pod의 MARP 자식 PDF 수준은 off로 두어 텍스트 복귀의 재압축을 막으세요. Full 서버 요청은 PDF Pod를 통과하지 않습니다.');
   }else if(AGENTS.includes(tab)){field(tab+'_enabled',LABELS[tab]+' 분석 사용',group(),{check:true});providerFields(tab)}
   else if(tab==='prompts'){
    text('기본값을 사용하려면 override를 비우세요. 자료는 분석 대상이며, 최종 RP 답변은 메인 모델이 작성합니다.');

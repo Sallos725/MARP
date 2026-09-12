@@ -20,7 +20,7 @@
 실제 기기에서는 아래 항목이 릴리즈 시점에 미확인입니다. 기기/OS/브라우저/RisuAI/PDF Pod 버전과 공급자·모델을 함께 기록합니다.
 
 1. v0.8.4 설정이 있는 상태에서 JS를 교체하고 설정·프리셋·0 온도·agent override가 유지되는지 확인합니다.
-2. PDF Pod 없이 Full/Lite를 실행하고, 다음으로 PDF Pod v0.17.10 자식 플러그인으로 실행합니다. API auto, OpenAI→Gemini none을 사용합니다.
+2. PDF Pod 없이 Full/Lite를 실행하고, 다음으로 PDF Pod v0.17.10 자식 플러그인으로 실행합니다. API auto, OpenAI→Gemini none을 사용합니다. Lite 내장 PDF를 켰다면 PDF Pod의 MARP 자식 PDF 수준을 off로 두고 텍스트 복귀가 다시 압축되지 않는지 확인합니다.
 3. 메인 한 턴, 이어쓰기, 재생성, 첨부 이미지, 캐시 metadata, HypaMemory·번역·lb-process 우회를 확인합니다.
 4. PDF off/quality/standard/max를 같은 합성 자료로 비교합니다. 한글·일본어·이모지·긴 줄을 포함합니다. 확정 사실과 추측이 구분되는지 확인합니다.
 5. 진단 탭의 텍스트/PDF 테스트를 각각 실행하고 실제 usage·지연·결과를 기록합니다. 버튼을 누를 때만 비교용 추가 LLM 호출이 발생합니다.
