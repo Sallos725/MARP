@@ -1,0 +1,89 @@
+import {AGENTS,VERSION,cleanOutput,analysisInput,bypass,withoutOwn,inject,deadline,guarded,responseJSON,parseStored} from './core.js';
+import {loadConfig,legacyConfig,validate,vaultKey,fullKey,exportPack,defaults} from './config.js';
+import {openDashboard} from './ui.js';
+export async function start(host,{full=false,analyze,defaultPrompts,clearTokens}={}){
+ let alive=true,ui=null,lastRun=null,runtime=null,runtimePending=null;
+ const jobs=new Set(),parts=[];let loaded;
+ const config=()=>loaded??=(loadConfig(host,full).catch(e=>{loaded=null;throw e}));
+ const request=async(path,{method='GET',body,signal,base}={})=>{
+  const c=await config();if(!alive)throw Error('플러그인 해제');
+  const controller=new AbortController(),abort=()=>controller.abort(signal.reason);jobs.add(controller);
+  if(signal?.aborted)abort();else signal?.addEventListener('abort',abort,{once:true});
+  const d=deadline(controller.signal,Math.min(120000,(c.analysis_timeout||120)*1000));
+  try{if(d.signal.aborted)throw d.signal.reason;return await guarded(responseJSON(await guarded(host.nativeFetch((base||c.server_url).replace(/\/+$/,'')+path,{method,headers:{'Content-Type':'application/json'},...(body===undefined?{}:{body:JSON.stringify(body)})}),d.signal)),d.signal)}finally{d.close();signal?.removeEventListener('abort',abort);jobs.delete(controller)}
+ };
+ const runtimeConfig=async(c,signal)=>{
+  if(runtime&&runtime.url===c.server_url&&Date.now()-runtime.at<60000)return runtime.value;
+  if(runtimePending)return guarded(runtimePending,signal);
+  runtimePending=(async()=>{const d=deadline(signal,5000);try{
+   let value;try{value=await request('/runtime-config',{signal:d.signal})}catch(e){if(e.status!==404&&e.status!==405)throw e;const status=await request('/status',{signal:d.signal});value=status.config||status}
+   runtime={url:c.server_url,at:Date.now(),value};return value;
+  }finally{d.close();runtimePending=null}})();
+  return guarded(runtimePending,signal);
+ };
+ const save=async draft=>{
+  validate(draft);
+  if(full){await request('/config',{method:'PUT',body:draft,base:draft.server_url});const local=legacyConfig(draft);delete local.marpConfig;delete local.agents;for(const k of ['provider','baseUrl','apiKey','model','temperature','maxTokens','extraBodyJson','pdfMode'])delete local[k];await host.pluginStorage.setItem(fullKey,{version:1,...local,savedAt:new Date().toISOString()});runtime=null}
+  else await host.pluginStorage.setItem(vaultKey,{version:1,scope:'lite',savedAt:new Date().toISOString(),config:legacyConfig(draft)});
+  // Arguments were historically authoritative. Update existing arguments too.
+  const names={server_url:'server_url',context_window:'context_window',main_model_only:'main_model_only',bypass_hypamemory:'bypass_hypamemory',bypass_translate:'bypass_translate',bypass_lb_process:'bypass_lb_process',strict_mode:'strict_mode',injection_position:'injection_position',injection_format:'injection_format',analysis_language:'analysis_language'};
+  if(!full)for(const k of ['provider','base_url','api_key','model','temperature','max_tokens','extra_body_json'])names['default_'+k]='agent_'+k;
+  if(host.setArgument)await Promise.all(Object.entries(names).map(([key,arg])=>host.setArgument(arg,typeof draft[key]==='boolean'?(draft[key]?'1':'0'):String(draft[key]??''))));
+  loaded=Promise.resolve({...draft});
+  if(full)await runtimeConfig(draft).catch(()=>{});return draft;
+ };
+ const before=async(messages,mode)=>{
+  if(!alive||!Array.isArray(messages))return messages;
+  // Re-read arguments only on activity; no timer, no conversation cache.
+  loaded=null;let c;try{c=await config()}catch{return messages}
+  if(!alive||bypass(messages,mode,c))return messages;
+  const clean=withoutOwn(messages),start=performance.now(),controller=new AbortController();jobs.add(controller);
+  const d=deadline(controller.signal,(c.analysis_timeout||120)*1000);
+  try{
+   const server=full?await runtimeConfig(c,d.signal):c;
+   const input=analysisInput(clean,Number(server.context_window)||10);
+   input.analysis_language=c.analysis_language;
+   let result=full?await request('/analyze',{method:'POST',body:input,signal:d.signal}):await analyze(host,c,input,d.signal);
+   if(!alive||d.signal.aborted)return clean;
+   const failed=Object.keys(result.errors||{}).length>0;
+   const useful=['world','plot','char'].some(k=>cleanOutput(result['context_'+k]));
+   const injected=useful&&!(c.strict_mode&&failed);
+   lastRun={version:1,plugin_version:VERSION,started_at:new Date().toISOString(),elapsed_ms:Math.round(performance.now()-start),history_messages:input.chat_history.length,input_chars:input.user_input.length,system_chars:input.system_context.length,status:injected?'injected':failed?'failed-no-injection':'empty-no-injection',errors:result.errors||{},latency_ms:result.latency_ms||{},diagnostics:result.diagnostics||{},strict_note:c.strict_mode?'PDF Pod가 훅 오류를 흡수할 수 있어 메인 호출 차단은 보장되지 않습니다.':''};
+   return injected?inject(clean,result,c):clean;
+  }catch(e){
+   if(alive)lastRun={version:1,status:'failed-no-injection',error:e.message,elapsed_ms:Math.round(performance.now()-start),strict_note:c.strict_mode?'분석 주입 중단. PDF Pod 환경에서 메인 호출 차단은 보장되지 않습니다.':''};
+   return clean;
+  }finally{d.close();jobs.delete(controller)}
+ };
+ const presets={
+  async list(){if(full)return (await request('/presets')).presets;return (parseStored(await host.pluginStorage.getItem('risu_multiagent_lite_preset_library_v1'))||{presets:[]}).presets},
+  async get(id){if(full)return (await request('/presets/'+encodeURIComponent(id))).pack;const item=parseStored(await host.pluginStorage.getItem('risu_multiagent_lite_preset_v1:'+id));if(item)return item.pack||item;return (await this.list()).find(p=>p.id===id)?.pack},
+  async put(name,pack){if(full)return request('/presets',{method:'POST',body:{name,pack}});const id='preset-'+crypto.randomUUID(),list=await this.list();await host.pluginStorage.setItem('risu_multiagent_lite_preset_v1:'+id,pack);const all=[{id,name,savedAt:new Date().toISOString()},...list];for(const old of all.slice(30))await host.pluginStorage.removeItem?.('risu_multiagent_lite_preset_v1:'+old.id);await host.pluginStorage.setItem('risu_multiagent_lite_preset_library_v1',{version:1,presets:all.slice(0,30)})},
+  async remove(id){if(full)return request('/presets/'+encodeURIComponent(id),{method:'DELETE'});const list=(await this.list()).filter(p=>p.id!==id);await host.pluginStorage.setItem('risu_multiagent_lite_preset_library_v1',{version:1,presets:list});await host.pluginStorage.removeItem?.('risu_multiagent_lite_preset_v1:'+id)}
+ };
+ const open=async()=>{
+  if(!alive)return;ui?.close();
+  ui=openDashboard({full,host,connect:async url=>{const c=await config();loaded=Promise.resolve({...c,server_url:url});runtime=null;await host.setArgument?.('server_url',url);await host.pluginStorage.setItem(fullKey,{version:1,serverUrl:url,mainModelOnly:c.main_model_only,bypassHypaMemory:c.bypass_hypamemory,bypassTranslate:c.bypass_translate,bypassLbProcess:c.bypass_lb_process,strictMode:c.strict_mode,injectionPosition:c.injection_position,injectionFormat:c.injection_format,analysisLanguage:c.analysis_language})},getConfig:async()=>{const c=await config();return full?{...c,...await request('/config'),server_url:c.server_url}:c},save,presets,
+   getPrompts:async()=>full?request('/prompts/defaults'):defaultPrompts(),
+   getDiagnostics:async()=>({lastRun,server:full?await request('/status'):undefined,version:VERSION}),
+   test:async(draft,pdf=false)=>{const c={...draft,default_pdf_mode:pdf?'quality':'off'};for(const n of AGENTS)c[n+'_pdf_mode']='';if(full)return request('/analyze',{method:'POST',body:{user_input:'Analyze this synthetic test turn.',system_context:'A fictional observatory. Only established facts may be treated as canon. '.repeat(30),chat_history:[],pdf_mode:pdf?'quality':'off'}});const controller=new AbortController();jobs.add(controller);const d=deadline(controller.signal,c.analysis_timeout*1000);try{return await analyze(host,c,{user_input:'Analyze this synthetic test turn.',system_context:'A fictional observatory. Only established facts may be treated as canon. '.repeat(30),chat_history:[]},d.signal)}finally{d.close();jobs.delete(controller)}}
+  });
+  await host.showContainer?.('fullscreen');
+ };
+ // Await hook registration before exposing UI; dispose late registrations too.
+ let hook,hookRegistered=false;
+ const dispose=async()=>{
+  if(!alive)return;alive=false;for(const job of jobs)job.abort(Error('플러그인 해제'));jobs.clear();clearTokens?.();ui?.close();lastRun=null;runtime=null;loaded=null;
+  if(hookRegistered&&host.removeRisuReplacer)try{await host.removeRisuReplacer('beforeRequest',typeof hook==='string'?hook:before)}catch{}
+  if(typeof hook==='function'&&hook!==before)try{await hook()}catch{}
+  for(const id of parts)await host.unregisterUIPart?.(id);
+  await host.hideContainer?.();
+ };
+ await host.onUnload?.(dispose);
+ hook=await host.addRisuReplacer('beforeRequest',before);hookRegistered=true;
+ if(!alive){await host.removeRisuReplacer?.('beforeRequest',before);return {before,open,dispose}}
+ for(const register of [()=>host.registerSetting('MARP '+(full?'Full':'Lite'),open,'🔱','html'),()=>host.registerButton?.({name:'MARP '+(full?'Full':'Lite'),icon:'🔱',iconType:'html',location:'hamburger'},open)]){
+  if(!alive)break;const part=await register();if(part?.id){if(alive)parts.push(part.id);else await host.unregisterUIPart?.(part.id)}
+ }
+ return {before,open,dispose,get lastRun(){return lastRun}};
+}

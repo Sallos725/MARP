@@ -41,3 +41,9 @@ superpowers-*.md
 *.skill
 *.skills
 .skills
+
+node_modules/
+dist/
+full/marp
+test-results/
+playwright-report/

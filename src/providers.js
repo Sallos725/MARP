@@ -1,10 +1,10 @@
-import {cleanOutput,contentText,responseJSON,guarded} from './core.js';
+import {cleanOutput,contentText,responseJSON,guarded,deadline} from './core.js';
 import {makePDF,pdfSource,hasPDF,PDF_TASK,unsupportedPDF} from './pdf.js';
 const kind=a=>String(a.provider).toLowerCase().replaceAll('_','-');
 const anthropic=a=>['claude','anthropic'].includes(kind(a));
 const vertex=a=>['vertex','vertex-ai'].includes(kind(a));
 const gemini=a=>vertex(a)||['google','gemini','google-ai-studio'].includes(kind(a))||/generativelanguage\.googleapis\.com/.test(a.base_url);
-const tokens=new Map();export function clearTokens(){tokens.clear()}
+const tokens=new Map();export function clearTokens(){for(const v of tokens.values())v.controller?.abort(Error("플러그인 해제"));tokens.clear()}
 const base64url=bytes=>btoa(String.fromCharCode(...bytes)).replaceAll('+','-').replaceAll('/','_').replace(/=+$/,'');
 export async function headers(host,a,signal) {
  const h={'Content-Type':'application/json'};
@@ -13,7 +13,8 @@ export async function headers(host,a,signal) {
  if(!vertex(a))return {...h,Authorization:'Bearer '+a.api_key};
  let cached=tokens.get(a.api_key);if(cached&&cached.expires>Date.now()+60000)return {...h,Authorization:'Bearer '+cached.token};
  if(!cached?.pending){
-  const pending=(async()=>{
+  const controller=new AbortController(),timer=deadline(controller.signal,30000);
+  const pending=(async()=>{try{
    let sa;try{sa=JSON.parse(a.api_key)}catch{throw Error('Vertex 서비스 계정 JSON을 확인해 주세요')}
    if(!sa.client_email||!sa.private_key)throw Error('Vertex 서비스 계정 필드가 없습니다');
    const enc=new TextEncoder(),now=Math.floor(Date.now()/1000);
@@ -21,11 +22,11 @@ export async function headers(host,a,signal) {
    const der=Uint8Array.from(atob(sa.private_key.replace(/-----[^-]+-----|\s/g,'')),c=>c.charCodeAt(0));
    const key=await crypto.subtle.importKey('pkcs8',der,{name:'RSASSA-PKCS1-v1_5',hash:'SHA-256'},false,['sign']);
    const signature=await crypto.subtle.sign('RSASSA-PKCS1-v1_5',key,enc.encode(head+'.'+body));
-   const res=await responseJSON(await host.nativeFetch('https://oauth2.googleapis.com/token',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({grant_type:'urn:ietf:params:oauth:grant-type:jwt-bearer',assertion:head+'.'+body+'.'+base64url(new Uint8Array(signature))}).toString()}));
+   const res=await responseJSON(await guarded(host.nativeFetch('https://oauth2.googleapis.com/token',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({grant_type:'urn:ietf:params:oauth:grant-type:jwt-bearer',assertion:head+'.'+body+'.'+base64url(new Uint8Array(signature))}).toString()}),timer.signal));
    if(!res.access_token)throw Error('Vertex 토큰 응답을 확인해 주세요');
    return {token:res.access_token,expires:Date.now()+Number(res.expires_in||3600)*1000};
-  })();
-  cached={pending};if(tokens.size>=4)tokens.clear();tokens.set(a.api_key,cached);
+  }finally{timer.close()}})();
+  cached={pending,controller};if(tokens.size>=4)tokens.clear();tokens.set(a.api_key,cached);
   pending.then(v=>{if(tokens.get(a.api_key)===cached)tokens.set(a.api_key,v)},()=>{if(tokens.get(a.api_key)===cached)tokens.delete(a.api_key)});
  }
  const v=await guarded(cached.pending,signal);return {...h,Authorization:'Bearer '+v.token};

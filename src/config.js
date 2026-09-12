@@ -19,7 +19,7 @@ export function migrate(raw={}){
  return c;
 }
 export function legacyConfig(c){
- const out={marpConfig:c,window:c.context_window,serverUrl:c.server_url,agents:{}};
+ const out={marpConfig:{request_timeout:c.request_timeout,analysis_timeout:c.analysis_timeout},window:c.context_window,serverUrl:c.server_url,agents:{}};
  for(const[k,v]of Object.entries(flags))out[v]=c[k];
  for(const k of FIELDS)out[camel[k]]=c['default_'+k];
  for(const n of AGENTS){const a={enabled:c[n+'_enabled'],systemPrompt:c[n+'_system_prompt'],userPromptTemplate:c[n+'_user_prompt_template']};for(const k of FIELDS)a[camel[k]]=c[n+'_'+k];out.agents[n]=a}
@@ -43,9 +43,19 @@ export function validate(c){
   for(const k of ['temperature','max_tokens']){const v=c[prefix+'_'+k];if(v!=null&&v!==''&&(!Number.isFinite(Number(v))||(k==='max_tokens'&&Number(v)<=0)))throw new Error(k+' 값을 확인해 주세요')}
  }
 }
+function shareable(value){
+ if(Array.isArray(value))return value.map(shareable);
+ if(value&&typeof value==='object')return Object.fromEntries(Object.entries(value).filter(([k])=>!/(api.?key|credential|authorization|access.?token|refresh.?token|secret|private.?key)/i.test(k)).map(([k,v])=>[k,shareable(v)]));
+ return value;
+}
+function safeValue(key,value){
+ if(key==='extra_body_json'&&value){try{return JSON.stringify(shareable(JSON.parse(value)))}catch{return ''}}
+ if(key==='base_url'&&value){try{const u=new URL(value);u.username='';u.password='';for(const k of [...u.searchParams.keys()])if(/key|token|secret|credential/i.test(k))u.searchParams.delete(k);return u.toString().replace(/\/$/,'')}catch{return value}}
+ return value;
+}
 export function exportPack(c,edition){
- const global={};for(const k of FIELDS)if(k!=='api_key')global[camel[k]]=c['default_'+k];
- return {risuMultiagentPresetPackVersion:1,edition,pluginVersion:VERSION,exportedAt:new Date().toISOString(),global,agents:AGENTS.map(n=>{const a={name:n,enabled:c[n+'_enabled'],system_prompt_override:c[n+'_system_prompt'],user_prompt_template_override:c[n+'_user_prompt_template']};for(const k of FIELDS)if(k!=='api_key')a[k]=c[n+'_'+k];return a})};
+ const global={};for(const k of FIELDS)if(k!=='api_key')global[camel[k]]=safeValue(k,c['default_'+k]);
+ return {risuMultiagentPresetPackVersion:1,edition,pluginVersion:VERSION,exportedAt:new Date().toISOString(),global,agents:AGENTS.map(n=>{const a={name:n,enabled:c[n+'_enabled'],system_prompt_override:c[n+'_system_prompt'],user_prompt_template_override:c[n+'_user_prompt_template']};for(const k of FIELDS)if(k!=='api_key')a[k]=safeValue(k,c[n+'_'+k]);return a})};
 }
 export function importPack(c,pack){
  if(!pack||typeof pack!=='object')throw new Error('프리셋 JSON을 확인해 주세요');

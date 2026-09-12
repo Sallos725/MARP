@@ -1,0 +1,15 @@
+//@name risu_multiagent_full
+//@display-name MultiAgent RP — Full판
+//@api 3.0
+//@version 0.9.0
+//@update-url https://raw.githubusercontent.com/Sallos725/MARP/main/full/plugin/risu-multiagent-full.js
+//@link https://github.com/Sallos725/MARP GitHub
+//@arg server_url string Full판 서버 URL (e.g. http://localhost:6009 or https://example.com/multi-agent)
+//@arg main_model_only string Run MultiAgent only for RisuAI main model requests; bypass auxiliary/submodel/memory/emotion/translation requests (default: 1)
+//@arg bypass_hypamemory string Skip MultiAgent analysis for RisuAI HypaMemory/memory requests (default: 1)
+//@arg bypass_translate string Skip MultiAgent analysis for RisuAI built-in LLM translation requests (default: 1)
+//@arg bypass_lb_process string Skip MultiAgent analysis for <lb-process> helper LLM requests (default: 1)
+//@arg strict_mode string Strict mode safety policy (1 = stop analysis injection on failure, 0 = use successful analyses). e.g. 0
+//@arg injection_position string Context injection position (system-end or before-last-user). e.g. system-end
+//@arg injection_format string Context injection format (classic, xml, or markdown-table). e.g. classic
+//@arg analysis_language string Analysis language (auto, en, ko, ja). e.g. auto

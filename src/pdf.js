@@ -2,13 +2,12 @@
 export async function encodePDF(text,pause=async()=>{}) {
  const limit=1<<20;let bytes=0,count=0;
  for(const c of text){bytes+=c.codePointAt(0)<128?1:c.codePointAt(0)<2048?2:c.length===2?4:3;if(bytes>limit)throw Error('source-limit');if(++count%4096===0)await pause()}
- const ids=new Map(),chars=[],lines=[];let line=[],column=0;
+ const ids=new Map(),chars=[],lines=[];let line=[];
  const hex=n=>n.toString(16).toUpperCase().padStart(4,'0');
  count=0;
  for(const c of text.replaceAll('\r\n','\n')){
-  if(c==='\n'){lines.push(line.join(''));line=[];column=0}
-  else{if(!ids.has(c)){ids.set(c,chars.length+1);chars.push(c)}line.push(hex(ids.get(c)));column++;
-   // A new text positioning operator wraps long lines without adding characters.
+  if(c==='\n'){lines.push(line.join(''));line=[]}
+  else{if(!ids.has(c)){ids.set(c,chars.length+1);chars.push(c)}line.push(hex(ids.get(c)));
   }
   if(++count%4096===0)await pause();
  }
@@ -20,7 +19,7 @@ export async function encodePDF(text,pause=async()=>{}) {
  const stream=s=>'<< /Length '+s.length+' >>\nstream\n'+s+'\nendstream';
  const objects=['<< /Type /Catalog /Pages 2 0 R >>','','<< /Type /Font /Subtype /Type0 /BaseFont /MARPText /Encoding /Identity-H /DescendantFonts [4 0 R] /ToUnicode 6 0 R >>','<< /Type /Font /Subtype /CIDFontType2 /BaseFont /MARPText /CIDSystemInfo << /Registry (Adobe) /Ordering (Identity) /Supplement 0 >> /FontDescriptor 5 0 R /DW 600 /CIDToGIDMap /Identity >>','<< /Type /FontDescriptor /FontName /MARPText /Flags 4 /FontBBox [0 -200 1000 1000] /ItalicAngle 0 /Ascent 800 /Descent -200 /CapHeight 700 /StemV 80 >>',stream(cmap)];
  const kids=[];
- for(let i=0;i<lines.length;i+=100){const id=objects.length+1;kids.push(id+' 0 R');objects.push('<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R >> >> /Contents '+(id+1)+' 0 R >>',stream('BT /F1 6 Tf 7 TL 20 820 Td\n'+lines.slice(i,i+100).map(l=>'<'+l+'> Tj T*\n').join('')+'ET'));await pause()}
+ for(let i=0;i<lines.length;i+=100){const id=objects.length+1;kids.push(id+' 0 R');objects.push('<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R >> >> /Contents '+(id+1)+' 0 R >>',stream('BT /F1 6 Tf 7 TL 20 820 Td\n'+lines.slice(i,i+100).map(l=>Math.min(100,555/(Math.max(1,l.length/4)*3.6)*100)+' Tz <'+l+'> Tj T*\n').join('')+'ET'));await pause()}
  objects[1]='<< /Type /Pages /Count '+kids.length+' /Kids ['+kids.join(' ')+'] >>';
  const chunks=['%PDF-1.7\n'],offsets=[0];let length=chunks[0].length;
  for(let i=0;i<objects.length;i++){offsets.push(length);const s=(i+1)+' 0 obj\n'+objects[i]+'\nendobj\n';chunks.push(s);length+=s.length;if(length>8<<20)throw Error('pdf-limit');await pause()}
@@ -31,6 +30,7 @@ export async function encodePDF(text,pause=async()=>{}) {
 }
 export async function makePDF(text,signal,{worker=true}={}) {
  if(signal?.aborted)throw signal.reason;
+ if(text.length>1<<20)throw Error('source-limit');
  const fallback=()=>encodePDF(text,async()=>{if(signal?.aborted)throw signal.reason;await new Promise(r=>setTimeout(r,0));if(signal?.aborted)throw signal.reason});
  if(!worker||typeof Worker==='undefined')return {...await fallback(),worker:false};
  let instance,url;

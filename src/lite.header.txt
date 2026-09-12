@@ -1,0 +1,22 @@
+//@name risu_multiagent
+//@display-name MultiAgent RP Pipeline
+//@api 3.0
+//@version 0.9.0
+//@update-url https://raw.githubusercontent.com/Sallos725/MARP/main/lite/risu-multiagent.js
+//@link https://github.com/Sallos725/MARP GitHub
+//@arg agent_provider string Analysis agent provider label. e.g. openai
+//@arg agent_base_url string Analysis agent API base URL. e.g. https://api.openai.com/v1, https://api.anthropic.com/v1, or Vertex AI OpenAI-compatible endpoint
+//@arg agent_api_key string Analysis agent API key
+//@arg agent_model string Analysis agent model. e.g. gpt-4o-mini
+//@arg agent_temperature string Analysis agent temperature (default: 0.7)
+//@arg agent_max_tokens string Analysis agent max tokens (blank = provider default)
+//@arg agent_extra_body_json string Extra JSON body merged into OpenAI-compatible chat/completions requests
+//@arg context_window int Recent messages per agent (default: 10)
+//@arg main_model_only string Run MultiAgent only for RisuAI main model requests; bypass auxiliary/submodel/memory/emotion/translation requests (default: 1)
+//@arg bypass_hypamemory string Skip MultiAgent analysis for RisuAI HypaMemory/memory requests (default: 1)
+//@arg bypass_translate string Skip MultiAgent analysis for RisuAI built-in LLM translation requests (default: 1)
+//@arg bypass_lb_process string Skip MultiAgent analysis for <lb-process> helper LLM requests (default: 1)
+//@arg strict_mode string Strict mode safety policy (1 = stop analysis injection on failure, 0 = use successful analyses). e.g. 0
+//@arg injection_position string Context injection position (system-end or before-last-user). e.g. system-end
+//@arg injection_format string Context injection format (classic, xml, or markdown-table). e.g. classic
+//@arg analysis_language string Analysis language (auto, en, ko, ja). e.g. auto
