@@ -1,0 +1,1377 @@
+{
+  "/health": {
+    "status": "ok"
+  },
+  "/config": {
+    "pipeline_mode": "classic",
+    "default_provider": "openai",
+    "default_base_url": "https://api.openai.com/v1",
+    "default_api_key": "",
+    "default_model": "gpt-4o-mini",
+    "default_temperature": 0.7,
+    "default_max_tokens": null,
+    "default_extra_body_json": "",
+    "worldbuilding_enabled": true,
+    "worldbuilding_provider": "",
+    "worldbuilding_base_url": "",
+    "worldbuilding_api_key": "",
+    "worldbuilding_model": "",
+    "worldbuilding_temperature": null,
+    "worldbuilding_max_tokens": null,
+    "worldbuilding_extra_body_json": "",
+    "worldbuilding_system_prompt": "",
+    "worldbuilding_user_prompt_template": "",
+    "plot_enabled": true,
+    "plot_provider": "",
+    "plot_base_url": "",
+    "plot_api_key": "",
+    "plot_model": "",
+    "plot_temperature": null,
+    "plot_max_tokens": null,
+    "plot_extra_body_json": "",
+    "plot_system_prompt": "",
+    "plot_user_prompt_template": "",
+    "character_enabled": true,
+    "character_provider": "",
+    "character_base_url": "",
+    "character_api_key": "",
+    "character_model": "",
+    "character_temperature": null,
+    "character_max_tokens": null,
+    "character_extra_body_json": "",
+    "character_system_prompt": "",
+    "character_user_prompt_template": "",
+    "context_window": 10,
+    "debug_mode": false,
+    "request_timeout": 60.0,
+    "strict_mode": false,
+    "injection_position": "system-end",
+    "injection_format": "classic",
+    "analysis_language": "auto"
+  },
+  "/status": {
+    "status": "ok",
+    "version": "0.8.4",
+    "ready": false,
+    "config": {
+      "pipeline_mode": "classic",
+      "default_provider": "openai",
+      "default_base_url": "https://api.openai.com/v1",
+      "default_model": "gpt-4o-mini",
+      "default_api_key_set": false,
+      "default_temperature": 0.7,
+      "default_max_tokens": null,
+      "default_extra_body_json_set": false,
+      "context_window": 10,
+      "debug_mode": false,
+      "request_timeout": 60.0,
+      "strict_mode": false,
+      "injection_position": "system-end",
+      "injection_format": "classic",
+      "analysis_language": "auto"
+    },
+    "agents": [
+      {
+        "name": "worldbuilding",
+        "label": "세계관 에이전트",
+        "enabled": true,
+        "active": true,
+        "provider": "openai",
+        "base_url": "https://api.openai.com/v1",
+        "model": "gpt-4o-mini",
+        "temperature": 0.7,
+        "max_tokens": null,
+        "provider_source": "default",
+        "base_url_source": "default",
+        "api_key_source": "default",
+        "model_source": "default",
+        "temperature_source": "default",
+        "max_tokens_source": "default",
+        "extra_body_json_source": "default",
+        "extra_body_json_set": false,
+        "api_key_set": false,
+        "ready": false,
+        "system_prompt_custom": false,
+        "user_prompt_template_custom": false
+      },
+      {
+        "name": "plot",
+        "label": "플롯 에이전트",
+        "enabled": true,
+        "active": true,
+        "provider": "openai",
+        "base_url": "https://api.openai.com/v1",
+        "model": "gpt-4o-mini",
+        "temperature": 0.7,
+        "max_tokens": null,
+        "provider_source": "default",
+        "base_url_source": "default",
+        "api_key_source": "default",
+        "model_source": "default",
+        "temperature_source": "default",
+        "max_tokens_source": "default",
+        "extra_body_json_source": "default",
+        "extra_body_json_set": false,
+        "api_key_set": false,
+        "ready": false,
+        "system_prompt_custom": false,
+        "user_prompt_template_custom": false
+      },
+      {
+        "name": "character",
+        "label": "등장인물 에이전트",
+        "enabled": true,
+        "active": true,
+        "provider": "openai",
+        "base_url": "https://api.openai.com/v1",
+        "model": "gpt-4o-mini",
+        "temperature": 0.7,
+        "max_tokens": null,
+        "provider_source": "default",
+        "base_url_source": "default",
+        "api_key_source": "default",
+        "model_source": "default",
+        "temperature_source": "default",
+        "max_tokens_source": "default",
+        "extra_body_json_source": "default",
+        "extra_body_json_set": false,
+        "api_key_set": false,
+        "ready": false,
+        "system_prompt_custom": false,
+        "user_prompt_template_custom": false
+      }
+    ]
+  },
+  "/prompts/defaults": {
+    "version": 1,
+    "agents": {
+      "worldbuilding": {
+        "name": "worldbuilding",
+        "label": "세계관 에이전트",
+        "system_prompt": "You are the worldbuilding consistency agent.\nBased on the given world setting and chat history, write concise notes on worldbuilding concerns and useful reinforcement for the current scene.\n\nOutput format (bullet points):\n- Current scene/background information\n- Active world rules (for example: no magic, special conditions, taboos)\n- Established details that must be preserved from earlier conversation\n- Additional worldbuilding reinforcement\n\nKeep only the essential points. Do not write the final RP response.",
+        "user_prompt_template": "<source label=\"World Setting\">\n{{world_summary}}\n</source>\n\n<source label=\"Recent Conversation\">\n<message index=\"1\" role=\"user\">\n{{chat_history}}\n</message>\n</source>\n\n<source label=\"Current User Input\">\n{{user_input}}\n</source>\n\nUsing the information above, write the worldbuilding consistency notes."
+      },
+      "plot": {
+        "name": "plot",
+        "label": "플롯 에이전트",
+        "system_prompt": "You are the plot management agent.\nBased on the worldbuilding notes and chat history, analyze the current narrative flow and present concise notes on the plot direction for this scene.\n\nOutput format (bullet points):\n- Current arc/story progress\n- Purpose of this scene\n- Recommended direction for the next development\n- Foreshadowing or unrevealed information that must be preserved\n\nKeep only the essential points. Do not write the final RP response.",
+        "user_prompt_template": "<source label=\"Worldbuilding Agent Notes\">\n{{context_world}}\n</source>\n\n<source label=\"Recent Conversation\">\n<message index=\"1\" role=\"user\">\n{{chat_history}}\n</message>\n</source>\n\n<source label=\"Current User Input\">\n{{user_input}}\n</source>\n\nUsing the information above, write the plot direction notes."
+      },
+      "character": {
+        "name": "character",
+        "label": "등장인물 에이전트",
+        "system_prompt": "You are the character consistency agent.\nBased on the worldbuilding notes and character setting, summarize the personalities and speech patterns of the characters involved in this scene.\n\nOutput format (bullet points):\n- Key NPC personality and speech traits\n- Current character emotional or psychological state\n- Continuity notes for established voice and motivations\n- Characters likely to appear or be referenced\n\nKeep only the essential points. Do not write the final RP response.",
+        "user_prompt_template": "<source label=\"Character Setting\">\n{{char_summary}}\n</source>\n\n<source label=\"Worldbuilding Agent Notes\">\n{{context_world}}\n</source>\n\n<source label=\"Recent Conversation\">\n<message index=\"1\" role=\"user\">\n{{chat_history}}\n</message>\n</source>\n\n<source label=\"Current User Input\">\n{{user_input}}\n</source>\n\nUsing the information above, write the character adjustment notes."
+      }
+    }
+  },
+  "/presets": {
+    "version": 1,
+    "presets": []
+  },
+  "/openapi.json": {
+    "openapi": "3.1.0",
+    "info": {
+      "title": "risu-multiagent",
+      "description": "RisuAI용 멀티 에이전트 RP 분석 파이프라인 (beforeRequest 훅 기반)",
+      "version": "0.8.4"
+    },
+    "paths": {
+      "/health": {
+        "get": {
+          "summary": "Health",
+          "operationId": "health_health_get",
+          "responses": {
+            "200": {
+              "description": "Successful Response",
+              "content": {
+                "application/json": {
+                  "schema": {}
+                }
+              }
+            }
+          }
+        }
+      },
+      "/status": {
+        "get": {
+          "summary": "Status",
+          "operationId": "status_status_get",
+          "responses": {
+            "200": {
+              "description": "Successful Response",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/StatusResponse"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "/test/llm": {
+        "get": {
+          "summary": "Test Llm",
+          "operationId": "test_llm_test_llm_get",
+          "parameters": [
+            {
+              "name": "agent",
+              "in": "query",
+              "required": false,
+              "schema": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Agent"
+              }
+            }
+          ],
+          "responses": {
+            "200": {
+              "description": "Successful Response",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/LlmTestResponse"
+                  }
+                }
+              }
+            },
+            "422": {
+              "description": "Validation Error",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/HTTPValidationError"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "/config": {
+        "get": {
+          "summary": "Get Config",
+          "operationId": "get_config_config_get",
+          "responses": {
+            "200": {
+              "description": "Successful Response",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/ConfigModel"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "put": {
+          "summary": "Put Config",
+          "operationId": "put_config_config_put",
+          "requestBody": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigModel"
+                }
+              }
+            },
+            "required": true
+          },
+          "responses": {
+            "200": {
+              "description": "Successful Response",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/ConfigModel"
+                  }
+                }
+              }
+            },
+            "422": {
+              "description": "Validation Error",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/HTTPValidationError"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "/prompts/defaults": {
+        "get": {
+          "summary": "Get Default Prompts",
+          "operationId": "get_default_prompts_prompts_defaults_get",
+          "responses": {
+            "200": {
+              "description": "Successful Response",
+              "content": {
+                "application/json": {
+                  "schema": {}
+                }
+              }
+            }
+          }
+        }
+      },
+      "/presets": {
+        "get": {
+          "summary": "Get Presets",
+          "operationId": "get_presets_presets_get",
+          "responses": {
+            "200": {
+              "description": "Successful Response",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/PresetLibraryResponse"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "post": {
+          "summary": "Save Preset",
+          "operationId": "save_preset_presets_post",
+          "requestBody": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PresetSaveRequest"
+                }
+              }
+            },
+            "required": true
+          },
+          "responses": {
+            "200": {
+              "description": "Successful Response",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/PresetLibraryResponse"
+                  }
+                }
+              }
+            },
+            "422": {
+              "description": "Validation Error",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/HTTPValidationError"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "/presets/{preset_id}": {
+        "get": {
+          "summary": "Get Preset",
+          "operationId": "get_preset_presets__preset_id__get",
+          "parameters": [
+            {
+              "name": "preset_id",
+              "in": "path",
+              "required": true,
+              "schema": {
+                "type": "string",
+                "title": "Preset Id"
+              }
+            }
+          ],
+          "responses": {
+            "200": {
+              "description": "Successful Response",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/PresetEntry"
+                  }
+                }
+              }
+            },
+            "422": {
+              "description": "Validation Error",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/HTTPValidationError"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "delete": {
+          "summary": "Delete Preset",
+          "operationId": "delete_preset_presets__preset_id__delete",
+          "parameters": [
+            {
+              "name": "preset_id",
+              "in": "path",
+              "required": true,
+              "schema": {
+                "type": "string",
+                "title": "Preset Id"
+              }
+            }
+          ],
+          "responses": {
+            "200": {
+              "description": "Successful Response",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/PresetLibraryResponse"
+                  }
+                }
+              }
+            },
+            "422": {
+              "description": "Validation Error",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/HTTPValidationError"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "/analyze": {
+        "post": {
+          "summary": "Analyze",
+          "operationId": "analyze_analyze_post",
+          "requestBody": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnalyzeRequest"
+                }
+              }
+            },
+            "required": true
+          },
+          "responses": {
+            "200": {
+              "description": "Successful Response",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/AnalyzeResponse"
+                  }
+                }
+              }
+            },
+            "422": {
+              "description": "Validation Error",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/HTTPValidationError"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "components": {
+      "schemas": {
+        "AgentStatus": {
+          "properties": {
+            "name": {
+              "type": "string",
+              "title": "Name"
+            },
+            "label": {
+              "type": "string",
+              "title": "Label"
+            },
+            "enabled": {
+              "type": "boolean",
+              "title": "Enabled",
+              "default": true
+            },
+            "active": {
+              "type": "boolean",
+              "title": "Active",
+              "default": true
+            },
+            "provider": {
+              "type": "string",
+              "title": "Provider"
+            },
+            "base_url": {
+              "type": "string",
+              "title": "Base Url"
+            },
+            "model": {
+              "type": "string",
+              "title": "Model"
+            },
+            "temperature": {
+              "type": "number",
+              "title": "Temperature"
+            },
+            "max_tokens": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Max Tokens"
+            },
+            "provider_source": {
+              "type": "string",
+              "title": "Provider Source"
+            },
+            "base_url_source": {
+              "type": "string",
+              "title": "Base Url Source"
+            },
+            "api_key_source": {
+              "type": "string",
+              "title": "Api Key Source"
+            },
+            "model_source": {
+              "type": "string",
+              "title": "Model Source"
+            },
+            "temperature_source": {
+              "type": "string",
+              "title": "Temperature Source"
+            },
+            "max_tokens_source": {
+              "type": "string",
+              "title": "Max Tokens Source"
+            },
+            "extra_body_json_source": {
+              "type": "string",
+              "title": "Extra Body Json Source"
+            },
+            "extra_body_json_set": {
+              "type": "boolean",
+              "title": "Extra Body Json Set"
+            },
+            "api_key_set": {
+              "type": "boolean",
+              "title": "Api Key Set"
+            },
+            "ready": {
+              "type": "boolean",
+              "title": "Ready"
+            },
+            "system_prompt_custom": {
+              "type": "boolean",
+              "title": "System Prompt Custom",
+              "default": false
+            },
+            "user_prompt_template_custom": {
+              "type": "boolean",
+              "title": "User Prompt Template Custom",
+              "default": false
+            }
+          },
+          "type": "object",
+          "required": [
+            "name",
+            "label",
+            "provider",
+            "base_url",
+            "model",
+            "temperature",
+            "max_tokens",
+            "provider_source",
+            "base_url_source",
+            "api_key_source",
+            "model_source",
+            "temperature_source",
+            "max_tokens_source",
+            "extra_body_json_source",
+            "extra_body_json_set",
+            "api_key_set",
+            "ready"
+          ],
+          "title": "AgentStatus"
+        },
+        "AnalyzeRequest": {
+          "properties": {
+            "user_input": {
+              "type": "string",
+              "title": "User Input"
+            },
+            "chat_history": {
+              "items": {
+                "$ref": "#/components/schemas/ChatMessage"
+              },
+              "type": "array",
+              "title": "Chat History"
+            },
+            "system_context": {
+              "type": "string",
+              "title": "System Context",
+              "default": ""
+            },
+            "world_summary": {
+              "type": "string",
+              "title": "World Summary",
+              "default": ""
+            },
+            "char_summary": {
+              "type": "string",
+              "title": "Char Summary",
+              "default": ""
+            },
+            "context_window": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Context Window"
+            },
+            "analysis_language": {
+              "type": "string",
+              "title": "Analysis Language",
+              "default": "auto"
+            }
+          },
+          "type": "object",
+          "required": [
+            "user_input"
+          ],
+          "title": "AnalyzeRequest"
+        },
+        "AnalyzeResponse": {
+          "properties": {
+            "context_world": {
+              "type": "string",
+              "title": "Context World"
+            },
+            "context_plot": {
+              "type": "string",
+              "title": "Context Plot"
+            },
+            "context_char": {
+              "type": "string",
+              "title": "Context Char"
+            },
+            "errors": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object",
+              "title": "Errors"
+            },
+            "latency_ms": {
+              "additionalProperties": {
+                "type": "integer"
+              },
+              "type": "object",
+              "title": "Latency Ms"
+            }
+          },
+          "type": "object",
+          "required": [
+            "context_world",
+            "context_plot",
+            "context_char"
+          ],
+          "title": "AnalyzeResponse"
+        },
+        "ChatMessage": {
+          "properties": {
+            "role": {
+              "type": "string",
+              "title": "Role"
+            },
+            "content": {
+              "type": "string",
+              "title": "Content"
+            }
+          },
+          "type": "object",
+          "required": [
+            "role",
+            "content"
+          ],
+          "title": "ChatMessage"
+        },
+        "ConfigModel": {
+          "properties": {
+            "pipeline_mode": {
+              "type": "string",
+              "title": "Pipeline Mode",
+              "default": "classic"
+            },
+            "default_provider": {
+              "type": "string",
+              "title": "Default Provider",
+              "default": "openai-compatible"
+            },
+            "default_base_url": {
+              "type": "string",
+              "title": "Default Base Url",
+              "default": "https://api.openai.com/v1"
+            },
+            "default_api_key": {
+              "type": "string",
+              "title": "Default Api Key",
+              "default": ""
+            },
+            "default_model": {
+              "type": "string",
+              "title": "Default Model",
+              "default": "gpt-4o-mini"
+            },
+            "default_temperature": {
+              "type": "number",
+              "title": "Default Temperature",
+              "default": 0.7
+            },
+            "default_max_tokens": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Default Max Tokens"
+            },
+            "default_extra_body_json": {
+              "type": "string",
+              "title": "Default Extra Body Json",
+              "default": ""
+            },
+            "worldbuilding_enabled": {
+              "type": "boolean",
+              "title": "Worldbuilding Enabled",
+              "default": true
+            },
+            "worldbuilding_provider": {
+              "type": "string",
+              "title": "Worldbuilding Provider",
+              "default": ""
+            },
+            "worldbuilding_base_url": {
+              "type": "string",
+              "title": "Worldbuilding Base Url",
+              "default": ""
+            },
+            "worldbuilding_api_key": {
+              "type": "string",
+              "title": "Worldbuilding Api Key",
+              "default": ""
+            },
+            "worldbuilding_model": {
+              "type": "string",
+              "title": "Worldbuilding Model",
+              "default": ""
+            },
+            "worldbuilding_temperature": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Worldbuilding Temperature"
+            },
+            "worldbuilding_max_tokens": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Worldbuilding Max Tokens"
+            },
+            "worldbuilding_extra_body_json": {
+              "type": "string",
+              "title": "Worldbuilding Extra Body Json",
+              "default": ""
+            },
+            "worldbuilding_system_prompt": {
+              "type": "string",
+              "title": "Worldbuilding System Prompt",
+              "default": ""
+            },
+            "worldbuilding_user_prompt_template": {
+              "type": "string",
+              "title": "Worldbuilding User Prompt Template",
+              "default": ""
+            },
+            "plot_enabled": {
+              "type": "boolean",
+              "title": "Plot Enabled",
+              "default": true
+            },
+            "plot_provider": {
+              "type": "string",
+              "title": "Plot Provider",
+              "default": ""
+            },
+            "plot_base_url": {
+              "type": "string",
+              "title": "Plot Base Url",
+              "default": ""
+            },
+            "plot_api_key": {
+              "type": "string",
+              "title": "Plot Api Key",
+              "default": ""
+            },
+            "plot_model": {
+              "type": "string",
+              "title": "Plot Model",
+              "default": ""
+            },
+            "plot_temperature": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Plot Temperature"
+            },
+            "plot_max_tokens": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Plot Max Tokens"
+            },
+            "plot_extra_body_json": {
+              "type": "string",
+              "title": "Plot Extra Body Json",
+              "default": ""
+            },
+            "plot_system_prompt": {
+              "type": "string",
+              "title": "Plot System Prompt",
+              "default": ""
+            },
+            "plot_user_prompt_template": {
+              "type": "string",
+              "title": "Plot User Prompt Template",
+              "default": ""
+            },
+            "character_enabled": {
+              "type": "boolean",
+              "title": "Character Enabled",
+              "default": true
+            },
+            "character_provider": {
+              "type": "string",
+              "title": "Character Provider",
+              "default": ""
+            },
+            "character_base_url": {
+              "type": "string",
+              "title": "Character Base Url",
+              "default": ""
+            },
+            "character_api_key": {
+              "type": "string",
+              "title": "Character Api Key",
+              "default": ""
+            },
+            "character_model": {
+              "type": "string",
+              "title": "Character Model",
+              "default": ""
+            },
+            "character_temperature": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Character Temperature"
+            },
+            "character_max_tokens": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Character Max Tokens"
+            },
+            "character_extra_body_json": {
+              "type": "string",
+              "title": "Character Extra Body Json",
+              "default": ""
+            },
+            "character_system_prompt": {
+              "type": "string",
+              "title": "Character System Prompt",
+              "default": ""
+            },
+            "character_user_prompt_template": {
+              "type": "string",
+              "title": "Character User Prompt Template",
+              "default": ""
+            },
+            "context_window": {
+              "type": "integer",
+              "title": "Context Window",
+              "default": 10
+            },
+            "debug_mode": {
+              "type": "boolean",
+              "title": "Debug Mode",
+              "default": false
+            },
+            "request_timeout": {
+              "type": "number",
+              "title": "Request Timeout",
+              "default": 60.0
+            },
+            "strict_mode": {
+              "type": "boolean",
+              "title": "Strict Mode",
+              "default": false
+            },
+            "injection_position": {
+              "type": "string",
+              "title": "Injection Position",
+              "default": "system-end"
+            },
+            "injection_format": {
+              "type": "string",
+              "title": "Injection Format",
+              "default": "classic"
+            },
+            "analysis_language": {
+              "type": "string",
+              "title": "Analysis Language",
+              "default": "auto"
+            }
+          },
+          "type": "object",
+          "title": "ConfigModel"
+        },
+        "HTTPValidationError": {
+          "properties": {
+            "detail": {
+              "items": {
+                "$ref": "#/components/schemas/ValidationError"
+              },
+              "type": "array",
+              "title": "Detail"
+            }
+          },
+          "type": "object",
+          "title": "HTTPValidationError"
+        },
+        "LlmTestResponse": {
+          "properties": {
+            "success": {
+              "type": "boolean",
+              "title": "Success"
+            },
+            "results": {
+              "items": {
+                "$ref": "#/components/schemas/LlmTestResult"
+              },
+              "type": "array",
+              "title": "Results"
+            }
+          },
+          "type": "object",
+          "required": [
+            "success",
+            "results"
+          ],
+          "title": "LlmTestResponse"
+        },
+        "LlmTestResult": {
+          "properties": {
+            "name": {
+              "type": "string",
+              "title": "Name"
+            },
+            "label": {
+              "type": "string",
+              "title": "Label"
+            },
+            "provider": {
+              "type": "string",
+              "title": "Provider"
+            },
+            "base_url": {
+              "type": "string",
+              "title": "Base Url"
+            },
+            "example_url": {
+              "type": "string",
+              "title": "Example Url"
+            },
+            "model": {
+              "type": "string",
+              "title": "Model"
+            },
+            "success": {
+              "type": "boolean",
+              "title": "Success"
+            },
+            "status_code": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status Code"
+            },
+            "latency_ms": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Latency Ms"
+            },
+            "error": {
+              "type": "string",
+              "title": "Error",
+              "default": ""
+            }
+          },
+          "type": "object",
+          "required": [
+            "name",
+            "label",
+            "provider",
+            "base_url",
+            "example_url",
+            "model",
+            "success"
+          ],
+          "title": "LlmTestResult"
+        },
+        "PresetEntry": {
+          "properties": {
+            "id": {
+              "type": "string",
+              "title": "Id"
+            },
+            "name": {
+              "type": "string",
+              "title": "Name"
+            },
+            "saved_at": {
+              "type": "string",
+              "title": "Saved At"
+            },
+            "pack": {
+              "additionalProperties": true,
+              "type": "object",
+              "title": "Pack"
+            }
+          },
+          "type": "object",
+          "required": [
+            "id",
+            "name",
+            "saved_at"
+          ],
+          "title": "PresetEntry"
+        },
+        "PresetLibraryResponse": {
+          "properties": {
+            "version": {
+              "type": "integer",
+              "title": "Version",
+              "default": 1
+            },
+            "presets": {
+              "items": {
+                "$ref": "#/components/schemas/PresetListEntry"
+              },
+              "type": "array",
+              "title": "Presets"
+            }
+          },
+          "type": "object",
+          "title": "PresetLibraryResponse"
+        },
+        "PresetListEntry": {
+          "properties": {
+            "id": {
+              "type": "string",
+              "title": "Id"
+            },
+            "name": {
+              "type": "string",
+              "title": "Name"
+            },
+            "saved_at": {
+              "type": "string",
+              "title": "Saved At"
+            }
+          },
+          "type": "object",
+          "required": [
+            "id",
+            "name",
+            "saved_at"
+          ],
+          "title": "PresetListEntry"
+        },
+        "PresetSaveRequest": {
+          "properties": {
+            "id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Id"
+            },
+            "name": {
+              "type": "string",
+              "title": "Name"
+            },
+            "pack": {
+              "additionalProperties": true,
+              "type": "object",
+              "title": "Pack"
+            }
+          },
+          "type": "object",
+          "required": [
+            "name"
+          ],
+          "title": "PresetSaveRequest"
+        },
+        "PublicConfigStatus": {
+          "properties": {
+            "pipeline_mode": {
+              "type": "string",
+              "title": "Pipeline Mode",
+              "default": "classic"
+            },
+            "default_provider": {
+              "type": "string",
+              "title": "Default Provider"
+            },
+            "default_base_url": {
+              "type": "string",
+              "title": "Default Base Url"
+            },
+            "default_model": {
+              "type": "string",
+              "title": "Default Model"
+            },
+            "default_api_key_set": {
+              "type": "boolean",
+              "title": "Default Api Key Set"
+            },
+            "default_temperature": {
+              "type": "number",
+              "title": "Default Temperature"
+            },
+            "default_max_tokens": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Default Max Tokens"
+            },
+            "default_extra_body_json_set": {
+              "type": "boolean",
+              "title": "Default Extra Body Json Set"
+            },
+            "context_window": {
+              "type": "integer",
+              "title": "Context Window"
+            },
+            "debug_mode": {
+              "type": "boolean",
+              "title": "Debug Mode"
+            },
+            "request_timeout": {
+              "type": "number",
+              "title": "Request Timeout"
+            },
+            "strict_mode": {
+              "type": "boolean",
+              "title": "Strict Mode"
+            },
+            "injection_position": {
+              "type": "string",
+              "title": "Injection Position"
+            },
+            "injection_format": {
+              "type": "string",
+              "title": "Injection Format"
+            },
+            "analysis_language": {
+              "type": "string",
+              "title": "Analysis Language"
+            }
+          },
+          "type": "object",
+          "required": [
+            "default_provider",
+            "default_base_url",
+            "default_model",
+            "default_api_key_set",
+            "default_temperature",
+            "default_max_tokens",
+            "default_extra_body_json_set",
+            "context_window",
+            "debug_mode",
+            "request_timeout",
+            "strict_mode",
+            "injection_position",
+            "injection_format",
+            "analysis_language"
+          ],
+          "title": "PublicConfigStatus"
+        },
+        "StatusResponse": {
+          "properties": {
+            "status": {
+              "type": "string",
+              "title": "Status"
+            },
+            "version": {
+              "type": "string",
+              "title": "Version"
+            },
+            "ready": {
+              "type": "boolean",
+              "title": "Ready"
+            },
+            "config": {
+              "$ref": "#/components/schemas/PublicConfigStatus"
+            },
+            "agents": {
+              "items": {
+                "$ref": "#/components/schemas/AgentStatus"
+              },
+              "type": "array",
+              "title": "Agents"
+            }
+          },
+          "type": "object",
+          "required": [
+            "status",
+            "version",
+            "ready",
+            "config",
+            "agents"
+          ],
+          "title": "StatusResponse"
+        },
+        "ValidationError": {
+          "properties": {
+            "loc": {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "integer"
+                  }
+                ]
+              },
+              "type": "array",
+              "title": "Location"
+            },
+            "msg": {
+              "type": "string",
+              "title": "Message"
+            },
+            "type": {
+              "type": "string",
+              "title": "Error Type"
+            },
+            "input": {
+              "title": "Input"
+            },
+            "ctx": {
+              "type": "object",
+              "title": "Context"
+            }
+          },
+          "type": "object",
+          "required": [
+            "loc",
+            "msg",
+            "type"
+          ],
+          "title": "ValidationError"
+        }
+      }
+    }
+  },
+  "/analyze-disabled": {
+    "context_world": "",
+    "context_plot": "",
+    "context_char": "",
+    "errors": {},
+    "latency_ms": {}
+  }
+}
