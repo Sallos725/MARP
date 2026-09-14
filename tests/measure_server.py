@@ -33,7 +33,10 @@ def measure(command, cwd):
             try:proc.wait(timeout=12)
             except subprocess.TimeoutExpired:proc.kill();proc.wait()
             proc.stderr.close()
-results={"go":measure([str(root/"dist/marp-v0.9.0-linux-amd64")],root/"full")}
+version=json.loads((root/"package.json").read_text())["version"]
+binary=root/f"dist/marp-v{version}-linux-amd64"
+assert subprocess.check_output([str(binary),"--version"],text=True).strip()==version
+results={"go":measure([str(binary)],root/"full")}
 if os.environ.get("MARP_BASELINE_PYTHON"):
     results["python_v0.8.4"]=measure([os.environ["MARP_BASELINE_PYTHON"],"-m","uvicorn","app.main:app","--host","127.0.0.1","--port","{port}"],root/"tests/legacy-python")
 assert results["go"]["idle_rss_bytes"]<=48*1024*1024,results
