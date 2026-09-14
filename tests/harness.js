@@ -10,11 +10,12 @@ const add=AbortSignal.prototype.addEventListener,remove=AbortSignal.prototype.re
 const tracked=new WeakMap();AbortSignal.prototype.addEventListener=function(type,fn,opt){if(type==='abort'){let set=tracked.get(this);if(!set)tracked.set(this,set=new Set());if(!set.has(fn)){set.add(fn);testState.listeners++}}return add.call(this,type,fn,opt)};
 AbortSignal.prototype.removeEventListener=function(type,fn,...args){if(type==='abort'&&tracked.get(this)?.delete(fn))testState.listeners--;return remove.call(this,type,fn,...args)};
 window.setup=async full=>{
+ window.menuButtons=new Map();
  const c=defaults();c.default_api_key='fixture';c.default_pdf_mode='quality';
  const storage=new Map([['risu_multiagent_lite_config_vault_v1',{version:1,scope:'lite',config:legacyConfig(c)}]]);let before,unload,part=0;
  const host={getArgument:async()=>'',setArgument:async()=>{},pluginStorage:{getItem:async k=>storage.get(k),setItem:async(k,v)=>{testState.writes++;storage.set(k,v)},removeItem:async k=>storage.delete(k)},
  addRisuReplacer:async(t,fn)=>{await new Promise(r=>setTimeout(r,5));before=fn;testState.hooks++;return undefined},
- removeRisuReplacer:async()=>{testState.hooks--},onUnload:async fn=>{unload=fn},registerSetting:async()=>({id:'setting'+(++part)}),registerButton:async()=>({id:'button'+(++part)}),unregisterUIPart:async()=>{},showContainer:async()=>{},hideContainer:async()=>{},
+ removeRisuReplacer:async()=>{testState.hooks--},onUnload:async fn=>{unload=fn},registerSetting:async()=>({id:'setting'+(++part)}),registerButton:async(config,callback)=>{const id='button'+(++part);menuButtons.set(id,{...config,callback});return {id}},unregisterUIPart:async id=>{menuButtons.delete(id)},showContainer:async()=>{},hideContainer:async()=>{},
  nativeFetch:async(url,req={})=>{
   testState.requests++;if(window.delayResponse)await new Promise(r=>setTimeout(r,window.delayResponse));
   const path=new URL(url).pathname;

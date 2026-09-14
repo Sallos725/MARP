@@ -125,7 +125,7 @@ export async function start(host,{full=false,analyze,defaultPrompts,clearTokens,
  await host.onUnload?.(dispose);
  hook=await host.addRisuReplacer('beforeRequest',before);hookRegistered=true;
  if(!alive){await host.removeRisuReplacer?.('beforeRequest',before);return {before,open,dispose}}
- for(const register of [()=>host.registerSetting('MARP '+(full?'Full':'Lite'),open,'🔱','html'),()=>host.registerButton?.({name:'MARP '+(full?'Full':'Lite'),icon:'🔱',iconType:'html',location:'hamburger'},open)]){
+ for(const register of [()=>host.registerSetting('MARP '+(full?'Full':'Lite'),open,'🔱','html'),()=>host.registerButton?.({name:'MARP '+(full?'Full':'Lite'),icon:'🔱',iconType:'html',location:'chat'},open)]){
   if(!alive)break;const part=await register();if(part?.id){if(alive)parts.push(part.id);else await host.unregisterUIPart?.(part.id)}
  }
  return {before,open,dispose,test,testConnection,getHistory,clearHistory,get lastRun(){return lastRun}};

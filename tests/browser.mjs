@@ -11,7 +11,7 @@ try{for(const[name,type]of [['chromium',chromium],['webkit',webkit]]){
  await page.goto(base);const cdp=name==='chromium'?await page.context().newCDPSession(page):null;if(cdp)await cdp.send('Emulation.setCPUThrottlingRate',{rate:4});
  await page.evaluate(full=>setup(full),full);
  const timings=await page.evaluate(async()=>{const values=[];for(let i=0;i<20;i++){const start=performance.now();await instance.open();if(!document.querySelector('.marp-shell'))throw Error('shell missing');values.push(performance.now()-start);document.querySelector('[data-close]').click()}return values.sort((a,b)=>a-b)});
- await page.evaluate(()=>instance.open());await page.getByRole('heading',{name:'공통 설정',exact:true}).waitFor();
+ await page.evaluate(()=>[...menuButtons.values()].find(b=>b.location==='chat').callback());await page.getByRole('heading',{name:'공통 설정',exact:true}).waitFor();
  await page.locator('[data-field=default_temperature]').fill('0');await page.getByRole('button',{name:'프롬프트',exact:true}).click();await page.locator('[data-field=plot_system_prompt]').fill('Saved while hidden');await page.getByRole('button',{name:'등장인물',exact:true}).click();await page.getByRole('button',{name:'설정 저장',exact:true}).click();await page.getByRole('status').filter({hasText:'설정을 저장했습니다.'}).waitFor();
  await page.getByRole('button',{name:'프롬프트',exact:true}).click();assert.equal(await page.locator('[data-field=plot_system_prompt]').inputValue(),'Saved while hidden');
  await page.getByRole('button',{name:'닫기',exact:true}).click();
@@ -76,14 +76,16 @@ try{for(const[name,type]of [['chromium',chromium],['webkit',webkit]]){
  assert.equal(longTasks.length,0,'PDF main-thread long tasks: '+longTasks);
  await page.evaluate(async()=>{dataResponse=true;await run([{role:'user',content:'test'}]);delayResponse=100;const pending=run([{role:'user',content:'late'}]);await new Promise(r=>setTimeout(r,10));await unload();const result=await pending;if(result.length!==1)throw Error('late result injected')});
  assert.equal(await page.evaluate(()=>testState.workers),0);assert.equal(await page.evaluate(()=>testState.hooks),0);
+ assert.equal(await page.evaluate(()=>menuButtons.size),0);
  assert.deepEqual(errors,[]);
  metrics.browsers.push({name,edition:full?'full':'lite',shell_p95_ms:timings[18],pdf_long_tasks:longTasks,retained_heap_bytes:cdp?heapAfter-heapBefore:null,workers:0,object_urls:0,idle_requests:0,idle_storage_writes:0});
  // Exercise the actual minified release entry after the source harness checks.
  await page.evaluate(()=>{window.Risuai=host;host.registerSetting=async(label,open)=>{window.packagedOpen=open;return {id:'packaged-setting'}}});
  await page.addScriptTag({path:full?'full/plugin/risu-multiagent-full.js':'lite/risu-multiagent.js'});
- await page.waitForFunction(()=>typeof window.packagedOpen==='function');
+ await page.waitForFunction(()=>typeof window.packagedOpen==='function'&&[...menuButtons.values()].some(b=>b.location==='chat'));
  await page.evaluate(async()=>{
-  await packagedOpen();document.querySelector('[data-close]').click();
+  if([...menuButtons.values()].some(b=>b.location==='hamburger'))throw Error('old character-list menu entry remains');
+  await [...menuButtons.values()].find(b=>b.location==='chat').callback();if(!document.querySelector('.marp-shell'))throw Error('chat menu did not open dashboard');document.querySelector('[data-close]').click();
   delayResponse=0;
   const out=await run([{role:'system',content:'Unicode 한글 日本語 😀 setting. '.repeat(100)},{role:'user',content:'Packaged plugin test'}]);
   if(out.length!==3)throw Error('packaged plugin did not inject');
@@ -93,6 +95,7 @@ try{for(const[name,type]of [['chromium',chromium],['webkit',webkit]]){
  assert.equal(await page.evaluate(()=>testState.workers),0);
  assert.equal(await page.evaluate(()=>testState.urls),0);
  assert.deepEqual(errors,[]);
+ assert.equal(await page.evaluate(()=>menuButtons.size),0);
  console.log(name,full?'full':'lite',metrics.browsers.at(-1));await page.close();
  }}finally{await browser.close()}
  }}finally{server.close()}
