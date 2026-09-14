@@ -8,3 +8,32 @@ function fixture({full=false,result={context_world:'fact',errors:{}},old=false}=
 test('Full falls back to old status and caches only runtime config for activity',async()=>{const f=fixture({full:true,old:true});const app=await start(f.host,{full:true});const m=[{role:'system',content:'settings'},...Array.from({length:100},()=>({role:'assistant',content:'old'})),{role:'user',content:'now'},{role:'assistant',content:'continue'}];await app.before(m,'model');await app.before(m,'model');assert.equal(f.calls.filter(c=>c.url.endsWith('/status')).length,1);const body=f.calls.find(c=>c.url.endsWith('/analyze')).body;assert.equal(body.chat_history.length,3);assert.equal(body.chat_history.at(-1).content,'continue');assert.equal(body.system_context,'settings');await app.dispose()});
 test('partial results, empty output and disabled agents do not fabricate context',async()=>{const f=fixture();let result={context_world:'fact',errors:{plot:'failed'}};const app=await start(f.host,{analyze:async()=>result});const messages=[{role:'user',content:'now'}];assert.equal((await app.before(messages,'model')).length,2);result={context_world:'<think>hidden</think>',errors:{}};assert.deepEqual(await app.before(messages,'model'),messages);assert.equal(app.lastRun.status,'empty-no-injection');result={errors:{worldbuilding:'bad'}};assert.deepEqual(await app.before(messages,'model'),messages);await app.dispose()});
 test('late registration and late analysis are disposed without injection',async()=>{const f=fixture();let resolve;f.host.addRisuReplacer=async()=>new Promise(r=>{resolve=r});const pending=start(f.host,{analyze:async()=>({context_world:'late',errors:{}})});await new Promise(r=>setTimeout(r,0));await f.unload();resolve();const app=await pending;assert.equal(f.remove,1);const m=[{role:'user',content:'current'}];assert.equal(await app.before(m,'model'),m)});
+
+test('history is bounded, detached, redacted, and never persisted',async()=>{
+ const f=fixture(),app=await start(f.host,{analyze:async()=>({context_world:'fact '.repeat(2000),errors:{plot:'fake credential'},diagnostics:{worldbuilding:{status:'success',usage:{prompt_tokens:30,secret:'fake'}}}})});
+ const before=JSON.stringify([...f.store]);
+ for(let i=0;i<55;i++)await app.before([{role:'user',content:'private input'}],'model');
+ const history=app.getHistory();assert.equal(history.length,50);assert.equal(history[0].id,55);assert.equal(history.at(-1).id,6);
+ assert.equal(history[0].previews.worldbuilding.text.length,2001);assert.equal(history[0].previews.worldbuilding.truncated,true);
+ assert.ok(!JSON.stringify(history).includes('private input'));assert.ok(!JSON.stringify(history).includes('fake'));
+ history[0].status='mutated';assert.equal(app.getHistory()[0].status,'injected');assert.equal(JSON.stringify([...f.store]),before);
+ app.clearHistory();assert.equal(app.lastRun,null);assert.equal(app.getHistory().length,0);await app.dispose();
+});
+test('manual connection checks skip OFF agents, record errors, and never analyze',async()=>{
+ const f=fixture(),called=[];let analyses=0;
+ const app=await start(f.host,{analyze:async()=>{analyses++;return {context_world:'ok'}},checkConnection:async(_,a)=>{called.push(a.model);if(a.model==='denied'){const e=Error('denied');e.status=401;throw e}return {status_code:200,check:'models'}}});
+ f.c.plot_model='denied';f.c.character_enabled=false;
+ const record=await app.testConnection(f.c);assert.equal(analyses,0);assert.equal(called.length,2);assert.equal(record.status,'test-partial');assert.equal(record.diagnostics.plot.status_code,401);assert.equal(record.diagnostics.character.status,'skipped');assert.equal(app.lastRun,null);
+ const test=await app.test(f.c);assert.equal(test.kind,'text-test');assert.equal(app.getHistory().length,2);assert.equal(analyses,1);await app.dispose();assert.equal(app.getHistory().length,0);
+});
+test('timeouts and rejected tests leave records, while unload drops late records',async()=>{
+ const f=fixture(),app=await start(f.host,{analyze:async()=>new Promise(()=>{})});
+ f.c.analysis_timeout=.01;f.store.set('risu_multiagent_lite_config_vault_v1',{config:legacyConfig(f.c)});
+ const input=[{role:'user',content:'now'}];assert.deepEqual(await app.before(input,'model'),input);assert.equal(app.lastRun.status,'failed-no-injection');assert.ok(app.lastRun.error);
+ const pending=app.test(f.c);await assert.rejects(app.test(f.c),/진행 중/);assert.equal((await pending).status,'test-failed');
+ const late=app.test(f.c);await app.dispose();await late;assert.equal(app.getHistory().length,0);
+});
+test('Full connection tests use the selected server and legacy GET agent route',async()=>{
+ const f=fixture({full:true,result:{success:true,results:[{name:'plot',success:true,provider:'custom',model:'saved-model',latency_ms:8,status_code:200}]}}),app=await start(f.host,{full:true});
+ f.c.server_url='https://selected.example';const r=await app.testConnection(f.c,'plot');assert.equal(f.calls[0].url,'https://selected.example/test/llm?agent=plot');assert.equal(f.calls[0].body,undefined);assert.equal(r.diagnostics.plot.model,'saved-model');assert.equal(r.diagnostics.worldbuilding.status,'skipped');await app.dispose();
+});

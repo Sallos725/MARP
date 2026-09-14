@@ -153,6 +153,8 @@ def build_notes() -> str:
     groups = categorize(files)
     commits = commit_subjects(previous)
     manual = optional_manual_notes(tag)
+    if manual.startswith("<!-- complete-release-notes -->"):
+        return manual.removeprefix("<!-- complete-release-notes -->").lstrip() + "\n"
 
     lines: list[str] = [
         f"# MARP {tag}",

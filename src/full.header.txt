@@ -1,7 +1,7 @@
 //@name risu_multiagent_full
 //@display-name MultiAgent RP — Full판
 //@api 3.0
-//@version 0.9.0
+//@version 0.9.1
 //@update-url https://raw.githubusercontent.com/Sallos725/MARP/main/full/plugin/risu-multiagent-full.js
 //@link https://github.com/Sallos725/MARP GitHub
 //@arg server_url string Full판 서버 URL (e.g. http://localhost:6009 or https://example.com/multi-agent)

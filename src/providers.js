@@ -82,3 +82,17 @@ export async function callAgent(host,a,messages,signal){
  if(pdf.body){try{return {...await post(pdf),pdf:pdf.diag}}catch(e){if(!unsupportedPDF(e))throw e;pdf.diag={...pdf.diag,applied:false,reason:'provider-unsupported',text_retry:true}}}
  return {...await post(original),pdf:pdf.diag};
 }
+
+// Match Full's metadata/auth check; this does not generate a model response.
+export async function checkConnection(host,a,signal){
+ if(signal?.aborted)throw signal.reason;
+ const h=await guarded(headers(host,a,signal),signal);
+ if(vertex(a))return {status_code:200,check:'oauth'};
+ const base=new URL(a.base_url);
+ if(!['http:','https:'].includes(base.protocol))throw Error('API URL을 확인해 주세요');
+ const url=String(a.base_url).replace(/\/+$/,'')+'/models'+(anthropic(a)?'/'+encodeURIComponent(a.model):'');
+ const response=await guarded(host.nativeFetch(url,{method:'GET',headers:h}),signal);
+ const status=Number(response.status??(response.ok===false?500:200));
+ if(status<200||status>=400){const e=Error('HTTP '+status+' · 인증 정보와 API URL을 확인해 주세요');e.status=status;throw e}
+ return {status_code:status,check:'models'};
+}

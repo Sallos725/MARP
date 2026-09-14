@@ -1,4 +1,20 @@
-# MARP Release Notes
+# MARP 변경 내역
+
+## MARP v0.9.1 — 2026-09-14
+
+Lite·Full의 워터폴 UI, 연결 테스트, 최근 호출 기록을 복원했습니다. 기존 설정과 프리셋을 유지합니다.
+
+- **워터폴**: 단계별 시작 시각·소요 시간·성공/실패/OFF. 구버전 Full 서버는 기존 지연 시간으로 추정한 위치를 표시합니다.
+- **연결 테스트**: 전체·개별 에이전트의 인증·모델 조회 API 검사와 Full 서버 상태 확인. LLM 응답 생성 없이 검사하며 Vertex는 OAuth 인증을 확인합니다.
+- **호출 기록**: 현재 세션의 최근 50건, 필터·상세·JSON 내보내기·비우기. 결과 미리보기는 에이전트당 2,000자이며 재로드하면 초기화됩니다.
+- **진단**: 텍스트/PDF 분석 테스트를 기록과 연결하고 늦은 결과가 다른 탭을 덮어쓰지 않도록 처리합니다. 시간 초과와 연결 오류 HTTP 코드도 기록합니다.
+- **문서**: README는 다운로드·업데이트 중심으로 정리하고 진단·설정·PDF·개발 안내를 분리했습니다. Full ZIP에도 안내 문서를 포함합니다.
+
+**업데이트:** Lite는 새 JS로 교체합니다. Full은 서버와 ZIP의 플러그인을 함께 업데이트하고 기존 `.env`, `data/`와 Docker 볼륨을 유지합니다. `MULTIAGENT_VERSION=v0.9.1`로 `docker compose pull`과 `docker compose up -d`를 실행합니다.
+
+[다운로드와 자세한 릴리즈 노트](https://github.com/Sallos725/MARP/releases/tag/v0.9.1) · [진단 화면 사용법](guides/DIAGNOSTICS.md) · [설치 안내](README.md)
+
+자동 검증 범위는 JS·Go/race/vet·Chromium/WebKit·패키지 설치입니다. 실제 휴대전화·유료 공급자 확인은 [별도 점검 항목](MOBILE_TESTING.md)으로 남아 있습니다. 아래 v0.9.0 성능 수치는 해당 버전의 과거 측정값입니다.
 
 ## MARP v0.9.0 — 2026-09-12
 

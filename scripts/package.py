@@ -1,10 +1,12 @@
 """Build reproducible release assets from the checked Go and JS sources."""
-import hashlib, os, shutil, subprocess, sys, zipfile
+import hashlib, json, os, shutil, subprocess, sys, zipfile
 from pathlib import Path
 root = Path(__file__).resolve().parent.parent
-tag = sys.argv[1] if len(sys.argv) > 1 else os.environ.get("GITHUB_REF_NAME", "v0.9.0")
-if tag != "v0.9.0":
-    raise SystemExit("This release source requires tag v0.9.0")
+version = json.loads((root / "package.json").read_text())["version"]
+expected_tag = f"v{version}"
+tag = sys.argv[1] if len(sys.argv) > 1 else os.environ.get("GITHUB_REF_NAME", expected_tag) if os.environ.get("GITHUB_REF_TYPE") == "tag" else expected_tag
+if tag != expected_tag:
+    raise SystemExit(f"This release source requires tag {expected_tag}")
 dist = root / "dist"
 dist.mkdir(exist_ok=True)
 env = {**os.environ, "GOTOOLCHAIN": "go1.27.1", "CGO_ENABLED": "0", "GOOS": "linux"}
@@ -22,7 +24,7 @@ with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as z:
     files += sorted((root / "full/cmd").rglob("*.go"))
     files += [p for p in sorted((root / "full/internal").rglob("*")) if p.is_file() and not p.name.endswith("_test.go")]
     def put(p, name):
-        info = zipfile.ZipInfo(name, (2026, 9, 12, 0, 0, 0))
+        info = zipfile.ZipInfo(name, (2026, 9, 14, 0, 0, 0))
         info.compress_type = zipfile.ZIP_DEFLATED
         info.external_attr = (0o100755 if p.name == "run.sh" or p in assets[:2] else 0o100644) << 16
         z.writestr(info, p.read_bytes())
@@ -34,6 +36,8 @@ with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as z:
     put(root / "README.md", "README.md")
     put(root / "RELEASE_NOTES.md", "RELEASE_NOTES.md")
     put(root / "MOBILE_TESTING.md", "MOBILE_TESTING.md")
+    for p in sorted((root / "guides").glob("*.md")):
+        put(p, f"guides/{p.name}")
 assets.append(archive)
 checksums = dist / "SHA256SUMS"
 checksums.write_text("".join(f"{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.name}\n" for p in sorted(assets)))

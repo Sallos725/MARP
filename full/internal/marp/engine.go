@@ -48,6 +48,7 @@ func prompts(name string, a Config, values map[string]string, lang string) []Mes
 	return []Message{{"system", system}, {"user", renderTemplate(user, values)}}
 }
 func (e *Engine) Analyze(parent context.Context, req AnalyzeRequest) (AnalyzeResponse, error) {
+	started := time.Now()
 	cfg := e.store.Snapshot()
 	if req.PDFMode != nil {
 		switch *req.PDFMode {
@@ -120,12 +121,14 @@ func (e *Engine) Analyze(parent context.Context, req AnalyzeRequest) (AnalyzeRes
 		mu.Lock()
 		defer mu.Unlock()
 		out.Latency[name] = time.Since(start).Milliseconds()
+		diagnostic := Config{"start_offset_ms": start.Sub(started).Milliseconds(), "duration_ms": out.Latency[name], "provider": a["provider"], "model": a["model"]}
+		out.Diagnostics[name] = diagnostic
 		if err != nil {
 			out.Errors[name] = safeError(err)
-			out.Diagnostics[name] = Config{"status": "error", "error": safeError(err)}
+			diagnostic["status"], diagnostic["error"] = "error", safeError(err)
 			return ""
 		}
-		out.Diagnostics[name] = Config{"status": "success", "usage": res.Usage, "pdf": res.PDF, "chars": len([]rune(res.Text))}
+		diagnostic["status"], diagnostic["usage"], diagnostic["pdf"], diagnostic["chars"] = "success", res.Usage, res.PDF, len([]rune(res.Text))
 		return res.Text
 	}
 	out.World = run("worldbuilding")
@@ -153,12 +156,14 @@ func safeError(err error) string {
 func (e *Engine) TestLLM(ctx context.Context, target string) (any, error) {
 	cfg := e.store.Snapshot()
 	results := []Config{}
+	skipped := []string{}
 	success := true
 	for _, name := range AgentNames {
 		if target != "" && target != name {
 			continue
 		}
 		if !enabled(cfg, name+"_enabled") {
+			skipped = append(skipped, name)
 			continue
 		}
 		a := agentConfig(cfg, name)
@@ -167,6 +172,13 @@ func (e *Engine) TestLLM(ctx context.Context, target string) (any, error) {
 		c, stop := context.WithTimeout(ctx, 30*time.Second)
 		status, err := e.Check(c, a)
 		stop()
+		if status != 0 {
+			r["status_code"] = status
+		}
+		r["check"] = "models"
+		if provider(a) == "vertex-ai" || provider(a) == "vertex" {
+			r["check"] = "oauth"
+		}
 		if err != nil {
 			success = false
 			r["error"] = safeError(err)
@@ -177,7 +189,7 @@ func (e *Engine) TestLLM(ctx context.Context, target string) (any, error) {
 		r["latency_ms"] = time.Since(start).Milliseconds()
 		results = append(results, r)
 	}
-	return Config{"success": success, "results": results}, nil
+	return Config{"success": success, "results": results, "skipped": skipped}, nil
 }
 func defaultPromptPack() any {
 	p := clone(legacy["/prompts/defaults"].(map[string]any))

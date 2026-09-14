@@ -48,6 +48,13 @@ func TestPipelineParallelAndTemplate(t *testing.T) {
 	if err != nil || len(out.Errors) > 0 {
 		t.Fatal(err, out.Errors)
 	}
+	world := object(out.Diagnostics["worldbuilding"])
+	for _, name := range []string{"plot", "character"} {
+		d := object(out.Diagnostics[name])
+		if d["start_offset_ms"].(int64) < world["start_offset_ms"].(int64)+out.Latency["worldbuilding"] || d["duration_ms"] != out.Latency[name] || d["model"] != cfg["default_model"] {
+			t.Fatal("invalid waterfall timing", out.Diagnostics)
+		}
+	}
 	if out.World != "world" || out.Plot != "analysis" || peak.Load() != 2 {
 		t.Fatal(out, peak.Load())
 	}
@@ -81,5 +88,35 @@ func TestContentExtraction(t *testing.T) {
 	}
 	if _, e = extract(map[string]any{"choices": []any{Config{"message": Config{"content": "<think>unfinished"}}}}); e == nil {
 		t.Fatal("empty output accepted")
+	}
+}
+
+func TestConnectionDiagnostics(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		if r.Method != "GET" || r.URL.Path != "/models" {
+			t.Error("connection check generated a response", r.Method, r.URL.Path)
+		}
+		w.WriteHeader(401)
+	}))
+	defer server.Close()
+	s := testStore(t)
+	c := s.Snapshot()
+	c["default_base_url"] = server.URL
+	c["default_api_key"] = "fixture"
+	c["character_enabled"] = false
+	if err := s.Save(c); err != nil {
+		t.Fatal(err)
+	}
+	e := NewEngine(s)
+	defer e.Close()
+	result, err := e.TestLLM(context.Background(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	records := object(result)["results"].([]Config)
+	if calls.Load() != 2 || len(records) != 2 || records[0]["status_code"] != 401 || len(object(result)["skipped"].([]string)) != 1 || object(result)["success"] != false {
+		t.Fatal(result, calls.Load())
 	}
 }

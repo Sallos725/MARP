@@ -1,9 +1,17 @@
 import {AGENTS,VERSION,cleanOutput,analysisInput,bypass,withoutOwn,inject,deadline,guarded,responseJSON,parseStored} from './core.js';
-import {loadConfig,legacyConfig,validate,vaultKey,fullKey,exportPack,defaults} from './config.js';
+import {loadConfig,legacyConfig,validate,vaultKey,fullKey,exportPack,defaults,resolve} from './config.js';
+import {HISTORY_LIMIT,recordRun} from './diagnostics.js';
 import {openDashboard} from './ui.js';
-export async function start(host,{full=false,analyze,defaultPrompts,clearTokens}={}){
+export async function start(host,{full=false,analyze,defaultPrompts,clearTokens,checkConnection}={}){
  let alive=true,ui=null,lastRun=null,runtime=null,runtimePending=null;
- const jobs=new Set(),parts=[];let loaded;
+ const jobs=new Set(),parts=[],history=[];let loaded,nextId=0,manualPending=false;
+ const remember=(result,meta,c)=>{
+  const record=recordRun(result,{id:++nextId,edition:full?'full':'lite',...meta},c);
+  if(alive){history.unshift(record);history.length=Math.min(history.length,HISTORY_LIMIT);if(meta.kind!=='connection')lastRun=record}
+  return record;
+ };
+ const getHistory=()=>structuredClone(history);
+ const clearHistory=()=>{history.length=0;lastRun=null};
  const config=()=>loaded??=(loadConfig(host,full).catch(e=>{loaded=null;throw e}));
  const request=async(path,{method='GET',body,signal,base}={})=>{
   const c=await config();if(!alive)throw Error('플러그인 해제');
@@ -37,23 +45,58 @@ export async function start(host,{full=false,analyze,defaultPrompts,clearTokens}
   // Re-read arguments only on activity; no timer, no conversation cache.
   loaded=null;let c;try{c=await config()}catch{return messages}
   if(!alive||bypass(messages,mode,c))return messages;
-  const clean=withoutOwn(messages),start=performance.now(),controller=new AbortController();jobs.add(controller);
+  const clean=withoutOwn(messages),start=performance.now(),started_at=new Date().toISOString(),controller=new AbortController();jobs.add(controller);
   const d=deadline(controller.signal,(c.analysis_timeout||120)*1000);
   try{
    const server=full?await runtimeConfig(c,d.signal):c;
    const input=analysisInput(clean,Number(server.context_window)||10);
    input.analysis_language=c.analysis_language;
-   let result=full?await request('/analyze',{method:'POST',body:input,signal:d.signal}):await analyze(host,c,input,d.signal);
-   if(!alive||d.signal.aborted)return clean;
+   let result=full?await request('/analyze',{method:'POST',body:input,signal:d.signal}):await guarded(analyze(host,c,input,d.signal),d.signal);
+   if(!alive)return clean;
+   if(d.signal.aborted)throw d.signal.reason;
    const failed=Object.keys(result.errors||{}).length>0;
    const useful=['world','plot','char'].some(k=>cleanOutput(result['context_'+k]));
    const injected=useful&&!(c.strict_mode&&failed);
-   lastRun={version:1,plugin_version:VERSION,started_at:new Date().toISOString(),elapsed_ms:Math.round(performance.now()-start),history_messages:input.chat_history.length,input_chars:input.user_input.length,system_chars:input.system_context.length,status:injected?'injected':failed?'failed-no-injection':'empty-no-injection',errors:result.errors||{},latency_ms:result.latency_ms||{},diagnostics:result.diagnostics||{},strict_note:c.strict_mode?'PDF Pod가 훅 오류를 흡수할 수 있어 메인 호출 차단은 보장되지 않습니다.':''};
+   remember(result,{kind:'analysis',started_at,elapsed_ms:Math.round(performance.now()-start),history_messages:input.chat_history.length,input_chars:input.user_input.length,system_chars:input.system_context.length,status:injected?'injected':failed?'failed-no-injection':'empty-no-injection',strict_note:c.strict_mode?'PDF Pod가 훅 오류를 흡수할 수 있어 메인 호출 차단은 보장되지 않습니다.':''},c);
    return injected?inject(clean,result,c):clean;
   }catch(e){
-   if(alive)lastRun={version:1,status:'failed-no-injection',error:e.message,elapsed_ms:Math.round(performance.now()-start),strict_note:c.strict_mode?'분석 주입 중단. PDF Pod 환경에서 메인 호출 차단은 보장되지 않습니다.':''};
+   if(alive)remember({},{kind:'analysis',started_at,status:'failed-no-injection',error:e.message,elapsed_ms:Math.round(performance.now()-start),strict_note:c.strict_mode?'분석 주입 중단. PDF Pod 환경에서 메인 호출 차단은 보장되지 않습니다.':''},c);
    return clean;
   }finally{d.close();jobs.delete(controller)}
+ };
+ const manual=async(draft,kind,execute)=>{
+  if(!alive)throw Error('플러그인 해제');
+  if(manualPending)throw Error('진행 중인 테스트가 끝난 뒤 다시 실행해 주세요');
+  validate(draft);manualPending=true;
+  const c={...draft},started_at=new Date().toISOString(),started=performance.now(),controller=new AbortController();jobs.add(controller);
+  const d=deadline(controller.signal,c.analysis_timeout*1000);
+  try{
+   const result=await guarded(execute(c,d.signal),d.signal);
+   const failed=kind==='connection'?result.success===false:Object.keys(result.errors||{}).length>0;
+   const useful=kind==='connection'?result.results?.some(r=>r.success):['world','plot','char'].some(k=>cleanOutput(result['context_'+k]));
+   return remember(result,{kind,started_at,elapsed_ms:Math.round(performance.now()-started),status:failed?(useful?'test-partial':'test-failed'):useful?'test-success':'test-empty'},c);
+  }catch(e){return remember({},{kind,started_at,elapsed_ms:Math.round(performance.now()-started),status:'test-failed',error:e.message},c)}
+  finally{d.close();jobs.delete(controller);manualPending=false}
+ };
+ const test=(draft,pdf=false)=>manual(draft,pdf?'pdf-test':'text-test',async(c,signal)=>{
+  c.default_pdf_mode=pdf?'quality':'off';for(const n of AGENTS)c[n+'_pdf_mode']='';
+  const input={user_input:'Analyze this synthetic test turn.',system_context:'A fictional observatory. Only established facts may be treated as canon. '.repeat(30),chat_history:[],pdf_mode:c.default_pdf_mode};
+  return full?request('/analyze',{method:'POST',body:input,signal,base:c.server_url}):analyze(host,c,input,signal);
+ });
+ const testConnection=(draft,target='')=>{
+  if(target&&!AGENTS.includes(target))throw Error('에이전트를 확인해 주세요');
+  return manual(draft,'connection',async(c,signal)=>{
+   if(full)return request('/test/llm'+(target?'?agent='+encodeURIComponent(target):''),{signal,base:c.server_url});
+   const results=await Promise.all(AGENTS.filter(n=>!target||n===target).map(async name=>{
+    const a=resolve(c,name),base={name,provider:a.provider,model:a.model};
+    if(!c[name+'_enabled'])return {...base,skipped:true,reason:'disabled'};
+    const started=performance.now(),d=deadline(signal,Math.min(30,c.request_timeout)*1000);
+    try{return {...base,...await guarded(checkConnection(host,a,d.signal),d.signal),success:true,latency_ms:Math.round(performance.now()-started)}}
+    catch(e){return {...base,success:false,error:e.message,status_code:e.status,latency_ms:Math.round(performance.now()-started)}}
+    finally{d.close()}
+   }));
+   return {success:results.every(r=>r.skipped||r.success),results};
+  });
  };
  const presets={
   async list(){if(full)return (await request('/presets')).presets;return (parseStored(await host.pluginStorage.getItem('risu_multiagent_lite_preset_library_v1'))||{presets:[]}).presets},
@@ -65,15 +108,15 @@ export async function start(host,{full=false,analyze,defaultPrompts,clearTokens}
   if(!alive)return;ui?.close();
   ui=openDashboard({full,host,connect:async url=>{const c=await config();loaded=Promise.resolve({...c,server_url:url});runtime=null;await host.setArgument?.('server_url',url);await host.pluginStorage.setItem(fullKey,{version:1,serverUrl:url,mainModelOnly:c.main_model_only,bypassHypaMemory:c.bypass_hypamemory,bypassTranslate:c.bypass_translate,bypassLbProcess:c.bypass_lb_process,strictMode:c.strict_mode,injectionPosition:c.injection_position,injectionFormat:c.injection_format,analysisLanguage:c.analysis_language})},getConfig:async()=>{const c=await config();return full?{...c,...await request('/config'),server_url:c.server_url}:c},save,presets,
    getPrompts:async()=>full?request('/prompts/defaults'):defaultPrompts(),
-   getDiagnostics:async()=>({lastRun,server:full?await request('/status'):undefined,version:VERSION}),
-   test:async(draft,pdf=false)=>{const c={...draft,default_pdf_mode:pdf?'quality':'off'};for(const n of AGENTS)c[n+'_pdf_mode']='';if(full)return request('/analyze',{method:'POST',body:{user_input:'Analyze this synthetic test turn.',system_context:'A fictional observatory. Only established facts may be treated as canon. '.repeat(30),chat_history:[],pdf_mode:pdf?'quality':'off'}});const controller=new AbortController();jobs.add(controller);const d=deadline(controller.signal,c.analysis_timeout*1000);try{return await analyze(host,c,{user_input:'Analyze this synthetic test turn.',system_context:'A fictional observatory. Only established facts may be treated as canon. '.repeat(30),chat_history:[]},d.signal)}finally{d.close();jobs.delete(controller)}}
+   getDiagnostics:async base=>({lastRun,server:full?await request('/status',{base}):undefined,version:VERSION}),
+   test,testConnection,getHistory,clearHistory
   });
   await host.showContainer?.('fullscreen');
  };
  // Await hook registration before exposing UI; dispose late registrations too.
  let hook,hookRegistered=false;
  const dispose=async()=>{
-  if(!alive)return;alive=false;for(const job of jobs)job.abort(Error('플러그인 해제'));jobs.clear();clearTokens?.();ui?.close();lastRun=null;runtime=null;loaded=null;
+  if(!alive)return;alive=false;for(const job of jobs)job.abort(Error('플러그인 해제'));jobs.clear();clearTokens?.();ui?.close();clearHistory();runtime=null;loaded=null;
   if(hookRegistered&&host.removeRisuReplacer)try{await host.removeRisuReplacer('beforeRequest',typeof hook==='string'?hook:before)}catch{}
   if(typeof hook==='function'&&hook!==before)try{await hook()}catch{}
   for(const id of parts)await host.unregisterUIPart?.(id);
@@ -85,5 +128,5 @@ export async function start(host,{full=false,analyze,defaultPrompts,clearTokens}
  for(const register of [()=>host.registerSetting('MARP '+(full?'Full':'Lite'),open,'🔱','html'),()=>host.registerButton?.({name:'MARP '+(full?'Full':'Lite'),icon:'🔱',iconType:'html',location:'hamburger'},open)]){
   if(!alive)break;const part=await register();if(part?.id){if(alive)parts.push(part.id);else await host.unregisterUIPart?.(part.id)}
  }
- return {before,open,dispose,get lastRun(){return lastRun}};
+ return {before,open,dispose,test,testConnection,getHistory,clearHistory,get lastRun(){return lastRun}};
 }

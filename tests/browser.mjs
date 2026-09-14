@@ -2,6 +2,7 @@ import {chromium,webkit} from 'playwright';import {build} from 'esbuild';import 
 const code=(await build({entryPoints:['tests/harness.js'],bundle:true,write:false,format:'iife',target:'es2020'})).outputFiles[0].text;
 const server=createServer((req,res)=>{res.setHeader('Content-Type',req.url==='/bundle.js'?'application/javascript':'text/html');res.end(req.url==='/bundle.js'?code:'<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"></head><body><script src="/bundle.js"></script></body></html>')});
 await new Promise(r=>server.listen(0,'127.0.0.1',r));const base='http://127.0.0.1:'+server.address().port;
+await mkdir('test-results',{recursive:true});
 const metrics={date:new Date().toISOString(),browsers:[]};
 try{for(const[name,type]of [['chromium',chromium],['webkit',webkit]]){
  const browser=await type.launch({headless:true,args:name==='chromium'?['--js-flags=--expose-gc']:[]});
@@ -24,6 +25,40 @@ try{for(const[name,type]of [['chromium',chromium],['webkit',webkit]]){
   return {state:{...testState},diag:instance.lastRun};
  },full);
  assert.equal(r.state.workers,0);assert.equal(r.state.urls,0);
+ await page.evaluate(()=>instance.open());
+ await page.getByRole('button',{name:'워터폴',exact:true}).click();
+ await page.locator('.marp-waterfall-row').first().waitFor();assert.equal(await page.locator('.marp-waterfall-row').count(),3);
+ assert.ok(await page.locator('.marp-waterfall-row[data-agent=plot] .marp-bar').count());
+ assert.equal(await page.evaluate(()=>document.querySelector('.marp-shell').scrollWidth<=innerWidth),true,'mobile overflow');
+ await page.screenshot({path:`test-results/${name}-${full?'full':'lite'}-waterfall.png`,fullPage:true});
+ const beforeView=await page.evaluate(()=>({...testState}));
+ await page.getByRole('button',{name:'호출 기록',exact:true}).click();await page.locator('.marp-records>li').first().waitFor();
+ assert.equal(await page.locator('.marp-records>li').count(),2);
+ await page.locator('.marp-records>li').first().locator('summary').first().click();
+ await page.locator('.marp-records .marp-waterfall-row').first().waitFor();assert.equal(await page.locator('.marp-records .marp-waterfall-row').count(),3);
+ assert.equal(await page.evaluate(()=>testState.requests),beforeView.requests);
+ assert.equal(await page.evaluate(()=>testState.writes),beforeView.writes);
+ await page.getByRole('button',{name:'연결 테스트',exact:true}).click();
+ if(full){await page.getByRole('button',{name:'Full 서버 상태 확인',exact:true}).click();await page.getByText('서버 연결 확인 완료',{exact:false}).waitFor()}
+ await page.getByRole('button',{name:'플롯 연결 테스트',exact:true}).click();
+ await page.locator('.marp-summary').filter({hasText:'테스트 성공'}).waitFor();
+ assert.equal(await page.evaluate(()=>instance.getHistory()[0].kind),'connection');
+ await page.evaluate(()=>{failConnection=true});await page.getByRole('button',{name:'전체 연결 테스트',exact:true}).click();
+ await page.locator('.marp-summary').filter({hasText:'테스트 실패'}).waitFor();await page.evaluate(()=>{failConnection=false});
+ await page.getByRole('button',{name:'진단',exact:true}).click();await page.getByRole('button',{name:'텍스트 분석 테스트',exact:true}).click();
+ await page.locator('.marp-summary').filter({hasText:'테스트 성공'}).waitFor();
+ assert.equal(await page.evaluate(()=>instance.getHistory()[0].kind),'text-test');
+ // Delayed manual results may update history, but never replace another tab.
+ await page.evaluate(()=>{delayResponse=30});await page.getByRole('button',{name:'PDF 분석 테스트',exact:true}).click();
+ await page.getByRole('button',{name:'공통',exact:true}).click();await page.waitForFunction(()=>instance.getHistory()[0].kind==='pdf-test');
+ assert.equal(await page.getByRole('heading',{name:'공통 설정',exact:true}).count(),1);await page.evaluate(()=>{delayResponse=0});
+ await page.getByRole('button',{name:'호출 기록',exact:true}).click();await page.getByLabel('호출 기록 필터').selectOption('failed');
+ assert.equal(await page.locator('.marp-records>li').count(),1);
+ await page.screenshot({path:`test-results/${name}-${full?'full':'lite'}-history.png`,fullPage:true});
+ const download=page.waitForEvent('download');await page.getByRole('button',{name:'기록 JSON 내보내기',exact:true}).click();assert.equal((await download).suggestedFilename(),'marp-call-history.json');
+ await page.getByRole('button',{name:'기록 비우기',exact:true}).click();await page.waitForFunction(()=>instance.getHistory().length===0);
+ await page.getByRole('button',{name:'닫기',exact:true}).click();
+
  if(cdp)await cdp.send('HeapProfiler.collectGarbage');
  const heapBefore=cdp?(await cdp.send('Runtime.getHeapUsage')).usedSize:0;
  const longTasks=await page.evaluate(async()=>{

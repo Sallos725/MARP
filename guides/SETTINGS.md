@@ -1,0 +1,42 @@
+# 설정과 분석 동작
+
+[처음으로](../README.md) · [PDF 설정](PDF.md)
+
+## 분석 흐름
+
+세계관 분석이 끝나면 플롯·등장인물 분석을 병렬로 실행합니다. 성공한 분석 메모를 RisuAI 메인 모델에 전달하고, 최종 RP 답변은 메인 모델이 작성합니다. 추가 검수 LLM 호출은 없습니다.
+
+## 공통값과 에이전트별 설정
+
+공통 탭에서 공급자·API URL·credential·모델을 지정합니다. 세계관·플롯·등장인물 탭에서 일부 값을 따로 지정할 수 있으며, 빈 값은 공통 설정을 상속합니다. 각 에이전트의 ON/OFF와 프롬프트도 따로 설정할 수 있습니다. 수정한 뒤 **설정 저장**을 누릅니다.
+
+| 공급자 | API 기본 URL 예시 |
+| --- | --- |
+| OpenAI / Custom | 서비스의 OpenAI 호환 URL |
+| Anthropic | `https://api.anthropic.com/v1` |
+| Google AI Studio | `https://generativelanguage.googleapis.com/v1beta/openai` |
+| Vertex | `https://LOCATION-aiplatform.googleapis.com/v1/projects/PROJECT/locations/LOCATION/endpoints/openapi` |
+
+모델과 credential은 공급자에 맞게 지정합니다. Vertex는 서비스 계정 JSON 파일을 불러올 수 있습니다. 실제 연결 확인은 **연결 테스트**, 응답 생성 확인은 **진단** 탭에서 실행합니다.
+
+## 저장·실패 처리·호환성
+
+
+- 공통값과 에이전트별 값: 공급자, API URL, credential, 모델, 온도, 출력 제한, 추가 JSON, PDF 수준.
+- 에이전트별 ON/OFF와 system/user 프롬프트 override. override를 비우면 개선된 기본값을 사용합니다.
+- 기본 최근 대화 수 10, 에이전트 제한 60초, 전체 제한 120초. Full은 대기열 시간도 전체 제한에 포함하며 기본 동시 분석 수는 4입니다. `max_concurrent_analyses` 변경은 서버 재시작 후 적용됩니다.
+- 기본 Lenient는 성공한 결과만 사용합니다. 모두 OFF, 전체 실패, 빈 결과에는 주입하지 않습니다. Strict는 일부 실패에도 분석 주입을 중단합니다.
+- 최근 사용자 입력 뒤의 assistant 메시지도 이어쓰기·재생성 분석에 포함됩니다. system 자료를 별도로 전달합니다.
+- 배열 content, 첨부 파일, 캐시 메타데이터와 다른 플러그인의 메시지를 유지합니다. MARP 메모만 소유 마커로 찾아 교체합니다. 분석은 텍스트 자료를 사용하며 첨부 파일 원문을 별도로 해독하지 않습니다.
+- 설정 화면은 먼저 틀을 표시하고 프롬프트·프리셋·진단을 탭 진입 시 읽습니다. 숨겨진 탭의 편집 값도 저장됩니다.
+- 유휴 폴링과 자동 저장이 없습니다. `/runtime-config`는 작업할 때만 읽고 최대 60초 캐시하며 저장 후 갱신합니다. 최근 분석 진단은 메모리에만 보관합니다.
+- 기존 JSON 설정이 있으면 `.env` 초기값보다 우선합니다. GUI 또는 `PUT /config`로 저장하세요. 저장은 잠금과 임시 파일 교체를 사용합니다. 분석 시작 시 하나의 설정 스냅샷을 사용합니다.
+- 프리셋 JSON은 Full/Lite 상호 import가 가능하며 기존 v1 형식을 읽습니다. export에는 credential을 포함하지 않습니다.
+
+
+## Full 서버 운영
+
+- 기본 포트는 `6009`입니다. 모바일에서는 휴대전화의 localhost 대신 서버에 접근할 수 있는 주소를 입력합니다.
+- 기존 `data/config.json`이 있으면 `.env`의 초기값보다 우선합니다. 이후 설정 변경은 화면 또는 `PUT /config`를 사용합니다.
+- 기본 동시 분석 수는 4이며 `max_concurrent_analyses`를 바꾸면 서버를 재시작합니다.
+- `.env`, `data/config.json`, `data/presets.json`과 Docker 데이터 볼륨은 업데이트해도 유지합니다.

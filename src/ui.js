@@ -1,12 +1,13 @@
 import {AGENTS,LABELS,VERSION} from './core.js';
 import {FIELDS,defaults,exportPack,importPack,resolve} from './config.js';
+import {diagnosticsCSS,renderDiagnostics} from './diagnostics-ui.js';
 const css='.marp-shell{position:fixed;inset:0;z-index:10000;background:#11161d;color:#e7edf5;font:15px/1.5 system-ui,sans-serif;overflow:auto;color-scheme:dark}.marp-shell *{box-sizing:border-box}.marp-wrap{max-width:960px;margin:auto;padding:24px 18px 80px}.marp-top,.marp-actions{display:flex;gap:12px;align-items:center;flex-wrap:wrap}.marp-top{justify-content:space-between}.marp-shell h1{font-size:25px;letter-spacing:.08em;margin:0}.marp-shell h2{font-size:19px;margin:8px 0 20px}.marp-shell p{color:#aebbc9}.marp-shell button,.marp-shell select,.marp-shell input,.marp-shell textarea{font:inherit;border:1px solid #364451;border-radius:8px;padding:10px;background:#1b242f;color:inherit;min-height:44px}.marp-shell button{cursor:pointer}.marp-shell button:hover,.marp-shell button[aria-selected=true]{border-color:#61d4bd;background:#1c3935}.marp-shell button:disabled{opacity:.45;cursor:wait}.marp-shell :focus-visible{outline:2px solid #61d4bd;outline-offset:2px}.marp-nav{display:flex;gap:8px;overflow:auto;margin:24px 0 18px;padding-bottom:5px}.marp-panel{background:#161e28;border:1px solid #2c3846;border-radius:12px;padding:20px;min-height:180px}.marp-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:15px}.marp-field{display:flex;flex-direction:column;gap:6px;min-width:0}.marp-field input,.marp-field textarea,.marp-field select{width:100%}.marp-field small{color:#aebbc9}.marp-field textarea{min-height:120px;resize:vertical}.marp-wide{grid-column:1/-1}.marp-check{flex-direction:row;align-items:center}.marp-check input{width:20px}.marp-status{white-space:pre-wrap;overflow-wrap:anywhere;min-height:24px;margin:12px 0;color:#9aead9}.marp-shell pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#10151c;border-radius:8px;padding:12px;max-height:480px;overflow:auto}.marp-primary{background:#24564c!important;border-color:#61d4bd!important}.marp-footer{margin-top:18px}.marp-badge{color:#72dfc8;font-size:13px}.marp-shell hr{border:0;border-top:1px solid #364451;margin:20px 0}@media(max-width:600px){.marp-grid{grid-template-columns:1fr}.marp-wrap{padding:18px 12px 60px}.marp-panel{padding:14px}.marp-nav button{white-space:nowrap}.marp-shell h1{font-size:22px}}';
 const labels={provider:'공급자',base_url:'API 기본 URL',api_key:'Credential / 서비스 계정 JSON',model:'모델',temperature:'온도',max_tokens:'출력 토큰 제한',extra_body_json:'추가 JSON',pdf_mode:'내장 PDF'};
 const options={provider:['','openai','custom','google','vertex-ai','anthropic'],pdf_mode:['','off','quality','standard','max'],analysis_language:['auto','ko','en','ja'],injection_position:['system-end','before-last-user'],injection_format:['classic','xml','markdown-table']};
 export function openDashboard(api){
  let alive=true,draft=null,tab='common',epoch=0,pack=null;
  const root=document.createElement('section');root.className='marp-shell';root.setAttribute('aria-label','MARP 설정');
- root.innerHTML='<style>'+css+'</style><div class="marp-wrap"><header class="marp-top"><div><h1>MARP <span class="marp-badge">'+(api.full?'Full':'Lite')+' · '+VERSION+'</span></h1><p>세계관 · 플롯 · 등장인물 분석</p></div><button type="button" data-close>닫기</button></header><nav class="marp-nav" aria-label="설정 탭"></nav><div class="marp-panel" aria-live="polite">설정을 읽는 중입니다…</div><div class="marp-status" role="status"></div><footer class="marp-actions marp-footer"><button class="marp-primary" data-save disabled>설정 저장</button><span>표시하지 않은 탭의 편집 내용도 함께 저장합니다.</span></footer></div>';
+ root.innerHTML='<style>'+css+diagnosticsCSS+'</style><div class="marp-wrap"><header class="marp-top"><div><h1>MARP <span class="marp-badge">'+(api.full?'Full':'Lite')+' · '+VERSION+'</span></h1><p>세계관 · 플롯 · 등장인물 분석</p></div><button type="button" data-close>닫기</button></header><nav class="marp-nav" aria-label="설정 탭"></nav><div class="marp-panel" aria-live="polite">설정을 읽는 중입니다…</div><div class="marp-status" role="status"></div><footer class="marp-actions marp-footer"><button class="marp-primary" data-save disabled>설정 저장</button><span>표시하지 않은 탭의 편집 내용도 함께 저장합니다.</span></footer></div>';
  document.body.append(root);
  const panel=root.querySelector('.marp-panel'),nav=root.querySelector('nav'),status=root.querySelector('[role=status]'),save=root.querySelector('[data-save]');
  const message=(text,error=false)=>{if(alive){status.textContent=text;status.style.color=error?'#ffb4b4':'#9aead9'}};
@@ -34,7 +35,7 @@ export function openDashboard(api){
  async function render(next){
   tab=next;const seq=++epoch;for(const b of nav.children)b.setAttribute('aria-selected',String(b.dataset.tab===tab));panel.replaceChildren();
   if(!draft){text('설정을 읽는 중입니다…');return}
-  const title=document.createElement('h2');title.textContent=({common:'공통 설정',prompts:'프롬프트',presets:'프리셋',diagnostics:'진단'})[tab]||LABELS[tab];panel.append(title);
+  const title=document.createElement('h2');title.textContent=({common:'공통 설정',prompts:'프롬프트',presets:'프리셋',diagnostics:'진단',waterfall:'워터폴',connection:'연결 테스트',history:'호출 기록'})[tab]||LABELS[tab];panel.append(title);
   if(tab==='common'){
    if(api.full)field('server_url','Full 서버 URL',group(),{hint:'새 URL을 저장하면 해당 서버에 현재 설정이 저장됩니다.'});
    providerFields('default');panel.append(document.createElement('hr'));
@@ -59,18 +60,10 @@ export function openDashboard(api){
    action('현재 편집 내용을 프리셋으로 저장',async()=>{await api.presets.put(name.value.trim()||'Preset',exportPack(draft,api.full?'full':'lite'));await render(tab)});
    const list=await api.presets.list();if(!alive||seq!==epoch)return;
    for(const p of list){const row=document.createElement('div');row.className='marp-actions';text(p.name,row);action('불러오기',async()=>{draft=importPack(draft,await api.presets.get(p.id));message('불러왔습니다. 설정 저장 후 적용됩니다.')},row);action('삭제',async()=>{await api.presets.remove(p.id);await render(tab)},row);panel.append(row)}
-  }else{
-   if(api.full)text('Full 테스트는 서버에 저장된 설정으로 실행합니다.');
-   text('실제 사용량은 공급자 응답의 usage, 토큰 추정치는 estimated_source_tokens로 구분합니다. 아래 테스트 버튼을 누를 때만 합성 자료로 추가 LLM 호출이 발생합니다.');
-   const actions=document.createElement('div');actions.className='marp-actions';panel.append(actions);
-   action('텍스트 분석 테스트',async()=>showResult(await api.test(draft,false)),actions);
-   action('PDF 분석 테스트',async()=>showResult(await api.test(draft,true)),actions);
-   const pre=document.createElement('pre');panel.append(pre);
-   function showResult(r){if(alive&&tab==='diagnostics')pre.textContent=JSON.stringify(r,null,2)}
-   const data=await api.getDiagnostics();if(alive&&seq===epoch)showResult(data);
-  }
+  }else{await renderDiagnostics(panel,api,tab,draft,{current:()=>alive&&seq===epoch,refresh:()=>render(tab),download,message})}
+
  }
- for(const[k,label]of [['common','공통'],...AGENTS.map(n=>[n,LABELS[n]]),['prompts','프롬프트'],['presets','프리셋'],['diagnostics','진단']]){const b=action(label,()=>render(k),nav);b.dataset.tab=k}
+ for(const[k,label]of [['common','공통'],...AGENTS.map(n=>[n,LABELS[n]]),['prompts','프롬프트'],['presets','프리셋'],['waterfall','워터폴'],['connection','연결 테스트'],['history','호출 기록'],['diagnostics','진단']]){const b=action(label,()=>render(k),nav);b.dataset.tab=k}
  save.onclick=async()=>{if(!draft)return;save.disabled=true;try{await api.save({...draft});message('설정을 저장했습니다.')}catch(e){message(e.message,true)}finally{if(alive)save.disabled=false}};
  const close=()=>{alive=false;epoch++;root.remove();draft=null;pack=null};
  root.querySelector('[data-close]').onclick=()=>{close();api.host.hideContainer?.()};
