@@ -12,6 +12,7 @@ try{for(const[name,type]of [['chromium',chromium],['webkit',webkit]]){
  await page.evaluate(full=>setup(full),full);
  const timings=await page.evaluate(async()=>{const values=[];for(let i=0;i<20;i++){const start=performance.now();await instance.open();if(!document.querySelector('.marp-shell'))throw Error('shell missing');values.push(performance.now()-start);document.querySelector('[data-close]').click()}return values.sort((a,b)=>a-b)});
  await page.evaluate(()=>[...menuButtons.values()].find(b=>b.location==='chat').callback());await page.getByRole('heading',{name:'공통 설정',exact:true}).waitFor();
+ assert.equal(await page.locator('.marp-panel [data-field]').first().getAttribute('data-field'),'main_model_only');
  await page.locator('[data-field=default_temperature]').fill('0');await page.getByRole('button',{name:'프롬프트',exact:true}).click();await page.locator('[data-field=plot_system_prompt]').fill('Saved while hidden');await page.getByRole('button',{name:'등장인물',exact:true}).click();await page.getByRole('button',{name:'설정 저장',exact:true}).click();await page.getByRole('status').filter({hasText:'설정을 저장했습니다.'}).waitFor();
  await page.getByRole('button',{name:'프롬프트',exact:true}).click();assert.equal(await page.locator('[data-field=plot_system_prompt]').inputValue(),'Saved while hidden');
  await page.getByRole('button',{name:'닫기',exact:true}).click();
@@ -22,6 +23,8 @@ try{for(const[name,type]of [['chromium',chromium],['webkit',webkit]]){
   if(JSON.stringify(once[0])!==JSON.stringify(input[0]))throw Error('metadata lost');
   const bypass=await run(input,'memory');if(bypass!==input)throw Error('auxiliary request ran');
   if(full&&(lastPayload.chat_history.length!==10||lastPayload.chat_history.at(-1).content!=='Newest continuation'||!lastPayload.system_context))throw Error('history lost');
+  const ooc=[{role:'system',content:'<!--MARP:bypass-->\n# HELENA OOC System Prompt'},{role:'user',content:'Help me'}];if(await run(ooc)!==ooc)throw Error('marked OOC request ran');
+  const sameName=[{role:'system',content:'Helena is the protagonist.'},{role:'user',content:'Continue the story'}];if((await run(sameName)).length!==3)throw Error('unmarked same-name character was bypassed');
   return {state:{...testState},diag:instance.lastRun};
  },full);
  assert.equal(r.state.workers,0);assert.equal(r.state.urls,0);
@@ -33,7 +36,7 @@ try{for(const[name,type]of [['chromium',chromium],['webkit',webkit]]){
  await page.screenshot({path:`test-results/${name}-${full?'full':'lite'}-waterfall.png`,fullPage:true});
  const beforeView=await page.evaluate(()=>({...testState}));
  await page.getByRole('button',{name:'호출 기록',exact:true}).click();await page.locator('.marp-records>li').first().waitFor();
- assert.equal(await page.locator('.marp-records>li').count(),2);
+ assert.equal(await page.locator('.marp-records>li').count(),3);
  await page.locator('.marp-records>li').first().locator('summary').first().click();
  await page.locator('.marp-records .marp-waterfall-row').first().waitFor();assert.equal(await page.locator('.marp-records .marp-waterfall-row').count(),3);
  assert.equal(await page.evaluate(()=>testState.requests),beforeView.requests);
