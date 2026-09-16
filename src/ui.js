@@ -37,10 +37,13 @@ export function openDashboard(api){
   if(!draft){text('설정을 읽는 중입니다…');return}
   const title=document.createElement('h2');title.textContent=({common:'공통 설정',prompts:'프롬프트',presets:'프리셋',diagnostics:'진단',waterfall:'워터폴',connection:'연결 테스트',history:'호출 기록'})[tab]||LABELS[tab];panel.append(title);
   if(tab==='common'){
+   const behavior=group();
+   for(const[k,label]of [['main_model_only','메인 모델에서만 실행'],['bypass_hypamemory','메모리 요청 건너뛰기'],['bypass_translate','번역 요청 건너뛰기'],['bypass_lb_process','lb-process 요청 건너뛰기'],['strict_mode','실패하면 분석 주입 중단 (Strict)']])field(k,label,behavior,{check:true});
+   text('OOC 등 특정 system 프롬프트만 제외하려면 활성화되는 조건문 안에 <!--MARP:bypass-->를 넣으세요. 해당 요청은 MARP 분석 전체를 건너뜁니다.');
+   panel.append(document.createElement('hr'));
    if(api.full)field('server_url','Full 서버 URL',group(),{hint:'새 URL을 저장하면 해당 서버에 현재 설정이 저장됩니다.'});
    providerFields('default');panel.append(document.createElement('hr'));
    const g=group();for(const[k,label]of [['context_window','최근 대화 수'],['request_timeout','에이전트 제한 (초)'],['analysis_timeout','전체 제한 (초)'],['analysis_language','분석 언어'],['injection_position','주입 위치'],['injection_format','주입 형식']])field(k,label,g);
-   for(const[k,label]of [['main_model_only','메인 모델에서만 실행'],['bypass_hypamemory','메모리 요청 건너뛰기'],['bypass_translate','번역 요청 건너뛰기'],['bypass_lb_process','lb-process 요청 건너뛰기'],['strict_mode','실패하면 분석 주입 중단 (Strict)']])field(k,label,g,{check:true});
    text('Lenient는 성공한 분석만 사용합니다. 모두 OFF이거나 결과가 비어 있으면 주입하지 않습니다. PDF Pod는 훅 예외를 흡수할 수 있어 Strict의 메인 호출 차단은 보장되지 않습니다.');
    text('PDF Pod 병용: API 감지 auto · OpenAI → Gemini 변환 none. Lite 내장 PDF를 켜면 PDF Pod의 MARP 자식 PDF 수준은 off로 두어 텍스트 복귀의 재압축을 막으세요. Full 서버 요청은 PDF Pod를 통과하지 않습니다.');
   }else if(AGENTS.includes(tab)){field(tab+'_enabled',LABELS[tab]+' 분석 사용',group(),{check:true});providerFields(tab)}
