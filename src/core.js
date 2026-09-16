@@ -30,8 +30,13 @@ export function bypass(messages,mode,c) {
  if(c.main_model_only&&kind&&kind!=='model')return true;
  if(c.bypass_hypamemory&&/memory|hypa/.test(kind))return true;
  if(c.bypass_translate&&/translat/.test(kind))return true;
+ if(marpBypassMarked(messages))return true;
  return c.bypass_lb_process&&messages.some(m=>/<\/?\s*lb-process\b/i.test(contentText(m?.content)));
 }
+export function marpBypassMarked(messages) {
+ return (messages||[]).some(m=>(m?.role==='system'||m?.role==='developer')&&/<!--\s*marp\s*:\s*bypass\s*-->/i.test(contentText(m.content)));
+}
+
 export function analysisInput(messages,window=10) {
  const safe=withoutOwn(messages);let last=-1;
  for(let i=safe.length-1;i>=0;i--)if(safe[i]?.role==='user'){last=i;break}
