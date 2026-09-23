@@ -14,6 +14,8 @@ export function renderRun(parent,record){
  if(!record){add(parent,'p','아직 호출 기록이 없습니다. 대화를 보내거나 진단 탭에서 분석 테스트를 실행해 주세요.');return}
  const summary=add(parent,'div',null,'marp-summary');
  for(const value of [kinds[record.kind]||'대화 분석',label(record.status),duration(record.elapsed_ms),date(record.started_at)])add(summary,'span',value,'marp-pill');
+ if(record.cache_hit)add(summary,'span','분석 캐시 재사용 · '+duration(record.cache_age_ms),'marp-pill');
+ else if(record.shared_analysis)add(summary,'span','동일 분석 요청에 합류','marp-pill');
  if(record.error)add(parent,'p',record.error,'marp-error');
  if(record.pdf_pod_note)add(parent,'p',record.pdf_pod_note,'marp-error');
  if(record.strict_note)add(parent,'p',record.strict_note);

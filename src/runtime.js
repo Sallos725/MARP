@@ -7,7 +7,7 @@ import {createRetryCache,retryCacheKey} from './retry-cache.js';
 export async function start(host,{full=false,analyze,defaultPrompts,clearTokens,checkConnection}={}){
  let alive=true,ui=null,lastRun=null,runtime=null,runtimePending=null;
  const jobs=new Set(),parts=[],history=[];let loaded,nextId=0,manualPending=false;
- const retryCache=createRetryCache();
+ const retryCache=createRetryCache(),pendingAnalyses=new Map();
  const remember=(result,meta,c)=>{
   const record=recordRun(result,{id:++nextId,edition:full?'full':'lite',...meta},c);
   if(alive){history.unshift(record);history.length=Math.min(history.length,HISTORY_LIMIT);if(meta.kind!=='connection')lastRun=record}
@@ -57,14 +57,19 @@ export async function start(host,{full=false,analyze,defaultPrompts,clearTokens,
    const agents=full?null:Object.fromEntries(AGENTS.map(name=>[name,{enabled:c[name+'_enabled'],system_prompt:c[name+'_system_prompt'],user_prompt_template:c[name+'_user_prompt_template'],...Object.fromEntries(FIELDS.map(field=>[field,resolve(c,name)[field]]))}]));
    const identity=full?server.revision&&{edition:'full',server_url:c.server_url,revision:server.revision}:{edition:'lite',version:VERSION,agents};
    const key=identity?await retryCacheKey({input,identity}):null,entry=key&&retryCache.get(key);
-   const result=entry?entry.result:full?await request('/analyze',{method:'POST',body:input,signal:d.signal}):await guarded(analyze(host,c,input,d.signal),d.signal);
+   let pending=key&&pendingAnalyses.get(key),shared=!!pending;
+   if(!entry&&!pending){
+    pending=full?request('/analyze',{method:'POST',body:input,signal:d.signal}):guarded(analyze(host,c,input,d.signal),d.signal);
+    if(key){pendingAnalyses.set(key,pending);pending.then(()=>{if(pendingAnalyses.get(key)===pending)pendingAnalyses.delete(key)},()=>{if(pendingAnalyses.get(key)===pending)pendingAnalyses.delete(key)})}
+   }
+   const result=entry?entry.result:await guarded(pending,d.signal);
    if(!alive)return clean;
    if(d.signal.aborted)throw d.signal.reason;
    const failed=Object.keys(result.errors||{}).length>0;
    const useful=['world','plot','char'].some(k=>cleanOutput(result['context_'+k]));
    const injected=useful&&!(c.strict_mode&&failed);
-   const record=remember(result,{kind:'analysis',started_at,elapsed_ms:Math.round(performance.now()-start),history_messages:input.chat_history.length,input_chars:input.user_input.length,system_chars:input.system_context.length,status:injected?'injected':failed?'failed-no-injection':'empty-no-injection',cache_hit:!!entry,...(entry?{cache_age_ms:entry.age_ms,cache_source_id:entry.source_run_id}:{}),pdf_pod_note:!full&&failed?pdfPodNote(c):'',strict_note:c.strict_mode?'PDF Pod가 훅 오류를 흡수할 수 있어 메인 호출 차단은 보장되지 않습니다.':''},c);
-   if(key&&!entry&&!failed&&useful)retryCache.set(key,result,record.id);
+   const record=remember(result,{kind:'analysis',started_at,elapsed_ms:Math.round(performance.now()-start),history_messages:input.chat_history.length,input_chars:input.user_input.length,system_chars:input.system_context.length,status:injected?'injected':failed?'failed-no-injection':'empty-no-injection',cache_hit:!!entry,shared_analysis:shared,...(entry?{cache_age_ms:entry.age_ms,cache_source_id:entry.source_run_id}:{}),pdf_pod_note:!full&&failed?pdfPodNote(c):'',strict_note:c.strict_mode?'PDF Pod가 훅 오류를 흡수할 수 있어 메인 호출 차단은 보장되지 않습니다.':''},c);
+   if(key&&!entry&&!shared&&!failed&&useful)retryCache.set(key,result,record.id);
    return injected?inject(clean,result,c):clean;
   }catch(e){
    if(alive)remember({},{kind:'analysis',started_at,status:'failed-no-injection',error:e.message,pdf_pod_note:full?'':pdfPodNote(c),elapsed_ms:Math.round(performance.now()-start),strict_note:c.strict_mode?'분석 주입 중단. PDF Pod 환경에서 메인 호출 차단은 보장되지 않습니다.':''},c);
@@ -124,7 +129,7 @@ export async function start(host,{full=false,analyze,defaultPrompts,clearTokens,
  // Await hook registration before exposing UI; dispose late registrations too.
  let hook,hookRegistered=false;
  const dispose=async()=>{
-  if(!alive)return;alive=false;for(const job of jobs)job.abort(Error('플러그인 해제'));jobs.clear();clearTokens?.();ui?.close();clearHistory();retryCache.clear();runtime=null;loaded=null;
+  if(!alive)return;alive=false;for(const job of jobs)job.abort(Error('플러그인 해제'));jobs.clear();clearTokens?.();ui?.close();clearHistory();retryCache.clear();pendingAnalyses.clear();runtime=null;loaded=null;
   if(hookRegistered&&host.removeRisuReplacer)try{await host.removeRisuReplacer('beforeRequest',typeof hook==='string'?hook:before)}catch{}
   if(typeof hook==='function'&&hook!==before)try{await hook()}catch{}
   for(const id of parts)await host.unregisterUIPart?.(id);

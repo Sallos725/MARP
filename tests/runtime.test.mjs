@@ -21,6 +21,12 @@ test('failed, partial, and empty analyses are never reused',async()=>{
  for(let i=0;i<4;i++)await app.before(input,'model');assert.equal(analyses,4);
  await app.before(input,'model');assert.equal(analyses,4);assert.equal(app.lastRun.cache_hit,true);await app.dispose();
 });
+test('concurrent identical requests share one in-flight analysis',async()=>{
+ const f=fixture();let analyses=0,release;const ready=new Promise(resolve=>{release=resolve});
+ const app=await start(f.host,{analyze:async()=>{analyses++;await ready;return {context_world:'complete',errors:{}}}}),input=[{role:'user',content:'continue'}];
+ const first=app.before(input,'model'),second=app.before(input,'model');await new Promise(resolve=>setTimeout(resolve,0));assert.equal(analyses,1);release();await Promise.all([first,second]);
+ assert.equal(analyses,1);assert.equal(app.getHistory().filter(record=>record.shared_analysis).length,1);await app.dispose();
+});
 test('partial results, empty output and disabled agents do not fabricate context',async()=>{const f=fixture();let result={context_world:'fact',errors:{plot:'failed'}};const app=await start(f.host,{analyze:async()=>result});const messages=[{role:'user',content:'now'}];assert.equal((await app.before(messages,'model')).length,2);result={context_world:'<think>hidden</think>',errors:{}};assert.deepEqual(await app.before(messages,'model'),messages);assert.equal(app.lastRun.status,'empty-no-injection');result={errors:{worldbuilding:'bad'}};assert.deepEqual(await app.before(messages,'model'),messages);await app.dispose()});
 test('late registration and late analysis are disposed without injection',async()=>{const f=fixture();let resolve;f.host.addRisuReplacer=async()=>new Promise(r=>{resolve=r});const pending=start(f.host,{analyze:async()=>({context_world:'late',errors:{}})});await new Promise(r=>setTimeout(r,0));await f.unload();resolve();const app=await pending;assert.equal(f.remove,1);const m=[{role:'user',content:'current'}];assert.equal(await app.before(m,'model'),m)});
 

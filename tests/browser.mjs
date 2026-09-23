@@ -19,7 +19,8 @@ try{for(const[name,type]of [['chromium',chromium],['webkit',webkit]]){
  const beforeIdle=await page.evaluate(()=>({...testState}));await page.waitForTimeout(120);assert.deepEqual(await page.evaluate(()=>({...testState})),beforeIdle);
  const r=await page.evaluate(async full=>{
   const input=[{role:'system',content:[{type:'text',text:'한글 日本語 😀 설정 '.repeat(100),cache_control:{type:'ephemeral'}},{type:'image_url',image_url:{url:'data:fixture'}}]},...Array.from({length:100},()=>({role:'assistant',content:'older'})),{role:'user',content:'Current user'},{role:'assistant',content:'Newest continuation'}];
-  const once=await run(input),twice=await run(once);if(once.length!==input.length+1||twice.length!==once.length)throw Error('duplicate injection');
+  const once=await run(input),afterOnce=testState.requests,twice=await run(once);if(once.length!==input.length+1||twice.length!==once.length)throw Error('duplicate injection');
+  if(testState.requests!==afterOnce||!instance.lastRun.cache_hit)throw Error('identical retry was not served from analysis cache');
   if(JSON.stringify(once[0])!==JSON.stringify(input[0]))throw Error('metadata lost');
   const bypass=await run(input,'memory');if(bypass!==input)throw Error('auxiliary request ran');
   if(full&&(lastPayload.chat_history.length!==10||lastPayload.chat_history.at(-1).content!=='Newest continuation'||!lastPayload.system_context))throw Error('history lost');
