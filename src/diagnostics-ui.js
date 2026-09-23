@@ -15,6 +15,7 @@ export function renderRun(parent,record){
  const summary=add(parent,'div',null,'marp-summary');
  for(const value of [kinds[record.kind]||'대화 분석',label(record.status),duration(record.elapsed_ms),date(record.started_at)])add(summary,'span',value,'marp-pill');
  if(record.error)add(parent,'p',record.error,'marp-error');
+ if(record.pdf_pod_note)add(parent,'p',record.pdf_pod_note,'marp-error');
  if(record.strict_note)add(parent,'p',record.strict_note);
  if(record.kind==='analysis')add(parent,'p',`입력 ${record.input_chars??'—'}자 · 시스템 ${record.system_chars??'—'}자 · 최근 대화 ${record.history_messages??'—'}개`,'marp-muted');
  const rows=waterfallRows(record);

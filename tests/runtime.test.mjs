@@ -37,3 +37,14 @@ test('Full connection tests use the selected server and legacy GET agent route',
  const f=fixture({full:true,result:{success:true,results:[{name:'plot',success:true,provider:'custom',model:'saved-model',latency_ms:8,status_code:200}]}}),app=await start(f.host,{full:true});
  f.c.server_url='https://selected.example';const r=await app.testConnection(f.c,'plot');assert.equal(f.calls[0].url,'https://selected.example/test/llm?agent=plot');assert.equal(f.calls[0].body,undefined);assert.equal(r.diagnostics.plot.model,'saved-model');assert.equal(r.diagnostics.worldbuilding.status,'skipped');await app.dispose();
 });
+test('PDF Pod child runs attach the fix to failed analyses and connection checks only',async()=>{
+ const f=fixture();let result={context_world:'fact',errors:{}};globalThis.document={__pdfPodHost:{}};
+ try{
+  const app=await start(f.host,{analyze:async()=>result,checkConnection:async()=>({status_code:200,check:'models'})});
+  await app.before([{role:'user',content:'now'}],'model');assert.equal(app.lastRun.pdf_pod_note,'');
+  result={errors:{worldbuilding:'Agent API 400'}};await app.before([{role:'user',content:'now'}],'model');assert.match(app.lastRun.pdf_pod_note,/OpenAI → Gemini 변환 none/);
+  const check=await app.testConnection(f.c);assert.equal(check.status,'test-success');assert.match(check.pdf_pod_note,/세계관·플롯·등장인물/);
+  f.c.default_provider='anthropic';assert.equal((await app.testConnection(f.c)).pdf_pod_note,'');
+  await app.dispose();
+ }finally{delete globalThis.document}
+});

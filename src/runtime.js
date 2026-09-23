@@ -2,6 +2,7 @@ import {AGENTS,VERSION,cleanOutput,analysisInput,bypass,withoutOwn,inject,deadli
 import {loadConfig,legacyConfig,validate,vaultKey,fullKey,exportPack,defaults,resolve} from './config.js';
 import {HISTORY_LIMIT,recordRun} from './diagnostics.js';
 import {openDashboard} from './ui.js';
+import {pdfPodNote} from './pdfpod.js';
 export async function start(host,{full=false,analyze,defaultPrompts,clearTokens,checkConnection}={}){
  let alive=true,ui=null,lastRun=null,runtime=null,runtimePending=null;
  const jobs=new Set(),parts=[],history=[];let loaded,nextId=0,manualPending=false;
@@ -57,10 +58,10 @@ export async function start(host,{full=false,analyze,defaultPrompts,clearTokens,
    const failed=Object.keys(result.errors||{}).length>0;
    const useful=['world','plot','char'].some(k=>cleanOutput(result['context_'+k]));
    const injected=useful&&!(c.strict_mode&&failed);
-   remember(result,{kind:'analysis',started_at,elapsed_ms:Math.round(performance.now()-start),history_messages:input.chat_history.length,input_chars:input.user_input.length,system_chars:input.system_context.length,status:injected?'injected':failed?'failed-no-injection':'empty-no-injection',strict_note:c.strict_mode?'PDF Pod가 훅 오류를 흡수할 수 있어 메인 호출 차단은 보장되지 않습니다.':''},c);
+   remember(result,{kind:'analysis',started_at,elapsed_ms:Math.round(performance.now()-start),history_messages:input.chat_history.length,input_chars:input.user_input.length,system_chars:input.system_context.length,status:injected?'injected':failed?'failed-no-injection':'empty-no-injection',pdf_pod_note:!full&&failed?pdfPodNote(c):'',strict_note:c.strict_mode?'PDF Pod가 훅 오류를 흡수할 수 있어 메인 호출 차단은 보장되지 않습니다.':''},c);
    return injected?inject(clean,result,c):clean;
   }catch(e){
-   if(alive)remember({},{kind:'analysis',started_at,status:'failed-no-injection',error:e.message,elapsed_ms:Math.round(performance.now()-start),strict_note:c.strict_mode?'분석 주입 중단. PDF Pod 환경에서 메인 호출 차단은 보장되지 않습니다.':''},c);
+   if(alive)remember({},{kind:'analysis',started_at,status:'failed-no-injection',error:e.message,pdf_pod_note:full?'':pdfPodNote(c),elapsed_ms:Math.round(performance.now()-start),strict_note:c.strict_mode?'분석 주입 중단. PDF Pod 환경에서 메인 호출 차단은 보장되지 않습니다.':''},c);
    return clean;
   }finally{d.close();jobs.delete(controller)}
  };
@@ -74,8 +75,9 @@ export async function start(host,{full=false,analyze,defaultPrompts,clearTokens,
    const result=await guarded(execute(c,d.signal),d.signal);
    const failed=kind==='connection'?result.success===false:Object.keys(result.errors||{}).length>0;
    const useful=kind==='connection'?result.results?.some(r=>r.success):['world','plot','char'].some(k=>cleanOutput(result['context_'+k]));
-   return remember(result,{kind,started_at,elapsed_ms:Math.round(performance.now()-started),status:failed?(useful?'test-partial':'test-failed'):useful?'test-success':'test-empty'},c);
-  }catch(e){return remember({},{kind,started_at,elapsed_ms:Math.round(performance.now()-started),status:'test-failed',error:e.message},c)}
+   // Connection checks are bodyless GETs PDF Pod never converts, so warn even on success.
+   return remember(result,{kind,started_at,elapsed_ms:Math.round(performance.now()-started),status:failed?(useful?'test-partial':'test-failed'):useful?'test-success':'test-empty',pdf_pod_note:full?'':pdfPodNote(c)},c);
+  }catch(e){return remember({},{kind,started_at,elapsed_ms:Math.round(performance.now()-started),status:'test-failed',error:e.message,pdf_pod_note:full?'':pdfPodNote(c)},c)}
   finally{d.close();jobs.delete(controller);manualPending=false}
  };
  const test=(draft,pdf=false)=>manual(draft,pdf?'pdf-test':'text-test',async(c,signal)=>{
