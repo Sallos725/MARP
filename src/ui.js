@@ -1,6 +1,7 @@
 import {AGENTS,LABELS,VERSION} from './core.js';
 import {FIELDS,defaults,exportPack,importPack,resolve} from './config.js';
 import {diagnosticsCSS,renderDiagnostics} from './diagnostics-ui.js';
+import {hostedInPdfPod,pdfPodReport,PDF_POD_FIX} from './pdfpod.js';
 const css='.marp-shell{position:fixed;inset:0;z-index:10000;background:#11161d;color:#e7edf5;font:15px/1.5 system-ui,sans-serif;overflow:auto;color-scheme:dark}.marp-shell *{box-sizing:border-box}.marp-wrap{max-width:960px;margin:auto;padding:24px 18px 80px}.marp-top,.marp-actions{display:flex;gap:12px;align-items:center;flex-wrap:wrap}.marp-top{justify-content:space-between}.marp-shell h1{font-size:25px;letter-spacing:.08em;margin:0}.marp-shell h2{font-size:19px;margin:8px 0 20px}.marp-shell p{color:#aebbc9}.marp-shell button,.marp-shell select,.marp-shell input,.marp-shell textarea{font:inherit;border:1px solid #364451;border-radius:8px;padding:10px;background:#1b242f;color:inherit;min-height:44px}.marp-shell button{cursor:pointer}.marp-shell button:hover,.marp-shell button[aria-selected=true]{border-color:#61d4bd;background:#1c3935}.marp-shell button:disabled{opacity:.45;cursor:wait}.marp-shell :focus-visible{outline:2px solid #61d4bd;outline-offset:2px}.marp-nav{display:flex;gap:8px;overflow:auto;margin:24px 0 18px;padding-bottom:5px}.marp-panel{background:#161e28;border:1px solid #2c3846;border-radius:12px;padding:20px;min-height:180px}.marp-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:15px}.marp-field{display:flex;flex-direction:column;gap:6px;min-width:0}.marp-field input,.marp-field textarea,.marp-field select{width:100%}.marp-field small{color:#aebbc9}.marp-field textarea{min-height:120px;resize:vertical}.marp-wide{grid-column:1/-1}.marp-check{flex-direction:row;align-items:center}.marp-check input{width:20px}.marp-status{white-space:pre-wrap;overflow-wrap:anywhere;min-height:24px;margin:12px 0;color:#9aead9}.marp-shell pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#10151c;border-radius:8px;padding:12px;max-height:480px;overflow:auto}.marp-primary{background:#24564c!important;border-color:#61d4bd!important}.marp-footer{margin-top:18px}.marp-badge{color:#72dfc8;font-size:13px}.marp-shell hr{border:0;border-top:1px solid #364451;margin:20px 0}@media(max-width:600px){.marp-grid{grid-template-columns:1fr}.marp-wrap{padding:18px 12px 60px}.marp-panel{padding:14px}.marp-nav button{white-space:nowrap}.marp-shell h1{font-size:22px}}';
 const labels={provider:'공급자',base_url:'API 기본 URL',api_key:'Credential / 서비스 계정 JSON',model:'모델',temperature:'온도',max_tokens:'출력 토큰 제한',extra_body_json:'추가 JSON',pdf_mode:'내장 PDF'};
 const options={provider:['','openai','custom','google','vertex-ai','anthropic'],pdf_mode:['','off','quality','standard','max'],analysis_language:['auto','ko','en','ja'],injection_position:['system-end','before-last-user'],injection_format:['classic','xml','markdown-table']};
@@ -31,12 +32,25 @@ export function openDashboard(api){
   const g=group();for(const k of FIELDS)field(prefix+'_'+k,labels[k],g,{area:k==='extra_body_json',choices:options[k],hint:k==='api_key'?'프리셋 export에서 제외됩니다.':k==='pdf_mode'?'off는 기존 텍스트 요청을 유지합니다. 품질·절감 효과는 모델에 따라 달라 진단 탭에서 먼저 비교해 주세요.':prefix==='default'?'':'비워두면 공통 설정을 사용합니다.'});
   const file=document.createElement('input');file.type='file';file.accept='.json,application/json';file.setAttribute('aria-label','서비스 계정 JSON 파일');file.onchange=async()=>{const f=file.files?.[0];if(!f)return;try{const value=await f.text();const sa=JSON.parse(value);if(!sa.client_email||!sa.private_key)throw Error('서비스 계정 JSON이 아닙니다');draft[prefix+'_api_key']=value;await render(tab);message('서비스 계정 JSON을 불러왔습니다. 저장하면 적용됩니다.')}catch(e){message(e.message,true)}};panel.append(file);
  };
+ const routeLabels={passthrough:'변환 없이 전송',gemini:'Gemini 변환 · 동작',converted:'설정 필요'};
+ const pdfPodCard=()=>{
+  const {agents,broken,internalPdf}=pdfPodReport(draft),card=document.createElement('div');card.className='marp-run';card.dataset.pdfPod=broken.length?'broken':'ok';panel.append(card);
+  const h=document.createElement('h3');h.textContent='PDF Pod 연동';card.append(h);
+  text(broken.length?'설정 필요 · '+broken.map(a=>a.label).join('·')+' 요청은 PDF Pod 기본 설정에서 Gemini 주소로 바뀌어 실패합니다.':'호환 · 현재 공급자는 PDF Pod 기본 설정에서도 동작합니다.',card).className=broken.length?'marp-error':'';
+  const pills=document.createElement('div');pills.className='marp-summary';card.append(pills);
+  for(const a of agents){const pill=document.createElement('span');pill.className='marp-pill';pill.textContent=a.label+' · '+routeLabels[a.route];pills.append(pill)}
+  if(!agents.length)text('켜진 분석 에이전트가 없습니다.',card);
+  if(broken.length)text(PDF_POD_FIX+'. 또는 공급자를 Google AI Studio·Vertex·Anthropic으로 바꾸면 기본 설정 그대로 동작합니다.',card);
+  if(internalPdf)text('Lite 내장 PDF를 켰다면 PDF Pod의 MARP 자식 PDF 수준은 off로 두어 재압축을 막으세요.',card);
+  if(![draft.default_api_key,...AGENTS.map(n=>draft[n+'_api_key'])].some(Boolean))text('PDF Pod는 자식 플러그인마다 저장 공간을 따로 씁니다. 단독 설치 때 저장한 설정은 보이지 않으니 다시 입력하고 저장해 주세요.',card);
+ };
  const download=(name,value)=>{const url=URL.createObjectURL(new Blob([JSON.stringify(value,null,2)],{type:'application/json'})),a=document.createElement('a');a.href=url;a.download=name;root.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),0)};
  async function render(next){
   tab=next;const seq=++epoch;for(const b of nav.children)b.setAttribute('aria-selected',String(b.dataset.tab===tab));panel.replaceChildren();
   if(!draft){text('설정을 읽는 중입니다…');return}
   const title=document.createElement('h2');title.textContent=({common:'공통 설정',prompts:'프롬프트',presets:'프리셋',diagnostics:'진단',waterfall:'워터폴',connection:'연결 테스트',history:'호출 기록'})[tab]||LABELS[tab];panel.append(title);
   if(tab==='common'){
+   if(!api.full&&hostedInPdfPod())pdfPodCard();
    const behavior=group();
    for(const[k,label]of [['main_model_only','메인 모델에서만 실행'],['bypass_hypamemory','메모리 요청 건너뛰기'],['bypass_translate','번역 요청 건너뛰기'],['bypass_lb_process','lb-process 요청 건너뛰기'],['strict_mode','실패하면 분석 주입 중단 (Strict)']])field(k,label,behavior,{check:true});
    text('OOC 등 특정 system 프롬프트만 제외하려면 활성화되는 조건문 안에 <!--MARP:bypass-->를 넣으세요. 해당 요청은 MARP 분석 전체를 건너뜁니다.');
@@ -45,7 +59,7 @@ export function openDashboard(api){
    providerFields('default');panel.append(document.createElement('hr'));
    const g=group();for(const[k,label]of [['context_window','최근 대화 수'],['request_timeout','에이전트 제한 (초)'],['analysis_timeout','전체 제한 (초)'],['analysis_language','분석 언어'],['injection_position','주입 위치'],['injection_format','주입 형식']])field(k,label,g);
    text('Lenient는 성공한 분석만 사용합니다. 모두 OFF이거나 결과가 비어 있으면 주입하지 않습니다. PDF Pod는 훅 예외를 흡수할 수 있어 Strict의 메인 호출 차단은 보장되지 않습니다.');
-   text('PDF Pod 병용: API 감지 auto · OpenAI → Gemini 변환 none. Lite 내장 PDF를 켜면 PDF Pod의 MARP 자식 PDF 수준은 off로 두어 텍스트 복귀의 재압축을 막으세요. Full 서버 요청은 PDF Pod를 통과하지 않습니다.');
+   if(api.full||!hostedInPdfPod())text('PDF Pod 병용: API 감지 auto · OpenAI → Gemini 변환 none. Lite 내장 PDF를 켜면 PDF Pod의 MARP 자식 PDF 수준은 off로 두어 텍스트 복귀의 재압축을 막으세요. Full 서버 요청은 PDF Pod를 통과하지 않습니다.');
   }else if(AGENTS.includes(tab)){field(tab+'_enabled',LABELS[tab]+' 분석 사용',group(),{check:true});providerFields(tab)}
   else if(tab==='prompts'){
    text('기본값을 사용하려면 override를 비우세요. 자료는 분석 대상이며, 최종 RP 답변은 메인 모델이 작성합니다.');
@@ -67,7 +81,7 @@ export function openDashboard(api){
 
  }
  for(const[k,label]of [['common','공통'],...AGENTS.map(n=>[n,LABELS[n]]),['prompts','프롬프트'],['presets','프리셋'],['waterfall','워터폴'],['connection','연결 테스트'],['history','호출 기록'],['diagnostics','진단']]){const b=action(label,()=>render(k),nav);b.dataset.tab=k}
- save.onclick=async()=>{if(!draft)return;save.disabled=true;try{await api.save({...draft});message('설정을 저장했습니다.')}catch(e){message(e.message,true)}finally{if(alive)save.disabled=false}};
+ save.onclick=async()=>{if(!draft)return;save.disabled=true;try{await api.save({...draft});if(tab==='common'&&hostedInPdfPod())await render(tab);message('설정을 저장했습니다.')}catch(e){message(e.message,true)}finally{if(alive)save.disabled=false}};
  const close=()=>{alive=false;epoch++;root.remove();draft=null;pack=null};
  root.querySelector('[data-close]').onclick=()=>{close();api.host.hideContainer?.()};
  api.getConfig().then(c=>{if(!alive)return;draft={...defaults(),...c};save.disabled=false;return render(tab)}).catch(e=>{if(alive){panel.textContent='설정을 읽지 못했습니다.';message(e.message,true);if(api.full){draft=defaults();field('server_url','연결할 서버 URL',panel);action('서버 연결 및 설정 읽기',async()=>{await api.connect?.(draft.server_url);draft=await api.getConfig();save.disabled=false;await render(tab)})}}});
