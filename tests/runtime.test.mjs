@@ -2,10 +2,25 @@ import {test} from 'node:test';import assert from 'node:assert/strict';import {s
 function fixture({full=false,result={context_world:'fact',errors:{}},old=false}={}){
  const c=defaults();c.default_api_key='fake';const store=new Map([['risu_multiagent_lite_config_vault_v1',{config:legacyConfig(c)}]]);const calls=[];let unload,hook,remove=0;
  const host={pluginStorage:{getItem:async k=>store.get(k),setItem:async(k,v)=>store.set(k,v)},getArgument:async()=>'',addRisuReplacer:async(_,fn)=>{hook=fn},removeRisuReplacer:async()=>{remove++},onUnload:async fn=>{unload=fn},registerSetting:async()=>{},registerButton:async()=>{},
- nativeFetch:async(url,req)=>{calls.push({url,body:req.body&&JSON.parse(req.body)});if(url.endsWith('/runtime-config'))return old?{status:404,data:{detail:'not found'}}:{status:200,data:{context_window:3}};if(url.endsWith('/status'))return {data:{config:{context_window:3}}};return {data:result}}};
+ nativeFetch:async(url,req)=>{calls.push({url,body:req.body&&JSON.parse(req.body)});if(url.endsWith('/runtime-config'))return old?{status:404,data:{detail:'not found'}}:{status:200,data:{context_window:3,revision:'fixture'}};if(url.endsWith('/status'))return {data:{config:{context_window:3}}};return {data:result}}};
  return {host,calls,c,get hook(){return hook},get remove(){return remove},unload:()=>unload(),result,store};
 }
-test('Full falls back to old status and caches only runtime config for activity',async()=>{const f=fixture({full:true,old:true});const app=await start(f.host,{full:true});const m=[{role:'system',content:'settings'},...Array.from({length:100},()=>({role:'assistant',content:'old'})),{role:'user',content:'now'},{role:'assistant',content:'continue'}];await app.before(m,'model');await app.before(m,'model');assert.equal(f.calls.filter(c=>c.url.endsWith('/status')).length,1);const body=f.calls.find(c=>c.url.endsWith('/analyze')).body;assert.equal(body.chat_history.length,3);assert.equal(body.chat_history.at(-1).content,'continue');assert.equal(body.system_context,'settings');await app.dispose()});
+test('Full falls back to old status and caches only runtime config for activity',async()=>{const f=fixture({full:true,old:true});const app=await start(f.host,{full:true});const m=[{role:'system',content:'settings'},...Array.from({length:100},()=>({role:'assistant',content:'old'})),{role:'user',content:'now'},{role:'assistant',content:'continue'}];await app.before(m,'model');await app.before(m,'model');assert.equal(f.calls.filter(c=>c.url.endsWith('/status')).length,1);assert.equal(f.calls.filter(c=>c.url.endsWith('/analyze')).length,2,'old servers without a config revision are not cached');const body=f.calls.find(c=>c.url.endsWith('/analyze')).body;assert.equal(body.chat_history.length,3);assert.equal(body.chat_history.at(-1).content,'continue');assert.equal(body.system_context,'settings');await app.dispose()});
+test('Full reuses an identical successful analysis with a server config revision',async()=>{const f=fixture({full:true,result:{context_world:'fact',context_plot:'plot',context_char:'character',errors:{}}}),app=await start(f.host,{full:true}),input=[{role:'user',content:'continue'}];const first=await app.before(input,'model');await app.before(first,'model');assert.equal(f.calls.filter(c=>c.url.endsWith('/analyze')).length,1);assert.equal(app.lastRun.cache_hit,true);await app.dispose()});
+test('successful identical analyses are reused until the input or config changes',async()=>{
+ const f=fixture();let analyses=0;const app=await start(f.host,{analyze:async()=>{analyses++;return {context_world:'world',context_plot:'plot',context_char:'character',errors:{}}}}),input=[{role:'system',content:'setting'},{role:'user',content:'continue'}];
+ const first=await app.before(input,'model');assert.equal(analyses,1);assert.equal(app.lastRun.cache_hit,false);
+ const retry=await app.before(first,'model');assert.equal(analyses,1);assert.equal(retry.length,first.length);assert.equal(app.lastRun.cache_hit,true);assert.equal(app.lastRun.cache_source_id,1);
+ await app.before([{role:'system',content:'setting'},{role:'user',content:'changed'}],'model');assert.equal(analyses,2);
+ f.c.default_model='different';f.store.set('risu_multiagent_lite_config_vault_v1',{config:legacyConfig(f.c)});await app.before(input,'model');assert.equal(analyses,3);
+ await app.dispose();
+});
+test('failed, partial, and empty analyses are never reused',async()=>{
+ const f=fixture(),results=[{errors:{worldbuilding:'down'}},{context_world:'partial',errors:{plot:'down'}},{context_world:'<think>hidden</think>',errors:{}},{context_world:'complete',errors:{}}];let analyses=0;
+ const app=await start(f.host,{analyze:async()=>results[Math.min(analyses++,results.length-1)]}),input=[{role:'user',content:'continue'}];
+ for(let i=0;i<4;i++)await app.before(input,'model');assert.equal(analyses,4);
+ await app.before(input,'model');assert.equal(analyses,4);assert.equal(app.lastRun.cache_hit,true);await app.dispose();
+});
 test('partial results, empty output and disabled agents do not fabricate context',async()=>{const f=fixture();let result={context_world:'fact',errors:{plot:'failed'}};const app=await start(f.host,{analyze:async()=>result});const messages=[{role:'user',content:'now'}];assert.equal((await app.before(messages,'model')).length,2);result={context_world:'<think>hidden</think>',errors:{}};assert.deepEqual(await app.before(messages,'model'),messages);assert.equal(app.lastRun.status,'empty-no-injection');result={errors:{worldbuilding:'bad'}};assert.deepEqual(await app.before(messages,'model'),messages);await app.dispose()});
 test('late registration and late analysis are disposed without injection',async()=>{const f=fixture();let resolve;f.host.addRisuReplacer=async()=>new Promise(r=>{resolve=r});const pending=start(f.host,{analyze:async()=>({context_world:'late',errors:{}})});await new Promise(r=>setTimeout(r,0));await f.unload();resolve();const app=await pending;assert.equal(f.remove,1);const m=[{role:'user',content:'current'}];assert.equal(await app.before(m,'model'),m)});
 
@@ -42,7 +57,7 @@ test('PDF Pod child runs attach the fix to failed analyses and connection checks
  try{
   const app=await start(f.host,{analyze:async()=>result,checkConnection:async()=>({status_code:200,check:'models'})});
   await app.before([{role:'user',content:'now'}],'model');assert.equal(app.lastRun.pdf_pod_note,'');
-  result={errors:{worldbuilding:'Agent API 400'}};await app.before([{role:'user',content:'now'}],'model');assert.match(app.lastRun.pdf_pod_note,/API 형식 변환 "끄기"/);
+  result={errors:{worldbuilding:'Agent API 400'}};await app.before([{role:'user',content:'changed'}],'model');assert.match(app.lastRun.pdf_pod_note,/API 형식 변환 "끄기"/);
   const check=await app.testConnection(f.c);assert.equal(check.status,'test-success');assert.match(check.pdf_pod_note,/세계관·플롯·등장인물/);
   f.c.default_provider='anthropic';assert.equal((await app.testConnection(f.c)).pdf_pod_note,'');
   await app.dispose();
