@@ -2,18 +2,18 @@
 
 MARP는 세계관을 분석한 뒤 플롯·등장인물 분석을 병렬로 실행하고, 분석 메모를 RisuAI 메인 모델에 전달합니다. 최종 RP 답변은 메인 모델이 작성합니다.
 
-**v0.9.2에서는 MARP 메뉴 아이콘을 캐릭터 목록 쪽에서 채팅 입력창 왼쪽 햄버거 메뉴로 옮겼습니다. Lite·Full 모두 지원합니다.**
+**v0.9.4에서는 PDF Pod 안에서 MARP Lite를 쓸 때, 현재 설정으로 동작하는지와 바꿔야 할 PDF Pod 설정을 화면에서 바로 알려 줍니다.**
 
-[릴리즈 노트](https://github.com/Sallos725/MARP/releases/tag/v0.9.2) · [진단 화면 사용법](guides/DIAGNOSTICS.md) · [전체 변경 내역](RELEASE_NOTES.md)
+[릴리즈 노트](https://github.com/Sallos725/MARP/releases/tag/v0.9.4) · [진단 화면 사용법](guides/DIAGNOSTICS.md) · [전체 변경 내역](RELEASE_NOTES.md)
 
 ## 다운로드
 
 | 사용 방식 | 받을 파일 | 실행 위치 |
 | --- | --- | --- |
-| Lite | [multiagent-lite-v0.9.2.js](https://github.com/Sallos725/MARP/releases/download/v0.9.2/multiagent-lite-v0.9.2.js) | RisuAI 브라우저 플러그인 |
-| Full | [multiagent-full-v0.9.2.zip](https://github.com/Sallos725/MARP/releases/download/v0.9.2/multiagent-full-v0.9.2.zip) | 브라우저 플러그인 + 별도 서버 |
+| Lite | [multiagent-lite-v0.9.4.js](https://github.com/Sallos725/MARP/releases/download/v0.9.4/multiagent-lite-v0.9.4.js) | RisuAI 브라우저 플러그인 |
+| Full | [multiagent-full-v0.9.4.zip](https://github.com/Sallos725/MARP/releases/download/v0.9.4/multiagent-full-v0.9.4.zip) | 브라우저 플러그인 + 별도 서버 |
 
-Full ZIP에는 플러그인, Docker 구성, Linux amd64·arm64 실행 파일과 사용 문서가 들어 있습니다. 실행 파일만 필요하면 [릴리즈 첨부 파일](https://github.com/Sallos725/MARP/releases/tag/v0.9.2)에서 해당 아키텍처와 `SHA256SUMS`를 받습니다.
+Full ZIP에는 플러그인, Docker 구성, Linux amd64·arm64 실행 파일과 사용 문서가 들어 있습니다. 실행 파일만 필요하면 [릴리즈 첨부 파일](https://github.com/Sallos725/MARP/releases/tag/v0.9.4)에서 해당 아키텍처와 `SHA256SUMS`를 받습니다.
 
 ## 설치·업데이트
 
@@ -30,11 +30,11 @@ Full ZIP에는 플러그인, Docker 구성, Linux amd64·arm64 실행 파일과 
 설치 폴더에서 실행합니다.
 
 ```sh
-MULTIAGENT_VERSION=v0.9.2 docker compose pull
-MULTIAGENT_VERSION=v0.9.2 docker compose up -d
+MULTIAGENT_VERSION=v0.9.4 docker compose pull
+MULTIAGENT_VERSION=v0.9.4 docker compose up -d
 ```
 
-ZIP의 `plugin/multiagent-full-v0.9.2.js`를 RisuAI에 가져오고 MARP **공통** 탭에서 서버 URL을 지정합니다. 기본 포트는 `6009`입니다. 휴대전화에서는 휴대전화의 localhost가 아닌 서버에 접근할 수 있는 주소를 입력합니다.
+ZIP의 `plugin/multiagent-full-v0.9.4.js`를 RisuAI에 가져오고 MARP **공통** 탭에서 서버 URL을 지정합니다. 기본 포트는 `6009`입니다. 휴대전화에서는 휴대전화의 localhost가 아닌 서버에 접근할 수 있는 주소를 입력합니다.
 
 직접 소스에서 빌드하려면 `docker compose up -d --build`를 사용합니다. 사용자 지정 `MULTIAGENT_IMAGE`를 쓰고 있다면 해당 이미지의 버전도 함께 확인합니다.
 
@@ -67,7 +67,7 @@ v0.9.1 Full 서버를 사용 중이라면 이번 메뉴 이동은 브라우저 �
 
 공통 설정은 에이전트별로 덮어쓸 수 있고 빈 값은 공통값을 상속합니다. 기본 Lenient는 성공한 결과를 사용하고 Strict는 일부 실패에도 분석 주입을 중단합니다. 내장 PDF는 기본 `off`입니다.
 
-PDF Pod 병용 설정은 **API 감지 `auto` · OpenAI → Gemini 변환 `none`**입니다. Lite 내장 PDF를 켜면 PDF Pod의 MARP 자식 PDF 수준을 `off`로 둡니다. Full의 서버 요청은 PDF Pod를 통과하지 않습니다.
+PDF Pod 병용 설정은 **API 감지 `auto` · OpenAI → Gemini 변환 `none`**입니다. Lite 내장 PDF를 켜면 PDF Pod의 MARP 자식 PDF 수준을 `off`로 둡니다. Full의 서버 요청은 PDF Pod를 통과하지 않습니다. PDF Pod 안에서 Lite를 열면 **공통** 탭의 **PDF Pod 연동** 카드가 에이전트별 동작 여부와 필요한 설정을 보여 줍니다.
 
 - [공급자·설정·실패 처리](guides/SETTINGS.md)
 - [내장 PDF 수준·텍스트 복귀·PDF Pod 병용](guides/PDF.md)
