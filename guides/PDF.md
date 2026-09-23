@@ -1,13 +1,13 @@
 # PDF 설정과 PDF Pod 병용
 
-[처음으로](../README.md) · [진단 화면 사용법](DIAGNOSTICS.md)
+[처음으로](../README.md) · [진단 화면 사용법](DIAGNOSTICS.md) · [PDF Pod 안에서 쓰기 (화면 안내)](PDF-POD.md)
 
 
-MARP Lite에서 내장 PDF를 사용한다면 PDF Pod의 해당 자식 플러그인 PDF 수준은 off로 두세요. PDF Pod가 텍스트 복귀 요청까지 다시 압축하지 않도록 보조 요청의 압축 주체를 하나만 선택합니다. Full의 서버 LLM 요청은 PDF Pod를 통과하지 않습니다.
+MARP Lite에서 내장 PDF를 사용한다면 PDF Pod의 해당 자식 플러그인 **PDF 압축 수준**은 **끄기**로 두세요. PDF Pod가 텍스트 복귀 요청까지 다시 압축하지 않도록 보조 요청의 압축 주체를 하나만 선택합니다. Full의 서버 LLM 요청은 PDF Pod를 통과하지 않습니다.
 
 [PDF Pod 소스](https://pkg.panpka.xyz/pdf-pod.js) v0.17.10의 요청 감지·기존 PDF 보호·자식 훅 동작을 기준으로 호환성을 맞췄습니다. 향후 PDF Pod 업데이트에는 변경된 동작을 확인해야 합니다.
 
-**PDF Pod 병용 설정: API 감지 `auto`, OpenAI → Gemini 변환 `none`.** 이미 PDF가 포함된 요청을 다시 변환하지 않는 설정입니다. PDF Pod의 메인 대화 압축과 MARP의 보조 분석 압축은 각각 적용 범위가 다릅니다. MARP는 PDF Pod 내부 설정을 변경하지 않습니다.
+**PDF Pod 병용 설정: API 형식 감지 `자동`, API 형식 변환 `끄기`.** 이미 PDF가 포함된 요청을 다시 변환하지 않는 설정입니다. PDF Pod의 메인 대화 압축과 MARP의 보조 분석 압축은 각각 적용 범위가 다릅니다. MARP는 PDF Pod 내부 설정을 변경하지 않습니다.
 
 | 내장 수준 | 동작 |
 | --- | --- |
@@ -33,7 +33,7 @@ PDF에는 Unicode 추출용 문자 매핑을 포함해 한글·일본어·이모
 
 ## PDF Pod 안에서 자동 안내 (v0.9.4)
 
-PDF Pod의 **OpenAI → Gemini 변환** 기본값(`auto`)은 OpenAI 형식 요청을 모두 Gemini 주소로 다시 보냅니다. 그래서 OpenAI·OpenRouter·Vercel·로컬 모델처럼 Google이 아닌 주소를 쓰면 API 키가 Google로 전달되어 분석이 실패합니다. 연결 테스트는 모델 목록 조회(GET)라 PDF Pod가 바꾸지 않으므로, 테스트만 성공하고 실제 분석은 실패할 수 있습니다.
+PDF Pod의 **API 형식 변환** 기본값(`자동`)은 OpenAI 형식 요청을 모두 Gemini 주소로 다시 보냅니다. 그래서 OpenAI·OpenRouter·Vercel·로컬 모델처럼 Google이 아닌 주소를 쓰면 API 키가 Google로 전달되어 분석이 실패합니다. 연결 테스트는 모델 목록 조회(GET)라 PDF Pod가 바꾸지 않으므로, 테스트만 성공하고 실제 분석은 실패할 수 있습니다.
 
 MARP Lite는 PDF Pod 안에서 실행되는지 스스로 확인하고 아래처럼 안내합니다. PDF Pod 밖에서는 아무것도 바뀌지 않습니다.
 
@@ -43,11 +43,13 @@ MARP Lite는 PDF Pod 안에서 실행되는지 스스로 확인하고 아래처�
 | Google AI Studio · Vertex (`googleapis.com`) | Gemini로 변환되어 동작 | Gemini 변환 · 동작 |
 | 그 외 OpenAI 호환 주소 | Gemini 주소로 바뀌어 실패 | 설정 필요 |
 
-- **공통 탭 · PDF Pod 연동 카드:** 켜진 에이전트마다 위 판정을 보여 주고, 설정 변경이 필요하면 `OpenAI → Gemini 변환 none, PDF 수준 off`를 안내합니다. 저장된 credential이 하나도 없으면 PDF Pod가 자식 플러그인마다 저장 공간을 나눈다는 점도 알려 줍니다.
+- **공통 탭 · PDF Pod 연동 카드:** 켜진 에이전트마다 위 판정을 보여 주고, 설정 변경이 필요하면 `API 형식 변환 끄기, PDF 압축 수준 끄기`를 안내합니다. 저장된 credential이 하나도 없으면 PDF Pod가 자식 플러그인마다 저장 공간을 나눈다는 점도 알려 줍니다.
 - **워터폴 · 호출 기록:** PDF Pod 안에서 분석이 실패하고 설정 필요 에이전트가 있으면 같은 조치를 빨간 글씨로 덧붙입니다.
 - **연결 테스트:** 성공해도 설정 필요 에이전트가 있으면 같은 조치를 표시합니다.
 
 ![PDF Pod 연동 카드](img/pdf-pod-card.png)
+
+설치부터 설정 변경까지 화면 순서대로 보려면 [PDF Pod 안에서 MARP Lite 쓰기](PDF-POD.md)를 참고하세요.
 
 PDF Pod가 자식 훅 예외를 흡수하면 Strict가 메인 호출을 차단한다고 보장할 수 없습니다. UI는 분석 실패와 주입 중단을 구분합니다.
 

@@ -67,9 +67,10 @@ v0.9.1 Full 서버를 사용 중이라면 이번 메뉴 이동은 브라우저 �
 
 공통 설정은 에이전트별로 덮어쓸 수 있고 빈 값은 공통값을 상속합니다. 기본 Lenient는 성공한 결과를 사용하고 Strict는 일부 실패에도 분석 주입을 중단합니다. 내장 PDF는 기본 `off`입니다.
 
-PDF Pod 병용 설정은 **API 감지 `auto` · OpenAI → Gemini 변환 `none`**입니다. Lite 내장 PDF를 켜면 PDF Pod의 MARP 자식 PDF 수준을 `off`로 둡니다. Full의 서버 요청은 PDF Pod를 통과하지 않습니다. PDF Pod 안에서 Lite를 열면 **공통** 탭의 **PDF Pod 연동** 카드가 에이전트별 동작 여부와 필요한 설정을 보여 줍니다.
+PDF Pod 병용 설정은 **API 형식 감지 `자동` · API 형식 변환 `끄기`**입니다. Lite 내장 PDF를 켜면 PDF Pod에서 MARP의 **PDF 압축 수준**을 `끄기`로 둡니다. Full의 서버 요청은 PDF Pod를 통과하지 않습니다. PDF Pod 안에서 Lite를 열면 **공통** 탭의 **PDF Pod 연동** 카드가 에이전트별 동작 여부와 필요한 설정을 보여 줍니다.
 
 - [공급자·설정·실패 처리](guides/SETTINGS.md)
+- [PDF Pod 안에서 MARP Lite 쓰기 (화면 안내)](guides/PDF-POD.md)
 - [내장 PDF 수준·텍스트 복귀·PDF Pod 병용](guides/PDF.md)
 - [워터폴·테스트·호출 기록](guides/DIAGNOSTICS.md)
 - [개발·API·패키지 빌드](guides/DEVELOPMENT.md)
