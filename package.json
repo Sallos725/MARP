@@ -1,6 +1,7 @@
 {
   "name": "marp",
   "version": "0.9.5",
+  "license": "MIT",
   "private": true,
   "type": "module",
   "scripts": {

@@ -79,3 +79,7 @@ PDF Pod 병용 설정은 **API 형식 감지 `자동` · API 형식 변환 `끄�
 ## 이전 버전으로 되돌리기
 
 UI 업데이트 후 문제가 생기면 [v0.9.1](https://github.com/Sallos725/MARP/releases/tag/v0.9.1)의 플러그인으로 교체하고 Full Docker는 `MULTIAGENT_VERSION=v0.9.1`으로 위 명령을 실행합니다. 설정 파일과 데이터 볼륨은 유지합니다. v0.9.0 이전 구성으로 복귀하는 방법은 [전체 변경 내역](RELEASE_NOTES.md)에 있습니다.
+
+## 라이선스
+
+MARP는 [MIT License](LICENSE)로 배포됩니다.
