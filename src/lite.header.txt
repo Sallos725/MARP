@@ -1,5 +1,5 @@
 //@name risu_multiagent
-//@display-name MultiAgent RP Pipeline
+//@display-name MultiAgent RP Pipeline (MARP)
 //@api 3.0
 //@version 0.9.5
 //@update-url https://raw.githubusercontent.com/Sallos725/MARP/main/lite/risu-multiagent.js

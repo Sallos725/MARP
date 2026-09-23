@@ -1,5 +1,5 @@
 //@name risu_multiagent_full
-//@display-name MultiAgent RP — Full판
+//@display-name MultiAgent RP (MARP) — Full판
 //@api 3.0
 //@version 0.9.5
 //@update-url https://raw.githubusercontent.com/Sallos725/MARP/main/full/plugin/risu-multiagent-full.js
