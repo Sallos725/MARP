@@ -41,7 +41,7 @@ export function openDashboard(api){
   for(const a of agents){const pill=document.createElement('span');pill.className='marp-pill';pill.textContent=a.label+' · '+routeLabels[a.route];pills.append(pill)}
   if(!agents.length)text('켜진 분석 에이전트가 없습니다.',card);
   if(broken.length)text(PDF_POD_FIX+'. 또는 공급자를 Google AI Studio·Vertex·Anthropic으로 바꾸면 기본 설정 그대로 동작합니다.',card);
-  if(internalPdf)text('Lite 내장 PDF를 켰다면 PDF Pod의 MARP 자식 PDF 수준은 off로 두어 재압축을 막으세요.',card);
+  if(internalPdf)text('Lite 내장 PDF를 켰다면 PDF Pod의 PDF 압축 수준은 "끄기"로 두어 재압축을 막으세요.',card);
   if(![draft.default_api_key,...AGENTS.map(n=>draft[n+'_api_key'])].some(Boolean))text('PDF Pod는 자식 플러그인마다 저장 공간을 따로 씁니다. 단독 설치 때 저장한 설정은 보이지 않으니 다시 입력하고 저장해 주세요.',card);
  };
  const download=(name,value)=>{const url=URL.createObjectURL(new Blob([JSON.stringify(value,null,2)],{type:'application/json'})),a=document.createElement('a');a.href=url;a.download=name;root.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),0)};
@@ -59,7 +59,7 @@ export function openDashboard(api){
    providerFields('default');panel.append(document.createElement('hr'));
    const g=group();for(const[k,label]of [['context_window','최근 대화 수'],['request_timeout','에이전트 제한 (초)'],['analysis_timeout','전체 제한 (초)'],['analysis_language','분석 언어'],['injection_position','주입 위치'],['injection_format','주입 형식']])field(k,label,g);
    text('Lenient는 성공한 분석만 사용합니다. 모두 OFF이거나 결과가 비어 있으면 주입하지 않습니다. PDF Pod는 훅 예외를 흡수할 수 있어 Strict의 메인 호출 차단은 보장되지 않습니다.');
-   if(api.full||!hostedInPdfPod())text('PDF Pod 병용: API 감지 auto · OpenAI → Gemini 변환 none. Lite 내장 PDF를 켜면 PDF Pod의 MARP 자식 PDF 수준은 off로 두어 텍스트 복귀의 재압축을 막으세요. Full 서버 요청은 PDF Pod를 통과하지 않습니다.');
+   if(api.full||!hostedInPdfPod())text('PDF Pod 병용: API 형식 감지 "자동" · API 형식 변환 "끄기". Lite 내장 PDF를 켜면 PDF Pod의 PDF 압축 수준은 "끄기"로 두어 텍스트 복귀의 재압축을 막으세요. Full 서버 요청은 PDF Pod를 통과하지 않습니다.');
   }else if(AGENTS.includes(tab)){field(tab+'_enabled',LABELS[tab]+' 분석 사용',group(),{check:true});providerFields(tab)}
   else if(tab==='prompts'){
    text('기본값을 사용하려면 override를 비우세요. 자료는 분석 대상이며, 최종 RP 답변은 메인 모델이 작성합니다.');

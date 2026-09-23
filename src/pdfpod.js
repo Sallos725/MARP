@@ -1,10 +1,11 @@
 import {AGENTS,LABELS} from './core.js';
 import {resolve} from './config.js';
 
-// PDF Pod v0.17.10 wraps child nativeFetch. With its default "OpenAI → Gemini 변환: auto",
+// PDF Pod v0.17.10 wraps child nativeFetch. With its default "API 형식 변환: 자동" (openAiToGeminiMode auto),
 // every OpenAI-format request is re-sent to a native Gemini URL, so non-Google endpoints
 // receive nothing and their key is sent to Google. Anthropic /messages is passed through.
-export const PDF_POD_FIX='PDF Pod 설정 → 자식 플러그인 MARP → OpenAI → Gemini 변환 none, PDF 수준 off';
+// Labels match the PDF Pod 0.17.10 settings screen, where the child is listed by its display name.
+export const PDF_POD_FIX='PDF Pod 설정 → 자식 플러그인 MultiAgent RP Pipeline → API 형식 변환 "끄기", PDF 압축 수준 "끄기"';
 
 // Only PDF Pod's scoped child document exposes __pdfPodHost.
 export function hostedInPdfPod(doc=typeof document==='undefined'?undefined:document){

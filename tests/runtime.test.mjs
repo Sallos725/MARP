@@ -42,7 +42,7 @@ test('PDF Pod child runs attach the fix to failed analyses and connection checks
  try{
   const app=await start(f.host,{analyze:async()=>result,checkConnection:async()=>({status_code:200,check:'models'})});
   await app.before([{role:'user',content:'now'}],'model');assert.equal(app.lastRun.pdf_pod_note,'');
-  result={errors:{worldbuilding:'Agent API 400'}};await app.before([{role:'user',content:'now'}],'model');assert.match(app.lastRun.pdf_pod_note,/OpenAI → Gemini 변환 none/);
+  result={errors:{worldbuilding:'Agent API 400'}};await app.before([{role:'user',content:'now'}],'model');assert.match(app.lastRun.pdf_pod_note,/API 형식 변환 "끄기"/);
   const check=await app.testConnection(f.c);assert.equal(check.status,'test-success');assert.match(check.pdf_pod_note,/세계관·플롯·등장인물/);
   f.c.default_provider='anthropic';assert.equal((await app.testConnection(f.c)).pdf_pod_note,'');
   await app.dispose();
