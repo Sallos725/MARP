@@ -5,8 +5,8 @@ if [ -x ./marp ]; then
   exec ./marp
 fi
 case "$(uname -s)/$(uname -m)" in
-  Linux/x86_64) packaged="./bin/marp-v0.9.5-linux-amd64" ;;
-  Linux/aarch64|Linux/arm64) packaged="./bin/marp-v0.9.5-linux-arm64" ;;
+  Linux/x86_64) packaged="./bin/marp-v0.9.6-linux-amd64" ;;
+  Linux/aarch64|Linux/arm64) packaged="./bin/marp-v0.9.6-linux-arm64" ;;
   *) packaged="" ;;
 esac
 if [ -n "$packaged" ] && [ -f "$packaged" ]; then

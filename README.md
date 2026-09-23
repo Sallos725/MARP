@@ -2,18 +2,18 @@
 
 MARP는 세계관을 분석한 뒤 플롯·등장인물 분석을 병렬로 실행하고, 분석 메모를 RisuAI 메인 모델에 전달합니다. 최종 RP 답변은 메인 모델이 작성합니다.
 
-**v0.9.5에서는 PDF Pod 안에서 MARP Lite를 쓸 때, 현재 설정으로 동작하는지와 바꿔야 할 PDF Pod 설정을 화면에서 바로 알려 줍니다. [화면 안내](guides/PDF-POD.md)를 참고하세요.**
+**v0.9.6에서는 메인 generation 실패 후 같은 요청을 재전송할 때 성공한 World/Plot/Character 분석을 재사용해 중복 분석 비용을 막습니다.**
 
-[릴리즈 노트](https://github.com/Sallos725/MARP/releases/tag/v0.9.5) · [진단 화면 사용법](guides/DIAGNOSTICS.md) · [전체 변경 내역](RELEASE_NOTES.md)
+[릴리즈 노트](https://github.com/Sallos725/MARP/releases/tag/v0.9.6) · [진단 화면 사용법](guides/DIAGNOSTICS.md) · [전체 변경 내역](RELEASE_NOTES.md)
 
 ## 다운로드
 
 | 사용 방식 | 받을 파일 | 실행 위치 |
 | --- | --- | --- |
-| Lite | [multiagent-lite-v0.9.5.js](https://github.com/Sallos725/MARP/releases/download/v0.9.5/multiagent-lite-v0.9.5.js) | RisuAI 브라우저 플러그인 |
-| Full | [multiagent-full-v0.9.5.zip](https://github.com/Sallos725/MARP/releases/download/v0.9.5/multiagent-full-v0.9.5.zip) | 브라우저 플러그인 + 별도 서버 |
+| Lite | [multiagent-lite-v0.9.6.js](https://github.com/Sallos725/MARP/releases/download/v0.9.6/multiagent-lite-v0.9.6.js) | RisuAI 브라우저 플러그인 |
+| Full | [multiagent-full-v0.9.6.zip](https://github.com/Sallos725/MARP/releases/download/v0.9.6/multiagent-full-v0.9.6.zip) | RisuAI 브라우저 플러그인 + 별도 서버 |
 
-Full ZIP에는 플러그인, Docker 구성, Linux amd64·arm64 실행 파일과 사용 문서가 들어 있습니다. 실행 파일만 필요하면 [릴리즈 첨부 파일](https://github.com/Sallos725/MARP/releases/tag/v0.9.5)에서 해당 아키텍처와 `SHA256SUMS`를 받습니다.
+Full ZIP에는 플러그인, Docker 구성, Linux amd64·arm64 실행 파일과 사용 문서가 들어 있습니다. 실행 파일만 필요하면 [릴리즈 첨부 파일](https://github.com/Sallos725/MARP/releases/tag/v0.9.6)에서 해당 아키텍처와 `SHA256SUMS`를 받습니다.
 
 ## 설치·업데이트
 
@@ -30,11 +30,11 @@ Full ZIP에는 플러그인, Docker 구성, Linux amd64·arm64 실행 파일과 
 설치 폴더에서 실행합니다.
 
 ```sh
-MULTIAGENT_VERSION=v0.9.5 docker compose pull
-MULTIAGENT_VERSION=v0.9.5 docker compose up -d
+MULTIAGENT_VERSION=v0.9.6 docker compose pull
+MULTIAGENT_VERSION=v0.9.6 docker compose up -d
 ```
 
-ZIP의 `plugin/multiagent-full-v0.9.5.js`를 RisuAI에 가져오고 MARP **공통** 탭에서 서버 URL을 지정합니다. 기본 포트는 `6009`입니다. 휴대전화에서는 휴대전화의 localhost가 아닌 서버에 접근할 수 있는 주소를 입력합니다.
+ZIP의 `plugin/multiagent-full-v0.9.6.js`를 RisuAI에 가져오고 MARP **공통** 탭에서 서버 URL을 지정합니다. 기본 포트는 `6009`입니다. 휴대전화에서는 휴대전화의 localhost가 아닌 서버에 접근할 수 있는 주소를 입력합니다.
 
 직접 소스에서 빌드하려면 `docker compose up -d --build`를 사용합니다. 사용자 지정 `MULTIAGENT_IMAGE`를 쓰고 있다면 해당 이미지의 버전도 함께 확인합니다.
 
