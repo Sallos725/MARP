@@ -4,7 +4,7 @@
 
 [PDF Pod](https://pkg.panpka.xyz/pdf-pod/latest)는 다른 플러그인을 안에 넣어 실행하면서 LLM 요청을 PDF로 압축해 토큰을 아껴 주는 플러그인입니다. 이 문서는 **MARP Lite를 PDF Pod 안에 넣어 쓰는 방법**을 화면 순서대로 설명합니다.
 
-> 기준 버전: PDF Pod **0.17.10**, MARP **v0.9.4 이상**. MARP Full의 서버 요청은 PDF Pod를 거치지 않으므로 이 문서와 상관없습니다.
+> 기준 버전: PDF Pod **0.17.10**, MARP **v0.9.5 이상**. MARP Full의 서버 요청은 PDF Pod를 거치지 않으므로 이 문서와 상관없습니다.
 
 ## 먼저 알아 둘 점
 
@@ -80,6 +80,6 @@ PDF Pod의 압축과 변환은 Gemini·Vertex에 맞춰져 있습니다. 다른 
 
 ## 확인 방법과 한계
 
-이 문서의 화면은 **PDF Pod 0.17.10 실제 파일 안에 MARP Lite v0.9.4를 넣어** 실행한 것입니다. RisuAI 플러그인 API는 테스트용 모의 환경으로 대신했습니다. 설정을 바꾸기 전에는 분석 요청이 `generativelanguage.googleapis.com`의 `…/gpt-4o-mini:generateContent`로 전송되어 실패했습니다. 바꾼 뒤에는 `api.openai.com/v1/chat/completions`로 정상 전송되는 것을 확인했습니다.
+이 문서의 화면은 **PDF Pod 0.17.10 실제 파일 안에 MARP Lite v0.9.5를 넣어** 실행한 것입니다. RisuAI 플러그인 API는 테스트용 모의 환경으로 대신했습니다. 설정을 바꾸기 전에는 분석 요청이 `generativelanguage.googleapis.com`의 `…/gpt-4o-mini:generateContent`로 전송되어 실패했습니다. 바꾼 뒤에는 `api.openai.com/v1/chat/completions`로 정상 전송되는 것을 확인했습니다.
 
 PDF Pod가 업데이트되어 화면 이름이나 기본값이 바뀌면 이 문서와 다를 수 있습니다.

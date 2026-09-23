@@ -1,5 +1,15 @@
 # MARP 변경 내역
 
+## MARP v0.9.5 — 2026-09-23
+
+PDF Pod 안내 문구를 PDF Pod 0.17.10 실제 화면 표기에 맞추고, 화면 순서대로 따라 할 수 있는 안내 문서를 추가했습니다.
+
+- **안내 문구 수정**: `API 형식 변환 끄기, PDF 압축 수준 끄기`처럼 PDF Pod 설정 화면에 보이는 이름 그대로 안내합니다. PDF Pod 목록에 보이는 MARP 이름(**MultiAgent RP Pipeline**)도 함께 표시합니다.
+- **새 문서**: [PDF Pod 안에서 MARP Lite 쓰기](guides/PDF-POD.md). 불러오기부터 설정 변경과 확인까지 스크린샷으로 설명합니다. 스크린샷은 실제 PDF Pod 0.17.10 안에서 MARP Lite를 실행해 찍었습니다.
+- 분석 동작과 Full 서버는 바뀌지 않았습니다.
+
+[다운로드·업데이트 안내](https://github.com/Sallos725/MARP/releases/tag/v0.9.5) · [PDF Pod 화면 안내](guides/PDF-POD.md)
+
 ## MARP v0.9.4 — 2026-09-23
 
 PDF Pod 안에서 MARP Lite를 쓸 때 분석이 조용히 실패하던 문제를 화면에서 바로 알 수 있게 했습니다.
