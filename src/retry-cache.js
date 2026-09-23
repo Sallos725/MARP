@@ -6,7 +6,12 @@ const stable=value=>{
 
 export async function retryCacheKey(value){
  const source=JSON.stringify(stable(value));
- if(!globalThis.crypto?.subtle)return null;
+ if(!globalThis.crypto?.subtle){
+  let h1=1779033703,h2=3144134277,h3=1013904242,h4=2773480762;
+  for(let i=0;i<source.length;i++){const k=source.charCodeAt(i);h1=h2^Math.imul(h1^k,597399067);h2=h3^Math.imul(h2^k,2869860233);h3=h4^Math.imul(h3^k,951274213);h4=h1^Math.imul(h4^k,2716044179)}
+  h1=Math.imul(h3^(h1>>>18),597399067);h2=Math.imul(h4^(h2>>>22),2869860233);h3=Math.imul(h1^(h3>>>17),951274213);h4=Math.imul(h2^(h4>>>19),2716044179);
+  return 'hash128:'+source.length+':'+[h1^h2^h3^h4,h2^h1,h3^h1,h4^h1].map(n=>(n>>>0).toString(16).padStart(8,'0')).join('');
+ }
  const bytes=await globalThis.crypto.subtle.digest('SHA-256',new TextEncoder().encode(source));
  return 'sha256:'+Array.from(new Uint8Array(bytes),byte=>byte.toString(16).padStart(2,'0')).join('');
 }
