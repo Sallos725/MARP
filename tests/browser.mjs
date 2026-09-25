@@ -62,6 +62,19 @@ try{for(const[name,type]of [['chromium',chromium],['webkit',webkit]]){
  const download=page.waitForEvent('download');await page.getByRole('button',{name:'기록 JSON 내보내기',exact:true}).click();assert.equal((await download).suggestedFilename(),'marp-call-history.json');
  await page.getByRole('button',{name:'기록 비우기',exact:true}).click();await page.waitForFunction(()=>instance.getHistory().length===0);
  await page.getByRole('button',{name:'닫기',exact:true}).click();
+ // Progress display on a real layout engine (WebKit ≈ iPhone Safari): toggle, NMOS avoidance, outcome, off.
+ await page.evaluate(()=>instance.open());await page.getByLabel('채팅 화면에 진행 표시 띄우기').check();
+ await page.getByText('켰습니다',{exact:false}).waitFor();await page.getByRole('button',{name:'닫기',exact:true}).click();
+ await page.evaluate(()=>{document.body.insertAdjacentHTML('beforeend','<div class="nmos-hud" style="position:fixed;top:8px;right:8px;width:180px;height:30px"></div>');delayResponse=400});
+ const hudRun=page.evaluate(()=>run([{role:'user',content:'Progress display turn'}]));
+ await page.locator('.marp-hud').filter({hasText:'분석 중'}).waitFor();
+ await page.waitForFunction(()=>document.querySelector('.marp-hud').getBoundingClientRect().top>=document.querySelector('.nmos-hud').getBoundingClientRect().bottom+5);
+ assert.equal(await page.evaluate(()=>{const r=document.querySelector('.marp-hud').getBoundingClientRect();return r.right<=innerWidth&&r.left>=0}),true,'pill fits the phone width');
+ await page.screenshot({path:`test-results/${name}-${full?'full':'lite'}-hud-running.png`});
+ assert.equal((await hudRun).length,2);await page.locator('.marp-hud').filter({hasText:'분석 주입'}).waitFor();
+ await page.screenshot({path:`test-results/${name}-${full?'full':'lite'}-hud-done.png`});
+ await page.evaluate(async()=>{document.querySelector('.nmos-hud').remove();delayResponse=0;hudArg='0';await run([{role:'user',content:'Display off'}])});
+ await page.waitForFunction(()=>!document.querySelector('.marp-hud'));
 
  if(cdp)await cdp.send('HeapProfiler.collectGarbage');
  const heapBefore=cdp?(await cdp.send('Runtime.getHeapUsage')).usedSize:0;
