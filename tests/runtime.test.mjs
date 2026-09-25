@@ -1,4 +1,5 @@
 import {test} from 'node:test';import assert from 'node:assert/strict';import {start} from '../src/runtime.js';import {defaults,legacyConfig,loadConfig} from '../src/config.js';
+import {fakeRoot} from './fake-root.mjs';
 function fixture({full=false,result={context_world:'fact',errors:{}},old=false}={}){
  const c=defaults();c.default_api_key='fake';const store=new Map([['risu_multiagent_lite_config_vault_v1',{config:legacyConfig(c)}]]);const calls=[];let unload,hook,remove=0;
  const host={pluginStorage:{getItem:async k=>store.get(k),setItem:async(k,v)=>store.set(k,v)},getArgument:async()=>'',addRisuReplacer:async(_,fn)=>{hook=fn},removeRisuReplacer:async()=>{remove++},onUnload:async fn=>{unload=fn},registerSetting:async()=>{},registerButton:async()=>{},
@@ -74,4 +75,31 @@ test('the progress display setting defaults off and follows its argument',async(
  const host={pluginStorage:{getItem:async()=>null},getArgument:async k=>k==='hud'?'1':''};
  assert.equal((await loadConfig(host)).hud,true);assert.equal((await loadConfig(host,true)).hud,true);
  assert.equal(legacyConfig({...defaults(),hud:true}).hud,true);
+});
+const hudOn=f=>{const root=fakeRoot();f.host.getArgument=async k=>k==='hud'?'1':'';f.host.getRootDocument=async()=>root.doc;return root};
+test('the progress display follows a Lite analysis and marks failed agents',async()=>{
+ const f=fixture(),root=hudOn(f);
+ const app=await start(f.host,{analyze:async(host,c,input,signal,progress)=>{progress('worldbuilding','running');progress('worldbuilding','success');return {context_world:'world',context_plot:'plot',errors:{character:'down'},diagnostics:{worldbuilding:{status:'success'},plot:{status:'success'},character:{status:'error'}}}}});
+ const m=[{role:'user',content:'now'}];assert.equal((await app.before(m,'model')).length,2);await app.hud.settled();
+ const pill=root.body.children[0];assert.equal(pill.children[3].text,'✓ 분석 주입 · 9자');assert.match(pill.children[2].style,/#ff9a9a/);
+ await app.dispose();assert.equal(pill.removed,true);
+});
+test('the progress display stays away from bypassed requests and when it is off',async()=>{
+ const f=fixture();let asked=0;f.host.getRootDocument=async()=>{asked++;return fakeRoot().doc};
+ const app=await start(f.host,{analyze:async()=>({context_world:'fact',errors:{}})});await app.before([{role:'user',content:'now'}],'model');await app.hud.settled();assert.equal(asked,0);
+ f.host.getArgument=async k=>k==='hud'?'1':'';await app.before([{role:'user',content:'now'}],'memory');await app.hud.settled();assert.equal(asked,0);await app.dispose();
+});
+test('a broken progress display never changes analysis results',async()=>{
+ const f=fixture();f.host.getArgument=async k=>k==='hud'?'1':'';f.host.getRootDocument=async()=>{throw Error('bridge down')};
+ const app=await start(f.host,{analyze:async()=>({context_world:'fact',errors:{}})}),m=[{role:'user',content:'now'}];
+ assert.equal((await app.before(m,'model')).length,2);await app.hud.settled();assert.match(app.hud.problem(),/bridge down/);await app.dispose();
+});
+test('turning the display on asks for main-page access with the panel hidden',async()=>{
+ const f=fixture(),calls=[];let grant=true;
+ Object.assign(f.host,{hideContainer:async()=>calls.push('hide'),showContainer:async()=>calls.push('show'),setArgument:async(k,v)=>calls.push(k+'='+v),getRootDocument:async()=>null,requestPluginPermission:async p=>{calls.push('ask '+p);return grant}});
+ const app=await start(f.host,{analyze:async()=>({errors:{}})});
+ assert.equal(await app.hud.enable(),'on');assert.deepEqual(calls,['hide','ask mainDom','show','hud=1']);
+ grant=false;calls.length=0;assert.equal(await app.hud.enable(),'denied');assert.deepEqual(calls.slice(-1),['hud=0']);
+ await app.hud.disable();assert.deepEqual(calls.slice(-1),['hud=0']);
+ delete f.host.requestPluginPermission;assert.equal(await app.hud.enable(),'unsupported');await app.dispose();
 });
