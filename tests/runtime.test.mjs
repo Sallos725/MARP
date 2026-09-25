@@ -103,3 +103,76 @@ test('turning the display on asks for main-page access with the panel hidden',as
  await app.hud.disable();assert.deepEqual(calls.slice(-1),['hud=0']);
  delete f.host.requestPluginPermission;assert.equal(await app.hud.enable(),'unsupported');await app.dispose();
 });
+test('a hung page bridge neither delays analysis nor blocks unload past a second',async()=>{
+ const f=fixture();f.host.getArgument=async k=>k==='hud'?'1':'';f.host.getRootDocument=()=>new Promise(()=>{});
+ let hidden=0,unregistered=0;f.host.hideContainer=async()=>{hidden++};f.host.registerSetting=async()=>({id:'s'});f.host.unregisterUIPart=async()=>{unregistered++};
+ const app=await start(f.host,{analyze:async()=>({context_world:'fact',errors:{}})}),m=[{role:'user',content:'now'}];
+ assert.equal((await app.before(m,'model')).length,2);
+ const t=performance.now();await app.dispose();const ms=performance.now()-t;
+ assert.ok(ms>=900&&ms<1500,'waited '+ms);assert.equal(unregistered,1);assert.equal(hidden,1);
+});
+test('a healthy unload does not wait out the one-second guard',async()=>{
+ const f=fixture(),root=hudOn(f);const app=await start(f.host,{analyze:async()=>({context_world:'fact',errors:{}})});
+ await app.before([{role:'user',content:'now'}],'model');await app.hud.settled();
+ const real=globalThis.clearTimeout;let cleared=0;globalThis.clearTimeout=id=>{cleared++;return real(id)};
+ try{const t=performance.now();await app.dispose();assert.ok(performance.now()-t<500);assert.ok(cleared>=1)}finally{globalThis.clearTimeout=real}
+ assert.equal(root.body.children[0].removed,true);
+});
+test('Lite agent progress reaches the pill while the analysis runs',async()=>{
+ const f=fixture(),root=hudOn(f);let release,ran;const gate=new Promise(r=>{release=r}),running=new Promise(r=>{ran=r});
+ const app=await start(f.host,{analyze:async(h,c,i,s,progress)=>{progress('worldbuilding','running');ran();await gate;return {context_world:'w',errors:{}}}});
+ const p=app.before([{role:'user',content:'now'}],'model');await running;await app.hud.settled();
+ const pill=root.body.children[0];assert.match(pill.children[3].text,/^세계관 분석 중…/);assert.match(pill.children[0].style,/background:#e2b865/);
+ release();await p;await app.hud.settled();assert.match(pill.children[3].text,/분석 주입/);await app.dispose();
+});
+test('cache hits, strict failures and thrown analyses show the right outcome',async()=>{
+ const f=fixture(),root=hudOn(f);let result={context_world:'world',context_plot:'plot',context_char:'char',errors:{}},boom=false;
+ const app=await start(f.host,{analyze:async()=>{if(boom)throw Error('x');return result}}),m=[{role:'user',content:'now'}];
+ const text=()=>root.body.children.at(-1).children[3].text;
+ const first=await app.before(m,'model');await app.before(first,'model');await app.hud.settled();assert.equal(text(),'↺ 캐시 재사용 · 13자');
+ f.getArgument=f.host.getArgument;f.host.getArgument=async k=>k==='hud'||k==='strict_mode'?'1':'';result={context_world:'w',errors:{plot:'down'}};
+ await app.before([{role:'user',content:'strict'}],'model');await app.hud.settled();assert.equal(text(),'⚠ 실패 · 미주입');
+ boom=true;await app.before([{role:'user',content:'throws'}],'model');await app.hud.settled();assert.equal(text(),'⚠ 실패 · 미주입');
+ const dots=root.body.children.at(-1).children.slice(0,3).map(d=>d.style);assert.ok(dots.every(s=>s.includes('#ff9a9a')));
+ await app.dispose();
+});
+test('Full: start is not live and the end carries server agent states',async()=>{
+ const f=fixture({full:true,result:{context_world:'fact',errors:{},diagnostics:{plot:{status:'skipped'}}}}),root=hudOn(f);
+ const app=await start(f.host,{full:true});await app.before([{role:'user',content:'now'}],'model');await app.hud.settled();
+ const pill=root.body.children[0];assert.equal(pill.children[3].text,'✓ 분석 주입 · 4자');assert.match(pill.children[1].style,/#4a5670/);await app.dispose();
+});
+const defer=()=>{let resolve;const promise=new Promise(r=>resolve=r);return {promise,resolve}};
+test('overlapping analyses do not reset the pill for a run already in flight',async()=>{
+ const f=fixture(),root=hudOn(f);
+ let n=0;const started=[defer(),defer()],gate1=[defer(),defer()],progressed=[defer(),defer()],gate2=[defer(),defer()];
+ const app=await start(f.host,{analyze:async(h,c,i,s,progress)=>{
+  const my=n++;started[my].resolve();
+  await gate1[my].promise;
+  progress('worldbuilding',my===0?'success':'running');progressed[my].resolve();
+  await gate2[my].promise;
+  return {context_world:'r'+my,errors:{}};
+ }});
+ const pill=()=>root.body.children[0];
+ const first=app.before([{role:'user',content:'first'}],'model');
+ await started[0].promise;await app.hud.settled();
+ gate1[0].resolve();await progressed[0].promise;await app.hud.settled();
+ assert.match(pill().children[0].style,/#7ee0b5/,'dot0 should be success-green after the first run reports progress');
+ const second=app.before([{role:'user',content:'second'}],'model');
+ await started[1].promise;await app.hud.settled();
+ assert.match(pill().children[0].style,/#7ee0b5/,'a second overlapping request must not reset the dots of the run in flight');
+ gate1[1].resolve();await progressed[1].promise;await app.hud.settled();
+ gate2[0].resolve();await first;await app.hud.settled();
+ assert.match(pill().children[3].text,/분석 중/,'pill must stay busy while the second run is still in flight');
+ gate2[1].resolve();await second;await app.hud.settled();
+ assert.match(pill().children[3].text,/분석 주입/,'pill should show the outcome once the last in-flight run finishes');
+ await app.dispose();
+});
+test('a HUD panel-open failure is logged, not left as an unhandled rejection',async()=>{
+ const f=fixture(),root=hudOn(f);
+ const app=await start(f.host,{analyze:async()=>({context_world:'fact',errors:{}})});
+ await app.before([{role:'user',content:'now'}],'model');await app.hud.settled();
+ const pill=root.body.children[0],logs=[],realDebug=console.debug;console.debug=(...a)=>logs.push(a);
+ try{root.click({clientX:340,clientY:20});await new Promise(r=>setTimeout(r,20))}finally{console.debug=realDebug}
+ assert.ok(logs.some(a=>a[0]==='[MARP]'&&/document is not defined/.test(String(a[1]||''))));
+ await app.dispose();
+});

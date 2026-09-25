@@ -10,7 +10,7 @@ const contextChars=result=>AGENTS.reduce((n,a)=>n+cleanOutput(result['context_'+
 const agentStates=result=>Object.fromEntries(AGENTS.map(a=>{const s=result.diagnostics?.[a]?.status;return [a,result.errors?.[a]||s==='error'?'error':s==='skipped'?'off':s==='success'||cleanOutput(result['context_'+KEYS[a]]).trim()?'success':'off']}));
 export async function start(host,{full=false,analyze,defaultPrompts,clearTokens,checkConnection}={}){
  let alive=true,ui=null,lastRun=null,runtime=null,runtimePending=null;
- const jobs=new Set(),parts=[],history=[];let loaded,nextId=0,manualPending=false;
+ const jobs=new Set(),parts=[],history=[];let loaded,nextId=0,manualPending=false,hudRuns=0;
  const retryCache=createRetryCache(),pendingAnalyses=new Map();
  const remember=(result,meta,c)=>{
   const record=recordRun(result,{id:++nextId,edition:full?'full':'lite',...meta},c);
@@ -20,7 +20,7 @@ export async function start(host,{full=false,analyze,defaultPrompts,clearTokens,
  const getHistory=()=>structuredClone(history);
  const clearHistory=()=>{history.length=0;lastRun=null};
  const config=()=>loaded??=(loadConfig(host,full).catch(e=>{loaded=null;throw e}));
- const hud=createHud({enabled:async()=>{try{return !!(await config()).hud}catch{return false}},rootDocument:async()=>typeof host.getRootDocument==='function'?host.getRootDocument():null,openPanel:()=>{void open()},now:()=>performance.now(),setTimer:(fn,ms)=>setTimeout(fn,ms),clearTimer:id=>clearTimeout(id),debug:(...a)=>console.debug(...a)});
+ const hud=createHud({enabled:async()=>{try{return !!(await config()).hud}catch{return false}},rootDocument:async()=>typeof host.getRootDocument==='function'?host.getRootDocument():null,openPanel:()=>{open().catch(e=>console.debug('[MARP]',e?.message))},now:()=>performance.now(),setTimer:(fn,ms)=>setTimeout(fn,ms),clearTimer:id=>clearTimeout(id),debug:(...a)=>console.debug(...a)});
  const setHud=async on=>{await host.setArgument?.('hud',on?'1':'0');if(loaded)loaded=loaded.then(c=>({...c,hud:on}));hud.refresh()};
  const hudControl={
   async enable(){
@@ -65,7 +65,7 @@ export async function start(host,{full=false,analyze,defaultPrompts,clearTokens,
   loaded=null;let c;try{c=await config()}catch{return messages}
   if(!alive||bypass(messages,mode,c))return messages;
   const clean=withoutOwn(messages),start=performance.now(),started_at=new Date().toISOString(),controller=new AbortController();jobs.add(controller);
-  hud.event({type:'start',live:!full,agents:Object.fromEntries(AGENTS.map(a=>[a,full||c[a+'_enabled']?'pending':'off']))});
+  if(!hudRuns++)hud.event({type:'start',live:!full,agents:Object.fromEntries(AGENTS.map(a=>[a,full||c[a+'_enabled']?'pending':'off']))});
   const d=deadline(controller.signal,(c.analysis_timeout||120)*1000);
   try{
    const server=full?await runtimeConfig(c,d.signal):c;
@@ -85,15 +85,16 @@ export async function start(host,{full=false,analyze,defaultPrompts,clearTokens,
    const failed=Object.keys(result.errors||{}).length>0;
    const useful=['world','plot','char'].some(k=>cleanOutput(result['context_'+k]));
    const injected=useful&&!(c.strict_mode&&failed);
+   const out=injected?inject(clean,result,c):clean;
    const record=remember(result,{kind:'analysis',started_at,elapsed_ms:Math.round(performance.now()-start),history_messages:input.chat_history.length,input_chars:input.user_input.length,system_chars:input.system_context.length,status:injected?'injected':failed?'failed-no-injection':'empty-no-injection',cache_hit:!!entry,shared_analysis:shared,...(entry?{cache_age_ms:entry.age_ms,cache_source_id:entry.source_run_id}:{}),pdf_pod_note:!full&&failed?pdfPodNote(c):'',strict_note:c.strict_mode?'PDF Pod가 훅 오류를 흡수할 수 있어 메인 호출 차단은 보장되지 않습니다.':''},c);
-   hud.event({type:'end',outcome:injected?'injected':failed?'failed':'empty',chars:injected?contextChars(result):0,cache:!!entry,agents:agentStates(result)});
+   if(hudRuns===1)hud.event({type:'end',outcome:injected?'injected':failed?'failed':'empty',chars:injected?contextChars(result):0,cache:!!entry,agents:agentStates(result)});
    if(key&&!entry&&!shared&&!failed&&useful)retryCache.set(key,result,record.id);
-   return injected?inject(clean,result,c):clean;
+   return out;
   }catch(e){
    if(alive)remember({},{kind:'analysis',started_at,status:'failed-no-injection',error:e.message,pdf_pod_note:full?'':pdfPodNote(c),elapsed_ms:Math.round(performance.now()-start),strict_note:c.strict_mode?'분석 주입 중단. PDF Pod 환경에서 메인 호출 차단은 보장되지 않습니다.':''},c);
-   if(alive)hud.event({type:'end',outcome:'failed',chars:0,cache:false,agents:Object.fromEntries(AGENTS.map(a=>[a,'error']))});
+   if(alive&&hudRuns===1)hud.event({type:'end',outcome:'failed',chars:0,cache:false,agents:Object.fromEntries(AGENTS.map(a=>[a,'error']))});
    return clean;
-  }finally{d.close();jobs.delete(controller)}
+  }finally{hudRuns--;d.close();jobs.delete(controller)}
  };
  const manual=async(draft,kind,execute)=>{
   if(!alive)throw Error('플러그인 해제');
