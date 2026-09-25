@@ -12,12 +12,16 @@ const DOTS={pending:'border:1.5px solid #e2b865',running:'background:#e2b865',su
 const TEXT_STYLE='min-width:0;margin-left:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
 const COLORS={busy:'#e7ecf5',ok:'#7ee0b5',muted:'#a3b0c6',warn:'#ff9a9a'};
 export function createHud(deps){
- let state=EMPTY,problem=null,drawn=null,timer=null,queue=Promise.resolve();
+ let state=EMPTY,problem=null,drawn=null,timer=null,queue=Promise.resolve(),dead=false;
  // All work runs in order on one chain; nothing here ever rejects to the caller.
  const run=task=>{queue=queue.then(task).catch(fail)};
- async function fail(e){problem=e?.message||String(e);deps.debug?.('[MARP] 진행 표시 중단:',problem);await erase().catch(()=>{})}
+ async function fail(e){
+  try{problem=e?.message||String(e)}catch{problem='unknown'}
+  try{deps.debug?.('[MARP] 진행 표시 중단:',problem)}catch{}
+  await erase().catch(()=>{})
+ }
  const stopTimer=()=>{if(timer!==null)deps.clearTimer(timer);timer=null};
- async function erase(){stopTimer();const d=drawn;drawn=null;if(!d)return;await d.root.removeEventListener('click',d.listener);await d.root.remove()}
+ async function erase(){stopTimer();const d=drawn;drawn=null;if(!d)return;await Promise.allSettled([d.root.removeEventListener('click',d.listener),d.root.remove()])}
  async function draw(){
   const doc=await deps.rootDocument();if(!doc)throw Error('메인 화면 접근 권한이 없습니다');
   await (await doc.querySelector('.'+CLASS))?.remove();
@@ -26,34 +30,45 @@ export function createHud(deps){
   const dots=[];for(let i=0;i<3;i++){const dot=await doc.createElement('span');await dot.setStyleAttribute(DOT_STYLE+DOTS.off);await root.appendChild(dot);dots.push(dot)}
   const text=await doc.createElement('span');await text.setStyleAttribute(TEXT_STYLE);await root.appendChild(text);
   await body.appendChild(root);
-  // The host listens on the whole document: act only on taps inside the pill.
-  const listener=await root.addEventListener('click',e=>{void hit(e)});
-  return {doc,root,dots,text,listener,key:'',dotKeys:[],top:DEFAULT_TOP};
+  // The host listens on the whole document: act only on taps inside the pill. A failed registration
+  // must not leave an unremovable, unlistenable pill behind.
+  let listener;
+  try{listener=await root.addEventListener('click',e=>{void hit(e)})}
+  catch(e){await root.remove().catch(()=>{});throw e}
+  return {doc,root,dots,text,listener,key:'',kind:'',dotKeys:[],top:DEFAULT_TOP};
  }
  async function hit(e){
-  try{const d=drawn;if(!d)return;const r=await d.root.getBoundingClientRect();if(e.clientX>=r.left&&e.clientX<=r.right&&e.clientY>=r.top&&e.clientY<=r.bottom)deps.openPanel()}
-  catch(err){deps.debug?.('[MARP] 진행 표시 클릭 실패:',err?.message)}
+  try{
+   const d=drawn;if(!d)return;const r=await d.root.getBoundingClientRect();
+   if(drawn!==d||r.right<=r.left)return;
+   if(e.clientX>=r.left&&e.clientX<=r.right&&e.clientY>=r.top&&e.clientY<=r.bottom)deps.openPanel()
+  }catch(err){deps.debug?.('[MARP] 진행 표시 클릭 실패:',err?.message)}
  }
  async function place(d){
   let top=DEFAULT_TOP;const nmos=await d.doc.querySelector(NMOS);
-  if(nmos){const [n,m]=await Promise.all([nmos.getBoundingClientRect(),d.root.getBoundingClientRect()]);if(n.bottom>n.top&&n.top<TOP_BAND&&n.left<m.right&&n.right>m.left)top=Math.round(n.bottom+GAP)+'px'}
+  if(nmos){
+   const [n,m]=await Promise.all([nmos.getBoundingClientRect(),d.root.getBoundingClientRect()]);
+   if(d.top===DEFAULT_TOP)d.base=m.top;
+   if(n.bottom>n.top&&n.top<(d.base??8)+TOP_BAND-8&&n.left<m.right&&n.right>m.left)top=Math.round(n.bottom+GAP)+'px'
+  }
   if(top!==d.top){d.top=top;await d.root.setStyle('top',top)}
  }
  async function render(){
+  if(dead)return;
   stopTimer();const now=deps.now(),v=view(state,now);
   if(!v)return erase();
   drawn??=await draw();const d=drawn,key=v.kind+'|'+v.text;
-  if(d.key!==key){d.key=key;await d.text.setTextContent(v.text);await d.text.setStyle('color',COLORS[v.kind])}
+  if(d.key!==key){d.key=key;await d.text.setTextContent(v.text);if(d.kind!==v.kind){d.kind=v.kind;await d.text.setStyle('color',COLORS[v.kind])}}
   for(let i=0;i<3;i++)if(d.dotKeys[i]!==v.dots[i]){d.dotKeys[i]=v.dots[i];await d.dots[i].setStyleAttribute(DOT_STYLE+DOTS[v.dots[i]])}
   await place(d);
   const next=nextChange(state,now);if(next!==null)timer=deps.setTimer(()=>{timer=null;run(render)},Math.max(0,next-now));
  }
  async function active(){if(!problem&&await deps.enabled())return true;state=EMPTY;await erase();return false}
  return {
-  event(e){run(async()=>{if(!await active())return;state=reduce(state,e,deps.now());await render()})},
+  event(e){run(async()=>{if(dead)return;if(!await active())return;state=reduce(state,e,deps.now());await render()})},
   // The toggle changed: off erases at once; on clears an earlier failure.
-  refresh(){run(async()=>{if(await deps.enabled()){problem=null;return}state=EMPTY;await erase()})},
-  dispose(){run(async()=>{state=EMPTY;await erase()})},
+  refresh(){run(async()=>{if(dead)return;if(await deps.enabled()){problem=null;return}state=EMPTY;await erase()})},
+  dispose(){dead=true;run(async()=>{state=EMPTY;await erase()})},
   problem:()=>problem,
   settled:()=>queue
  };

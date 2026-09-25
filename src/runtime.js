@@ -151,7 +151,7 @@ export async function start(host,{full=false,analyze,defaultPrompts,clearTokens,
   if(!alive)return;alive=false;for(const job of jobs)job.abort(Error('플러그인 해제'));jobs.clear();clearTokens?.();ui?.close();clearHistory();retryCache.clear();pendingAnalyses.clear();runtime=null;loaded=null;
   if(hookRegistered&&host.removeRisuReplacer)try{await host.removeRisuReplacer('beforeRequest',typeof hook==='string'?hook:before)}catch{}
   if(typeof hook==='function'&&hook!==before)try{await hook()}catch{}
-  hud.dispose();await hud.settled();
+  hud.dispose();let wait;await Promise.race([hud.settled(),new Promise(r=>{wait=setTimeout(r,1000)})]);clearTimeout(wait);
   for(const id of parts)await host.unregisterUIPart?.(id);
   await host.hideContainer?.();
  };

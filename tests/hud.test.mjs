@@ -23,6 +23,10 @@ test('outcomes last four seconds and mark failed agents',()=>{
  s=step(EMPTY,[{type:'end',outcome:'failed',chars:0,agents:{}}]);assert.deepEqual(view(s,0),{kind:'warn',text:'⚠ 실패 · 미주입',dots:['off','off','off']});
  s=step(EMPTY,[{type:'end',outcome:'empty',chars:0,agents}]);assert.equal(view(s,0).text,'– 결과 없음');
 });
+test('the elapsed tick stays aligned to whole seconds from the start time',()=>{
+ const s=step(EMPTY,[{type:'start',live:true,agents:pending}],1000);
+ assert.equal(nextChange(s,1300),2000);
+});
 test('agent events outside a run and abandon clear nothing extra',()=>{
  assert.equal(step(EMPTY,[{type:'agent',name:'plot',status:'running'}]),EMPTY);
  assert.equal(step(EMPTY,[{type:'start',live:true,agents:pending},{type:'abandon'}]),EMPTY);

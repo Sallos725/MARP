@@ -48,3 +48,54 @@ test('turning the display off removes it at once and ignores later events',async
  s.hud.event({type:'start',live:true,agents});await s.hud.settled();assert.equal(s.f.body.children.length,1);
  s.setOn(true);s.hud.event({type:'start',live:true,agents});s.hud.dispose();await s.hud.settled();assert.equal(s.f.body.children.at(-1).removed,true);assert.equal(s.timers.size,0);
 });
+test('a failed listener registration removes the pill and never leaves it stuck',async()=>{
+ const s=setup();s.f.failNextAdd();
+ s.hud.event({type:'start',live:true,agents});await s.hud.settled();
+ assert.equal(s.pill().removed,true);assert.match(s.hud.problem(),/addEventListener failed/);
+});
+test('a failed listener removal still removes the pill',async()=>{
+ const s=setup();s.hud.event({type:'start',live:true,agents});await s.hud.settled();const pill=s.pill();
+ s.f.failNextRemove();s.setOn(false);s.hud.refresh();await s.hud.settled();
+ assert.equal(pill.removed,true);
+});
+test('accounts for the safe-area offset when comparing MARP against NMOS',async()=>{
+ // On a notched phone both pills sit near y=65, well past the old absolute TOP_BAND=60 cutoff.
+ const s=setup();
+ s.hud.event({type:'start',live:true,agents});await s.hud.settled();
+ const pill=s.pill();pill.rect={left:300,right:380,top:65,bottom:95};
+ s.f.doc.nmos={getBoundingClientRect:async()=>({left:250,right:382,top:65,bottom:97})};
+ await s.advance(1000);
+ assert.equal(pill.props.top,'103px');
+});
+test('sets the text color only when the outcome kind changes, not every tick',async()=>{
+ const s=setup();s.hud.event({type:'start',live:true,agents});await s.hud.settled();
+ const colorWrites=()=>s.f.log.filter(l=>l==='setStyle color').length;
+ assert.equal(colorWrites(),1);
+ await s.advance(1000);await s.advance(1000);
+ assert.equal(colorWrites(),1);
+});
+test('a tap racing an erase does not open the panel',async()=>{
+ const s=setup();s.hud.event({type:'start',live:true,agents});await s.hud.settled();
+ const pill=s.pill();let resolveRect;
+ pill.getBoundingClientRect=()=>new Promise(r=>{resolveRect=r});
+ s.f.click({clientX:320,clientY:20});
+ s.setOn(false);s.hud.refresh();await s.hud.settled();
+ resolveRect(pill.rect);
+ await new Promise(r=>setTimeout(r,0));
+ assert.equal(s.opened,0);
+});
+test('fail() never throws for a null-prototype error or a throwing debug(), so the queue stays alive',async()=>{
+ const f=fakeRoot();
+ const hud=createHud({enabled:async()=>{throw Object.create(null)},rootDocument:async()=>f.doc,openPanel:()=>{},now:()=>0,
+  setTimer:(fn,ms)=>setTimeout(fn,ms),clearTimer:id=>clearTimeout(id),debug:()=>{throw Error('debug boom')}});
+ hud.event({type:'start',live:true,agents});
+ await assert.doesNotReject(hud.settled());
+ assert.equal(typeof hud.problem(),'string');
+ hud.event({type:'start',live:true,agents});
+ await assert.doesNotReject(hud.settled());
+});
+test('dispose() sets a disposed state so a later event draws nothing',async()=>{
+ const s=setup();
+ s.hud.dispose();s.hud.event({type:'start',live:true,agents});await s.hud.settled();
+ assert.equal(s.f.body.children.length,0);
+});

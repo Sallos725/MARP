@@ -23,6 +23,6 @@ export function view(state,now){
 }
 // When the view next changes by itself: the elapsed-time tick while running, or the outcome expiring.
 export function nextChange(state,now){
- if(state.run)return now+1000;
+ const r=state.run;if(r)return r.started+(Math.floor((now-r.started)/1000)+1)*1000;
  return state.done&&state.done.until>now?state.done.until:null;
 }
