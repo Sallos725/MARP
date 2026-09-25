@@ -1,4 +1,4 @@
-import {test} from 'node:test';import assert from 'node:assert/strict';import {start} from '../src/runtime.js';import {defaults,legacyConfig} from '../src/config.js';
+import {test} from 'node:test';import assert from 'node:assert/strict';import {start} from '../src/runtime.js';import {defaults,legacyConfig,loadConfig} from '../src/config.js';
 function fixture({full=false,result={context_world:'fact',errors:{}},old=false}={}){
  const c=defaults();c.default_api_key='fake';const store=new Map([['risu_multiagent_lite_config_vault_v1',{config:legacyConfig(c)}]]);const calls=[];let unload,hook,remove=0;
  const host={pluginStorage:{getItem:async k=>store.get(k),setItem:async(k,v)=>store.set(k,v)},getArgument:async()=>'',addRisuReplacer:async(_,fn)=>{hook=fn},removeRisuReplacer:async()=>{remove++},onUnload:async fn=>{unload=fn},registerSetting:async()=>{},registerButton:async()=>{},
@@ -68,4 +68,10 @@ test('PDF Pod child runs attach the fix to failed analyses and connection checks
   f.c.default_provider='anthropic';assert.equal((await app.testConnection(f.c)).pdf_pod_note,'');
   await app.dispose();
  }finally{delete globalThis.document}
+});
+test('the progress display setting defaults off and follows its argument',async()=>{
+ assert.equal(defaults().hud,false);
+ const host={pluginStorage:{getItem:async()=>null},getArgument:async k=>k==='hud'?'1':''};
+ assert.equal((await loadConfig(host)).hud,true);assert.equal((await loadConfig(host,true)).hud,true);
+ assert.equal(legacyConfig({...defaults(),hud:true}).hud,true);
 });

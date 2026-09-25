@@ -1,11 +1,11 @@
 import {AGENTS,VERSION,parseStored} from './core.js';
 export const FIELDS=['provider','base_url','api_key','model','temperature','max_tokens','extra_body_json','pdf_mode'];
 const camel={provider:'provider',base_url:'baseUrl',api_key:'apiKey',model:'model',temperature:'temperature',max_tokens:'maxTokens',extra_body_json:'extraBodyJson',pdf_mode:'pdfMode'};
-const flags={main_model_only:'mainModelOnly',bypass_hypamemory:'bypassHypaMemory',bypass_translate:'bypassTranslate',bypass_lb_process:'bypassLbProcess',strict_mode:'strictMode',injection_position:'injectionPosition',injection_format:'injectionFormat',analysis_language:'analysisLanguage'};
+const flags={main_model_only:'mainModelOnly',bypass_hypamemory:'bypassHypaMemory',bypass_translate:'bypassTranslate',bypass_lb_process:'bypassLbProcess',strict_mode:'strictMode',injection_position:'injectionPosition',injection_format:'injectionFormat',analysis_language:'analysisLanguage',hud:'hud'};
 export const vaultKey='risu_multiagent_lite_config_vault_v1';
 export const fullKey='risu_multiagent_full_plugin_settings_v1';
 export function defaults(){
- const c={default_provider:'openai',default_base_url:'https://api.openai.com/v1',default_api_key:'',default_model:'gpt-4o-mini',default_temperature:0.7,default_max_tokens:null,default_extra_body_json:'',default_pdf_mode:'off',context_window:10,request_timeout:60,analysis_timeout:120,main_model_only:true,bypass_hypamemory:true,bypass_translate:true,bypass_lb_process:true,strict_mode:false,injection_position:'system-end',injection_format:'classic',analysis_language:'auto',server_url:'http://localhost:6009'};
+ const c={default_provider:'openai',default_base_url:'https://api.openai.com/v1',default_api_key:'',default_model:'gpt-4o-mini',default_temperature:0.7,default_max_tokens:null,default_extra_body_json:'',default_pdf_mode:'off',context_window:10,request_timeout:60,analysis_timeout:120,main_model_only:true,bypass_hypamemory:true,bypass_translate:true,bypass_lb_process:true,strict_mode:false,hud:false,injection_position:'system-end',injection_format:'classic',analysis_language:'auto',server_url:'http://localhost:6009'};
  for(const n of AGENTS){c[n+'_enabled']=true;c[n+'_system_prompt']='';c[n+'_user_prompt_template']='';for(const k of FIELDS)c[n+'_'+k]=['temperature','max_tokens'].includes(k)?null:''}
  return c;
 }

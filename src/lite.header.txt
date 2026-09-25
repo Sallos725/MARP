@@ -17,6 +17,7 @@
 //@arg bypass_translate string Skip MultiAgent analysis for RisuAI built-in LLM translation requests (default: 1)
 //@arg bypass_lb_process string Skip MultiAgent analysis for <lb-process> helper LLM requests (default: 1)
 //@arg strict_mode string Strict mode safety policy (1 = stop analysis injection on failure, 0 = use successful analyses). e.g. 0
+//@arg hud string Show analysis progress on the chat screen (1 = on, 0 = off). e.g. 0
 //@arg injection_position string Context injection position (system-end or before-last-user). e.g. system-end
 //@arg injection_format string Context injection format (classic, xml, or markdown-table). e.g. classic
 //@arg analysis_language string Analysis language (auto, en, ko, ja). e.g. auto
