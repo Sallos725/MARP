@@ -149,10 +149,10 @@ export async function start(host,{full=false,analyze,defaultPrompts,clearTokens,
  // Await hook registration before exposing UI; dispose late registrations too.
  let hook,hookRegistered=false;
  const dispose=async()=>{
-  if(!alive)return;alive=false;for(const job of jobs)job.abort(Error('플러그인 해제'));jobs.clear();clearTokens?.();ui?.close();clearHistory();retryCache.clear();pendingAnalyses.clear();runtime=null;loaded=null;
+  if(!alive)return;alive=false;hud.dispose();for(const job of jobs)job.abort(Error('플러그인 해제'));jobs.clear();clearTokens?.();ui?.close();clearHistory();retryCache.clear();pendingAnalyses.clear();runtime=null;loaded=null;
   if(hookRegistered&&host.removeRisuReplacer)try{await host.removeRisuReplacer('beforeRequest',typeof hook==='string'?hook:before)}catch{}
   if(typeof hook==='function'&&hook!==before)try{await hook()}catch{}
-  hud.dispose();let wait;await Promise.race([hud.settled(),new Promise(r=>{wait=setTimeout(r,1000)})]);clearTimeout(wait);
+  let wait;await Promise.race([hud.settled(),new Promise(r=>{wait=setTimeout(r,1000)})]);clearTimeout(wait);
   for(const id of parts)await host.unregisterUIPart?.(id);
   await host.hideContainer?.();
  };

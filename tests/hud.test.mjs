@@ -27,8 +27,7 @@ test('the elapsed tick stays aligned to whole seconds from the start time',()=>{
  const s=step(EMPTY,[{type:'start',live:true,agents:pending}],1000);
  assert.equal(nextChange(s,1300),2000);
 });
-test('agent events outside a run and abandon clear nothing extra',()=>{
+test('agent events outside a run clear nothing extra',()=>{
  assert.equal(step(EMPTY,[{type:'agent',name:'plot',status:'running'}]),EMPTY);
- assert.equal(step(EMPTY,[{type:'start',live:true,agents:pending},{type:'abandon'}]),EMPTY);
  assert.equal(view(EMPTY,0),null);
 });

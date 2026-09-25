@@ -7,7 +7,6 @@ export function reduce(state,event,now){
   case 'start':return {run:{started:now,live:!!event.live,agents:{...event.agents}},done:null};
   case 'agent':return state.run&&event.name in state.run.agents?{...state,run:{...state.run,agents:{...state.run.agents,[event.name]:event.status}}}:state;
   case 'end':return {run:null,done:{outcome:event.outcome,chars:event.chars||0,cache:!!event.cache,agents:{...event.agents},until:now+OUTCOME_MS}};
-  case 'abandon':return EMPTY;
   default:return state;
  }
 }

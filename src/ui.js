@@ -53,7 +53,7 @@ export function openDashboard(api){
   const box=document.createElement('input');box.type='checkbox';box.checked=!!draft.hud;box.disabled=hudBusy;
   const name=document.createElement('span');name.textContent='채팅 화면에 진행 표시 띄우기';wrap.append(box,name);card.append(wrap);
   const note=text('',card),say=(value,error=false)=>{note.textContent=value;note.className=error?'marp-error':''};
-  const problem=api.hud?.problem();if(problem)say('이번 세션에서 표시를 그리지 못해 멈췄습니다: '+problem,true);
+  const problem=api.hud?.problem();if(problem)say('이번 세션에서 표시를 그리지 못해 멈췄습니다. 끄고 다시 켜면 재시도합니다: '+problem,true);
   const outcome=(value,error=false)=>{if(epoch===mine){box.checked=!!draft.hud;say(value,error)}else{message(value,error);if(alive&&tab==='common')render('common')}};
   box.onchange=async()=>{
    box.disabled=true;hudBusy=true;
