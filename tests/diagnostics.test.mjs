@@ -16,3 +16,11 @@ test('Lite records stage timing, overrides, parallel execution and failure durat
  const host={nativeFetch:async(_,req)=>{const b=JSON.parse(req.body);if(b.model==='plot-model'||b.model==='char-model'){active++;peak=Math.max(peak,active);await new Promise(r=>setTimeout(r,10));active--}if(b.model==='char-model')return {status:500,data:{error:{message:'failed'}}};return {data:{choices:[{message:{content:'note'}}],usage:{prompt_tokens:20}}}}};
  const r=await analyze(host,c,{chat_history:[],user_input:'now'},new AbortController().signal);assert.equal(peak,2);assert.equal(r.diagnostics.plot.model,'plot-model');assert.equal(r.diagnostics.character.status,'error');assert.ok(r.diagnostics.character.duration_ms>=10);assert.ok(r.diagnostics.plot.start_offset_ms>=r.diagnostics.worldbuilding.start_offset_ms+r.diagnostics.worldbuilding.duration_ms-1);
 });
+test('Lite reports each agent start and finish, skips OFF agents and ignores a throwing listener',async()=>{
+ const c=defaults();c.default_api_key='key';c.character_model='char-model';c.plot_enabled=false;const events=[];
+ const host={nativeFetch:async(_,req)=>JSON.parse(req.body).model==='char-model'?{status:500,data:{error:{message:'down'}}}:{data:{choices:[{message:{content:'note'}}]}}};
+ const r=await analyze(host,c,{chat_history:[],user_input:'now'},new AbortController().signal,(name,status)=>{events.push(name+':'+status);throw Error('listener bug')});
+ assert.deepEqual(events.slice(0,2),['worldbuilding:running','worldbuilding:success']);
+ assert.deepEqual(events.slice(2).sort(),['character:error','character:running']);
+ assert.equal(r.context_world,'note');assert.match(r.errors.character,/down/);
+});
