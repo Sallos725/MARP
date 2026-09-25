@@ -1,7 +1,7 @@
 import {checkConnection} from '../src/providers.js';
 import {start} from '../src/runtime.js';import {analyze,defaultPrompts} from '../src/pipeline.js';import {defaults,legacyConfig} from '../src/config.js';import {makePDF} from '../src/pdf.js';
 window.marpHarness={start,analyze,defaultPrompts,makePDF,defaults};
-window.testState={requests:0,writes:0,workers:0,urls:0,listeners:0,hooks:0};
+window.testState={requests:0,writes:0,workers:0,urls:0,listeners:0,hooks:0,hudListeners:0};
 const BaseWorker=window.Worker;
 window.Worker=class extends BaseWorker{constructor(...args){super(...args);testState.workers++;this.live=true}terminate(){if(this.live){testState.workers--;this.live=false}return super.terminate()}};
 const create=URL.createObjectURL.bind(URL),revoke=URL.revokeObjectURL.bind(URL),urls=new Set();
@@ -12,14 +12,14 @@ AbortSignal.prototype.removeEventListener=function(type,fn,...args){if(type==='a
 // A SafeDocument over the real page, so the progress display runs on a real layout engine.
 const hudListeners=new Map();let hudListenerId=0;
 const safe=el=>({el,remove:async()=>el.remove(),appendChild:async c=>{el.appendChild(c.el)},addClass:async n=>el.classList.add(n),setStyleAttribute:async v=>el.setAttribute('style',v),setStyle:async(p,v)=>{el.style[p]=v},setTextContent:async v=>{el.textContent=v},getBoundingClientRect:async()=>el.getBoundingClientRect().toJSON(),
- addEventListener:async(type,fn)=>{const id='hud'+(++hudListenerId),l=e=>fn({clientX:e.clientX,clientY:e.clientY});hudListeners.set(id,[type,l]);document.addEventListener(type,l);return id},
- removeEventListener:async(type,id)=>{const entry=hudListeners.get(id);if(entry){document.removeEventListener(entry[0],entry[1]);hudListeners.delete(id)}}});
+ addEventListener:async(type,fn)=>{const id='hud'+(++hudListenerId),l=e=>fn({clientX:e.clientX,clientY:e.clientY});hudListeners.set(id,[type,l]);document.addEventListener(type,l);testState.hudListeners=hudListeners.size;return id},
+ removeEventListener:async(type,id)=>{const entry=hudListeners.get(id);if(entry){document.removeEventListener(entry[0],entry[1]);hudListeners.delete(id);testState.hudListeners=hudListeners.size}}});
 window.fakeRoot={querySelector:async s=>{const el=document.querySelector(s);return el?safe(el):null},createElement:async t=>safe(document.createElement(t))};
 window.setup=async full=>{
  window.menuButtons=new Map();
  const c=defaults();c.default_api_key='fixture';c.default_pdf_mode='quality';
  const storage=new Map([['risu_multiagent_lite_config_vault_v1',{version:1,scope:'lite',config:legacyConfig(c)}]]);let before,unload,part=0;
- const host={getArgument:async k=>k==='hud'?(window.hudArg||''):'',setArgument:async(k,v)=>{if(k==='hud')window.hudArg=String(v)},getRootDocument:async()=>window.hudGranted?fakeRoot:null,requestPluginPermission:async()=>{window.hudGranted=true;return true},pluginStorage:{getItem:async k=>storage.get(k),setItem:async(k,v)=>{testState.writes++;storage.set(k,v)},removeItem:async k=>storage.delete(k)},
+ const host={getArgument:async k=>k==='hud'?(window.hudArg||''):'',setArgument:async(k,v)=>{if(k==='hud')window.hudArg=String(v)},getRootDocument:async()=>window.hudGranted?fakeRoot:null,requestPluginPermission:async()=>{if(window.permissionDelay)await new Promise(r=>setTimeout(r,window.permissionDelay));window.hudGranted=true;return true},pluginStorage:{getItem:async k=>storage.get(k),setItem:async(k,v)=>{testState.writes++;storage.set(k,v)},removeItem:async k=>storage.delete(k)},
  addRisuReplacer:async(t,fn)=>{await new Promise(r=>setTimeout(r,5));before=fn;testState.hooks++;return undefined},
  removeRisuReplacer:async()=>{testState.hooks--},onUnload:async fn=>{unload=fn},registerSetting:async()=>({id:'setting'+(++part)}),registerButton:async(config,callback)=>{const id='button'+(++part);menuButtons.set(id,{...config,callback});return {id}},unregisterUIPart:async id=>{menuButtons.delete(id)},showContainer:async()=>{},hideContainer:async()=>{},
  nativeFetch:async(url,req={})=>{

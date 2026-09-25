@@ -6,7 +6,7 @@ export const shellCSS='.marp-shell{--m-bg:#0b1120;--m-surface:#131b2e;--m-sunken
 const labels={provider:'공급자',base_url:'API 기본 URL',api_key:'Credential / 서비스 계정 JSON',model:'모델',temperature:'온도',max_tokens:'출력 토큰 제한',extra_body_json:'추가 JSON',pdf_mode:'내장 PDF'};
 const options={provider:['','openai','custom','google','vertex-ai','anthropic'],pdf_mode:['','off','quality','standard','max'],analysis_language:['auto','ko','en','ja'],injection_position:['system-end','before-last-user'],injection_format:['classic','xml','markdown-table']};
 export function openDashboard(api){
- let alive=true,draft=null,tab='common',epoch=0,pack=null;
+ let alive=true,draft=null,tab='common',epoch=0,pack=null,hudBusy=false;
  const root=document.createElement('section');root.className='marp-shell';root.setAttribute('aria-label','MARP 설정');
  root.innerHTML='<style>'+shellCSS+diagnosticsCSS+'</style><div class="marp-wrap"><header class="marp-top"><div><h1><span aria-hidden="true">🔱</span> MARP <span class="marp-badge">'+(api.full?'Full':'Lite')+' · '+VERSION+'</span></h1><p>세계관 · 플롯 · 등장인물 분석</p></div><button type="button" data-close>닫기</button></header><nav class="marp-nav" aria-label="설정 탭"></nav><div class="marp-panel" aria-live="polite">설정을 읽는 중입니다…</div><div class="marp-status" role="status"></div><footer class="marp-actions marp-footer"><button class="marp-primary" data-save disabled>설정 저장</button><span>표시하지 않은 탭의 편집 내용도 함께 저장합니다.</span></footer></div>';
  document.body.append(root);
@@ -45,23 +45,25 @@ export function openDashboard(api){
   if(![draft.default_api_key,...AGENTS.map(n=>draft[n+'_api_key'])].some(Boolean))text('PDF Pod는 자식 플러그인마다 저장 공간을 따로 씁니다. 단독 설치 때 저장한 설정은 보이지 않으니 다시 입력하고 저장해 주세요.',card);
  };
  const hudCard=()=>{
+  const mine=epoch;
   const card=document.createElement('div');card.className='marp-run';panel.append(card);
   const h=document.createElement('h3');h.textContent='채팅 화면 진행 표시';card.append(h);
   text('분석 진행과 결과를 채팅 화면 오른쪽 위에 작게 띄웁니다. 켜면 RisuAI가 "메인 Document 접근" 권한을 묻습니다. MARP는 이 권한으로 표시 하나를 그리고, 겹치지 않도록 NMOS 표시의 위치만 읽습니다. 표시를 누르면 이 설정 화면이 열립니다.',card);
   const wrap=document.createElement('label');wrap.className='marp-field marp-check';
-  const box=document.createElement('input');box.type='checkbox';box.checked=!!draft.hud;
+  const box=document.createElement('input');box.type='checkbox';box.checked=!!draft.hud;box.disabled=hudBusy;
   const name=document.createElement('span');name.textContent='채팅 화면에 진행 표시 띄우기';wrap.append(box,name);card.append(wrap);
   const note=text('',card),say=(value,error=false)=>{note.textContent=value;note.className=error?'marp-error':''};
   const problem=api.hud?.problem();if(problem)say('이번 세션에서 표시를 그리지 못해 멈췄습니다: '+problem,true);
+  const outcome=(value,error=false)=>{if(epoch===mine){box.checked=!!draft.hud;say(value,error)}else{message(value,error);if(alive&&tab==='common')render('common')}};
   box.onchange=async()=>{
-   box.disabled=true;
+   box.disabled=true;hudBusy=true;
    try{
-    if(!box.checked){await api.hud.disable();draft.hud=false;say('껐습니다.');return}
-    const result=await api.hud.enable();draft.hud=box.checked=result==='on';
-    if(result==='on')say('켰습니다. 다음 메시지부터 표시됩니다.');
-    else say(result==='denied'?'권한이 거부되어 켜지 않았습니다. 설정 → 플러그인 → MARP 줄 메뉴 → "권한 응답 초기화" 후 다시 켜세요.':'이 RisuAI 버전은 플러그인이 채팅 화면에 표시를 그리는 기능을 지원하지 않습니다.',true);
-   }catch(e){box.checked=!!draft.hud;message(e.message,true)}
-   finally{if(alive)box.disabled=false}
+    if(!box.checked){await api.hud.disable();draft.hud=false;hudBusy=false;outcome('껐습니다.');return}
+    const result=await api.hud.enable();draft.hud=result==='on';hudBusy=false;
+    if(result==='on')outcome('켰습니다. 다음 메시지부터 표시됩니다.');
+    else outcome(result==='denied'?'권한이 거부되어 켜지 않았습니다. 설정 → 플러그인 → MARP 줄 메뉴 → "권한 응답 초기화" 후 다시 켜세요.':'이 RisuAI 버전은 플러그인이 채팅 화면에 표시를 그리는 기능을 지원하지 않습니다.',true);
+   }catch(e){hudBusy=false;if(epoch===mine)box.checked=!!draft.hud;message(e.message,true)}
+   finally{hudBusy=false;if(alive&&epoch===mine)box.disabled=false}
   };
  };
  const download=(name,value)=>{const url=URL.createObjectURL(new Blob([JSON.stringify(value,null,2)],{type:'application/json'})),a=document.createElement('a');a.href=url;a.download=name;root.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),0)};

@@ -63,7 +63,17 @@ try{for(const[name,type]of [['chromium',chromium],['webkit',webkit]]){
  await page.getByRole('button',{name:'기록 비우기',exact:true}).click();await page.waitForFunction(()=>instance.getHistory().length===0);
  await page.getByRole('button',{name:'닫기',exact:true}).click();
  // Progress display on a real layout engine (WebKit ≈ iPhone Safari): toggle, NMOS avoidance, outcome, off.
- await page.evaluate(()=>instance.open());await page.getByLabel('채팅 화면에 진행 표시 띄우기').check();
+ await page.evaluate(()=>instance.open());
+ // A slow permission grant plus a tab switch mid-toggle must not strand a stale, still-clickable checkbox.
+ await page.evaluate(()=>{permissionDelay=300});
+ await page.getByLabel('채팅 화면에 진행 표시 띄우기').check();
+ await page.getByRole('button',{name:'프리셋',exact:true}).click();await page.getByRole('button',{name:'공통',exact:true}).click();
+ await page.getByRole('status').filter({hasText:'켰습니다'}).waitFor({timeout:5000});
+ assert.equal(await page.getByLabel('채팅 화면에 진행 표시 띄우기').isChecked(),true,'checkbox reflects state after tab switch');
+ await page.getByLabel('채팅 화면에 진행 표시 띄우기').uncheck();
+ await page.getByText('껐습니다',{exact:false}).waitFor();
+ await page.evaluate(()=>{document.querySelector('[role=status]').textContent='';permissionDelay=0});
+ await page.getByLabel('채팅 화면에 진행 표시 띄우기').check();
  await page.getByText('켰습니다',{exact:false}).waitFor();await page.getByRole('button',{name:'닫기',exact:true}).click();
  await page.evaluate(()=>{document.body.insertAdjacentHTML('beforeend','<div class="nmos-hud" style="position:fixed;top:8px;right:8px;width:180px;height:30px"></div>');delayResponse=400});
  const hudRun=page.evaluate(()=>run([{role:'user',content:'Progress display turn'}]));
@@ -75,6 +85,7 @@ try{for(const[name,type]of [['chromium',chromium],['webkit',webkit]]){
  await page.screenshot({path:`test-results/${name}-${full?'full':'lite'}-hud-done.png`});
  await page.evaluate(async()=>{document.querySelector('.nmos-hud').remove();delayResponse=0;hudArg='0';await run([{role:'user',content:'Display off'}])});
  await page.waitForFunction(()=>!document.querySelector('.marp-hud'));
+ assert.equal(await page.evaluate(()=>testState.hudListeners),0,'hud listeners cleaned up');
 
  if(cdp)await cdp.send('HeapProfiler.collectGarbage');
  const heapBefore=cdp?(await cdp.send('Runtime.getHeapUsage')).usedSize:0;
