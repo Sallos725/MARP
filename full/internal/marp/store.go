@@ -14,7 +14,7 @@ import (
 	"time"
 )
 
-const Version = "0.9.6"
+const Version = "0.9.7"
 
 var AgentNames = []string{"worldbuilding", "plot", "character"}
 var Labels = map[string]string{"worldbuilding": "세계관 에이전트", "plot": "플롯 에이전트", "character": "등장인물 에이전트"}

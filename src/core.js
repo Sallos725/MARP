@@ -1,4 +1,4 @@
-export const VERSION='0.9.6';
+export const VERSION='0.9.7';
 export const AGENTS=['worldbuilding','plot','character'];
 export const LABELS={worldbuilding:'세계관',plot:'플롯',character:'등장인물'};
 const START='<!--MARP:v1:begin-->', END='<!--MARP:v1:end-->';
