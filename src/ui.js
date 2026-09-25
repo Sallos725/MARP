@@ -44,6 +44,26 @@ export function openDashboard(api){
   if(internalPdf)text('Lite 내장 PDF를 켰다면 PDF Pod의 PDF 압축 수준은 "끄기"로 두어 재압축을 막으세요.',card);
   if(![draft.default_api_key,...AGENTS.map(n=>draft[n+'_api_key'])].some(Boolean))text('PDF Pod는 자식 플러그인마다 저장 공간을 따로 씁니다. 단독 설치 때 저장한 설정은 보이지 않으니 다시 입력하고 저장해 주세요.',card);
  };
+ const hudCard=()=>{
+  const card=document.createElement('div');card.className='marp-run';panel.append(card);
+  const h=document.createElement('h3');h.textContent='채팅 화면 진행 표시';card.append(h);
+  text('분석 진행과 결과를 채팅 화면 오른쪽 위에 작게 띄웁니다. 켜면 RisuAI가 "메인 Document 접근" 권한을 묻습니다. MARP는 이 권한으로 표시 하나를 그리고, 겹치지 않도록 NMOS 표시의 위치만 읽습니다. 표시를 누르면 이 설정 화면이 열립니다.',card);
+  const wrap=document.createElement('label');wrap.className='marp-field marp-check';
+  const box=document.createElement('input');box.type='checkbox';box.checked=!!draft.hud;
+  const name=document.createElement('span');name.textContent='채팅 화면에 진행 표시 띄우기';wrap.append(box,name);card.append(wrap);
+  const note=text('',card),say=(value,error=false)=>{note.textContent=value;note.className=error?'marp-error':''};
+  const problem=api.hud?.problem();if(problem)say('이번 세션에서 표시를 그리지 못해 멈췄습니다: '+problem,true);
+  box.onchange=async()=>{
+   box.disabled=true;
+   try{
+    if(!box.checked){await api.hud.disable();draft.hud=false;say('껐습니다.');return}
+    const result=await api.hud.enable();draft.hud=box.checked=result==='on';
+    if(result==='on')say('켰습니다. 다음 메시지부터 표시됩니다.');
+    else say(result==='denied'?'권한이 거부되어 켜지 않았습니다. 설정 → 플러그인 → MARP 줄 메뉴 → "권한 응답 초기화" 후 다시 켜세요.':'이 RisuAI 버전은 플러그인이 채팅 화면에 표시를 그리는 기능을 지원하지 않습니다.',true);
+   }catch(e){box.checked=!!draft.hud;message(e.message,true)}
+   finally{if(alive)box.disabled=false}
+  };
+ };
  const download=(name,value)=>{const url=URL.createObjectURL(new Blob([JSON.stringify(value,null,2)],{type:'application/json'})),a=document.createElement('a');a.href=url;a.download=name;root.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),0)};
  async function render(next){
   tab=next;const seq=++epoch;for(const b of nav.children)b.setAttribute('aria-selected',String(b.dataset.tab===tab));panel.replaceChildren();
@@ -51,6 +71,7 @@ export function openDashboard(api){
   const title=document.createElement('h2');title.textContent=({common:'공통 설정',prompts:'프롬프트',presets:'프리셋',diagnostics:'진단',waterfall:'워터폴',connection:'연결 테스트',history:'호출 기록'})[tab]||LABELS[tab];panel.append(title);
   if(tab==='common'){
    if(!api.full&&hostedInPdfPod())pdfPodCard();
+   hudCard();
    const behavior=group();
    for(const[k,label]of [['main_model_only','메인 모델에서만 실행'],['bypass_hypamemory','메모리 요청 건너뛰기'],['bypass_translate','번역 요청 건너뛰기'],['bypass_lb_process','lb-process 요청 건너뛰기'],['strict_mode','실패하면 분석 주입 중단 (Strict)']])field(k,label,behavior,{check:true});
    text('OOC 등 특정 system 프롬프트만 제외하려면 활성화되는 조건문 안에 <!--MARP:bypass-->를 넣으세요. 해당 요청은 MARP 분석 전체를 건너뜁니다.');
